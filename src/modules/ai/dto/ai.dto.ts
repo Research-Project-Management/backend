@@ -1,5 +1,7 @@
 import {
+  Allow,
   IsArray,
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -151,13 +153,77 @@ export class AiQueryDto {
   @IsOptional()
   selectionEndColumn?: number;
 
-  @IsString()
   @IsOptional()
-  document_structure?: string;
+  @Allow()
+  document_structure?: string | Record<string, unknown>[];
+
+  @IsOptional()
+  @Allow()
+  documentStructure?: string | Record<string, unknown>[];
 
   @IsString()
   @IsOptional()
-  documentStructure?: string;
+  context_before?: string;
+
+  @IsString()
+  @IsOptional()
+  contextBefore?: string;
+
+  @IsString()
+  @IsOptional()
+  context_after?: string;
+
+  @IsString()
+  @IsOptional()
+  contextAfter?: string;
+
+  @IsString()
+  @IsOptional()
+  current_section?: string;
+
+  @IsString()
+  @IsOptional()
+  currentSection?: string;
+
+  @IsString()
+  @IsOptional()
+  current_environment?: string;
+
+  @IsString()
+  @IsOptional()
+  currentEnvironment?: string;
+
+  @IsString()
+  @IsOptional()
+  document_structure_summary?: string;
+
+  @IsString()
+  @IsOptional()
+  documentStructureSummary?: string;
+
+  @IsOptional()
+  @Allow()
+  user_selection?: string | Record<string, unknown>;
+
+  @IsOptional()
+  @Allow()
+  userSelection?: string | Record<string, unknown>;
+
+  @IsOptional()
+  @Allow()
+  compile_errors?: unknown;
+
+  @IsOptional()
+  @Allow()
+  compileErrors?: unknown;
+
+  @IsBoolean()
+  @IsOptional()
+  use_rag?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  useRag?: boolean;
 
   // ── Intent Hint ───────────────────────────────────────────────────────────
   @IsString()

@@ -58,18 +58,71 @@ export class AiService {
     projectId?: string,
     chatId?: string,
     pageId?: string,
-  ): Promise<void> {
+  ): Promise<{
+    resolvedSpaceId?: string;
+    resolvedProjectId?: string | null;
+    canonicalPageId?: string;
+  }> {
+    let resolvedSpaceId: string | undefined;
+    let resolvedProjectId: string | null | undefined;
+    let canonicalPageId: string | undefined;
+
     const cleanProjectId = this.sanitizeProjectId(projectId, userId);
     if (cleanProjectId) {
-      const project = await this.prisma.project.findFirst({
-        where: {
-          id: cleanProjectId,
-          deletedAt: null,
-          OR: [{ members: { some: { userId } } }, { createdById: userId }],
-        },
-      });
-      if (!project) {
-        throw new ForbiddenException('You do not have access to this project');
+      const space = await Promise.resolve(
+        this.prisma.space?.findFirst?.({
+          where: {
+            OR: [{ id: cleanProjectId }, { projectId: cleanProjectId }],
+          },
+          select: {
+            id: true,
+            type: true,
+            ownerUserId: true,
+            projectId: true,
+          },
+        }),
+      ).catch(() => null);
+
+      if (space) {
+        if (space.type === 'personal') {
+          if (space.ownerUserId && space.ownerUserId !== userId) {
+            throw new ForbiddenException(
+              'You do not have access to this personal workspace',
+            );
+          }
+          resolvedSpaceId = space.id;
+          resolvedProjectId = null;
+        } else if (space.projectId) {
+          const project = await this.prisma.project.findFirst({
+            where: {
+              id: space.projectId,
+              deletedAt: null,
+              OR: [{ members: { some: { userId } } }, { createdById: userId }],
+            },
+          });
+          if (!project) {
+            throw new ForbiddenException(
+              'You do not have access to this project',
+            );
+          }
+          resolvedSpaceId = space.id;
+          resolvedProjectId = space.projectId;
+        }
+      } else {
+        const project = await this.prisma.project.findFirst({
+          where: {
+            id: cleanProjectId,
+            deletedAt: null,
+            OR: [{ members: { some: { userId } } }, { createdById: userId }],
+          },
+        });
+        if (!project) {
+          throw new ForbiddenException(
+            'You do not have access to this project',
+          );
+        }
+        resolvedSpaceId = cleanProjectId;
+        resolvedProjectId = cleanProjectId;
       }
     }
 
@@ -85,31 +138,106 @@ export class AiService {
     }
 
     if (pageId) {
-      const doc = await this.prisma.pageDoc.findFirst({
-        where: { id: pageId, deletedAt: null },
-        select: { id: true, spaceId: true },
-      });
-      if (!doc) {
-        throw new NotFoundException('Manuscript doc not found');
+      const pageRecord = this.prisma.page?.findFirst
+        ? await this.prisma.page.findFirst({
+            where: { id: pageId, deletedAt: null },
+            select: { id: true, spaceId: true },
+          })
+        : null;
+
+      const docRecord = !pageRecord
+        ? await this.prisma.pageDoc?.findFirst?.({
+            where: { id: pageId, deletedAt: null },
+            select: { id: true, pageId: true, spaceId: true },
+          })
+        : null;
+
+      if (!pageRecord && !docRecord) {
+        throw new NotFoundException('Manuscript page not found');
       }
-      if (doc.spaceId && doc.spaceId !== userId) {
-        const project = await this.prisma.project.findFirst({
-          where: { id: doc.spaceId },
-          select: {
-            createdById: true,
-            members: { where: { userId }, select: { userId: true } },
-          },
-        });
-        const canAccess =
-          project?.createdById === userId ||
-          (project?.members && project.members.length > 0);
-        if (!canAccess) {
-          throw new ForbiddenException(
-            'You do not have access to this manuscript document',
-          );
+
+      canonicalPageId =
+        pageRecord?.id ||
+        (docRecord as { pageId?: string | null } | null)?.pageId ||
+        docRecord?.id;
+
+      const pageSpaceId =
+        pageRecord?.spaceId ??
+        docRecord?.spaceId ??
+        (docRecord as { projectId?: string | null } | null)?.projectId ??
+        null;
+
+      if (pageSpaceId) {
+        if (pageSpaceId !== userId) {
+          const space = await Promise.resolve(
+            this.prisma.space?.findFirst?.({
+              where: { id: pageSpaceId },
+              select: {
+                id: true,
+                type: true,
+                ownerUserId: true,
+                projectId: true,
+              },
+            }),
+          ).catch(() => null);
+
+          if (space) {
+            if (space.type === 'personal') {
+              if (space.ownerUserId && space.ownerUserId !== userId) {
+                throw new ForbiddenException(
+                  'You do not have access to this manuscript document',
+                );
+              }
+              resolvedSpaceId = resolvedSpaceId || space.id;
+              resolvedProjectId = null;
+            } else if (space.projectId) {
+              const project = await this.prisma.project.findFirst({
+                where: { id: space.projectId, deletedAt: null },
+                select: {
+                  createdById: true,
+                  members: { where: { userId }, select: { userId: true } },
+                },
+              });
+              const canAccess =
+                project?.createdById === userId ||
+                (project?.members && project.members.length > 0);
+              if (!canAccess) {
+                throw new ForbiddenException(
+                  'You do not have access to this manuscript document',
+                );
+              }
+              resolvedSpaceId = resolvedSpaceId || space.id;
+              resolvedProjectId = space.projectId;
+            }
+          } else {
+            const project = await this.prisma.project.findFirst({
+              where: { id: pageSpaceId },
+              select: {
+                createdById: true,
+                members: { where: { userId }, select: { userId: true } },
+              },
+            });
+            const canAccess =
+              project?.createdById === userId ||
+              (project?.members && project.members.length > 0);
+            if (!canAccess) {
+              throw new ForbiddenException(
+                'You do not have access to this manuscript document',
+              );
+            }
+            resolvedSpaceId = resolvedSpaceId || pageSpaceId;
+          }
+        } else {
+          resolvedSpaceId = resolvedSpaceId || pageSpaceId;
         }
       }
     }
+
+    return {
+      resolvedSpaceId,
+      resolvedProjectId,
+      canonicalPageId,
+    };
   }
 
   /**
@@ -199,7 +327,7 @@ export class AiService {
     }
 
     // Parallel pre-flight: execute access check and document ID resolution simultaneously
-    const [_, resolvedDocIds] = await Promise.all([
+    const [accessMeta, resolvedDocIds] = await Promise.all([
       this.validateAccess(userId, targetProjectId, targetChatId, targetPageId),
       payload.document_ids && payload.document_ids.length > 0
         ? this.resolveDocumentIds(payload.document_ids)
@@ -209,13 +337,32 @@ export class AiService {
       payload.document_ids = resolvedDocIds;
     }
 
+    const canonicalPageId = accessMeta.canonicalPageId || targetPageId;
+    const effectiveChatSpaceArg =
+      targetProjectId !== undefined
+        ? targetProjectId
+        : accessMeta.resolvedSpaceId;
+
+    if (accessMeta.resolvedSpaceId) {
+      payload.space_id = accessMeta.resolvedSpaceId;
+    }
+    if (accessMeta.resolvedProjectId !== undefined) {
+      payload.project_id = accessMeta.resolvedProjectId;
+    }
+    if (canonicalPageId) {
+      payload.page_id = canonicalPageId;
+      if (payload.context) {
+        payload.context.page_id = canonicalPageId;
+      }
+    }
+
     // Resolve or establish authoritative chat session
     let effectiveTitle = 'New Chat';
     if (targetPageId) {
       const pageSession = await this.chatService.getOrCreatePageChat(
-        targetPageId,
+        canonicalPageId || targetPageId,
         userId,
-        targetProjectId,
+        effectiveChatSpaceArg,
       );
       targetChatId = pageSession.id;
       effectiveTitle = pageSession.title;
@@ -225,7 +372,7 @@ export class AiService {
         payload.document_ids,
       );
       const newSession = await this.chatService.createChat(userId, {
-        spaceId: targetProjectId,
+        spaceId: effectiveChatSpaceArg,
         title: effectiveTitle,
         documentIds: payload.document_ids,
       });
@@ -313,7 +460,7 @@ export class AiService {
     }
 
     // Parallel pre-flight: execute access check and document ID resolution simultaneously
-    const [_, resolvedDocIds] = await Promise.all([
+    const [accessMeta, resolvedDocIds] = await Promise.all([
       this.validateAccess(userId, targetProjectId, targetChatId, targetPageId),
       payload.document_ids && payload.document_ids.length > 0
         ? this.resolveDocumentIds(payload.document_ids)
@@ -323,13 +470,32 @@ export class AiService {
       payload.document_ids = resolvedDocIds;
     }
 
+    const canonicalPageId = accessMeta.canonicalPageId || targetPageId;
+    const effectiveChatSpaceArg =
+      targetProjectId !== undefined
+        ? targetProjectId
+        : accessMeta.resolvedSpaceId;
+
+    if (accessMeta.resolvedSpaceId) {
+      payload.space_id = accessMeta.resolvedSpaceId;
+    }
+    if (accessMeta.resolvedProjectId !== undefined) {
+      payload.project_id = accessMeta.resolvedProjectId;
+    }
+    if (canonicalPageId) {
+      payload.page_id = canonicalPageId;
+      if (payload.context) {
+        payload.context.page_id = canonicalPageId;
+      }
+    }
+
     // Resolve or establish authoritative chat session
     let effectiveTitle = 'New Chat';
     if (targetPageId) {
       const pageSession = await this.chatService.getOrCreatePageChat(
-        targetPageId,
+        canonicalPageId || targetPageId,
         userId,
-        targetProjectId,
+        effectiveChatSpaceArg,
       );
       targetChatId = pageSession.id;
       effectiveTitle = pageSession.title;
@@ -339,7 +505,7 @@ export class AiService {
         payload.document_ids,
       );
       const newSession = await this.chatService.createChat(userId, {
-        spaceId: targetProjectId,
+        spaceId: effectiveChatSpaceArg,
         title: effectiveTitle,
         documentIds: payload.document_ids,
       });

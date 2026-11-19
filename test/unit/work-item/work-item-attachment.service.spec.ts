@@ -1,14 +1,14 @@
 import { AttachmentService } from '@/modules/project/work-item/attachment/attachment.service';
 import { AttachmentRepository } from '@/modules/project/work-item/attachment/attachment.repository';
 import { PrismaService } from '@/core';
-import { IStoragePort } from '@/modules/storage/storage.port';
+import { IFilesPort } from '@/modules/files';
 import { EntityType } from '@prisma/client';
 
 describe('Work-Item AttachmentService & Storage Integration', () => {
   let service: AttachmentService;
   let mockRepo: any;
   let mockPrisma: any;
-  let mockStoragePort: any;
+  let mockFilesPort: any;
 
   beforeEach(() => {
     mockRepo = {
@@ -33,10 +33,10 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
       },
     };
 
-    mockStoragePort = {
+    mockFilesPort = {
       uploadFile: jest.fn().mockResolvedValue({
         fileId: 'cas-file-999',
-        url: '/api/v1/storage/files/cas-file-999/content',
+        url: '/api/v1/files/cas-file-999/content',
         path: 'cas/blobs/cas-file-999',
         filename: 'report.pdf',
         size: 1024,
@@ -50,11 +50,11 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
     service = new AttachmentService(
       mockRepo as AttachmentRepository,
       mockPrisma as PrismaService,
-      mockStoragePort as IStoragePort,
+      mockFilesPort as IFilesPort,
     );
   });
 
-  describe('uploadMultipart with STORAGE_PORT', () => {
+  describe('uploadMultipart with FILES_PORT', () => {
     it('should route file upload to storagePort and record fileId in metadata', async () => {
       const mockBuffer = Buffer.from('PDF_SAMPLE_DATA');
       const mockReq: any = {
@@ -86,7 +86,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       const result = await service.uploadMultipart(mockReq, 'user-uuid-1');
 
-      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith({
+      expect(mockFilesPort.uploadFile).toHaveBeenCalledWith({
         userId: 'user-uuid-1',
         filename: 'research_proposal.pdf',
         buffer: mockBuffer,
@@ -100,7 +100,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
           entityType: 'work_item',
           entityId: 'item-uuid-1',
           filename: 'research_proposal.pdf',
-          url: '/api/v1/storage/files/cas-file-999/content',
+          url: '/api/v1/files/cas-file-999/content',
           storageKey: 'cas/blobs/cas-file-999',
           metadata: expect.objectContaining({
             fileId: 'cas-file-999',
@@ -114,7 +114,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
     });
   });
 
-  describe('uploadMultipart when STORAGE_PORT is unavailable', () => {
+  describe('uploadMultipart when FILES_PORT is unavailable', () => {
     it('should throw BadRequestException if storagePort is not injected', async () => {
       const serviceWithoutStoragePort = new AttachmentService(
         mockRepo as AttachmentRepository,
@@ -162,7 +162,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       await service.deleteAttachment('att-123');
 
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('cas-file-999');
+      expect(mockFilesPort.deleteFile).toHaveBeenCalledWith('cas-file-999');
       expect(mockRepo.delete).toHaveBeenCalledWith('att-123');
     });
 
@@ -171,13 +171,13 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
         id: 'att-789',
         entityType: EntityType.work_item,
         entityId: 'item-uuid-1',
-        url: '/api/v1/storage/files/cas-url-uuid-555/content',
+        url: '/api/v1/files/cas-url-uuid-555/content',
         metadata: {},
       } as any);
 
       await service.deleteAttachment('att-789');
 
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(
+      expect(mockFilesPort.deleteFile).toHaveBeenCalledWith(
         'cas-url-uuid-555',
       );
       expect(mockRepo.delete).toHaveBeenCalledWith('att-789');
@@ -194,7 +194,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       await service.deleteAttachment('att-456');
 
-      expect(mockStoragePort.deleteObject).toHaveBeenCalledWith(
+      expect(mockFilesPort.deleteObject).toHaveBeenCalledWith(
         'legacy/attachments/old.pdf',
       );
       expect(mockRepo.delete).toHaveBeenCalledWith('att-456');
@@ -220,7 +220,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
           entityType: EntityType.work_item,
           entityId: mockItemId,
           metadata: { fileId: 'cas-file-999' },
-          url: '/api/v1/storage/files/cas-file-999/content',
+          url: '/api/v1/files/cas-file-999/content',
         },
       ]);
       mockRepo.findById.mockResolvedValueOnce({
@@ -232,7 +232,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       const res = await service.detachFile(mockItemId, 'att-file-1');
 
-      expect(mockStoragePort.deleteFile).toHaveBeenCalledWith('cas-file-999');
+      expect(mockFilesPort.deleteFile).toHaveBeenCalledWith('cas-file-999');
       expect(mockRepo.delete).toHaveBeenCalledWith('att-file-1');
       expect(res.message).toBe('File detached successfully');
     });
@@ -240,7 +240,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
   describe('generatePresignedUpload', () => {
     it('should generate presigned upload URL via storagePort.getPresignedUploadUrl', async () => {
-      mockStoragePort.getPresignedUploadUrl = jest.fn().mockResolvedValue({
+      mockFilesPort.getPresignedUploadUrl = jest.fn().mockResolvedValue({
         uploadUrl: 'https://storage-port.example.com/upload',
         storageKey: 'cas-keys/blob-1',
         fileUuid: 'file-uuid-777',
@@ -258,13 +258,13 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
         'user-1',
       );
 
-      expect(mockStoragePort.getPresignedUploadUrl).toHaveBeenCalled();
+      expect(mockFilesPort.getPresignedUploadUrl).toHaveBeenCalled();
       expect(res.signedUrl).toBe('https://storage-port.example.com/upload');
-      expect(res.fileUrl).toBe('/api/v1/storage/files/file-uuid-777/content');
+      expect(res.fileUrl).toBe('/api/v1/files/file-uuid-777/content');
     });
 
     it('should throw BadRequestException when storagePort is not configured for presign', async () => {
-      delete mockStoragePort.getPresignedUploadUrl;
+      delete mockFilesPort.getPresignedUploadUrl;
 
       await expect(
         service.generatePresignedUpload(
@@ -309,7 +309,7 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
 
       const result = await service.uploadMultipart(mockReq, 'user-param-1');
 
-      expect(mockStoragePort.uploadFile).toHaveBeenCalledWith(
+      expect(mockFilesPort.uploadFile).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: 'proj-resolved-1',
           filename: 'figure.png',

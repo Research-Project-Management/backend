@@ -9,7 +9,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { FastifyRequest } from 'fastify';
 import { AttachmentRepository } from './attachment.repository';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import { FILES_PORT, IFilesPort, getFileContentPath } from '@/modules/files';
 
 import { PrismaService, RedisCacheService, isUuid } from '@/core';
 import {
@@ -38,8 +38,8 @@ export class AttachmentService {
     private readonly attachmentRepository: AttachmentRepository,
     private readonly prismaService: PrismaService,
     @Optional()
-    @Inject(STORAGE_PORT)
-    private readonly storagePort?: IStoragePort,
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional() private readonly cache?: RedisCacheService,
   ) {}
@@ -104,14 +104,14 @@ export class AttachmentService {
     const contentType =
       dto.contentType || dto.mimeType || 'application/octet-stream';
 
-    if (this.storagePort?.getPresignedUploadUrl) {
-      const presigned = await this.storagePort.getPresignedUploadUrl({
+    if (this.filesPort?.getPresignedUploadUrl) {
+      const presigned = await this.filesPort.getPresignedUploadUrl({
         userId,
         filename: cleanName,
         mimeType: contentType,
         sizeBytes: dto.size || 0,
       });
-      const fileUrl = `/api/v1/storage/files/${presigned.fileUuid}/content`;
+      const fileUrl = presigned.url || getFileContentPath(presigned.fileUuid);
       return {
         signedUrl: presigned.uploadUrl,
         uploadUrl: presigned.uploadUrl,
@@ -177,11 +177,11 @@ export class AttachmentService {
       }
     }
 
-    if (!this.storagePort) {
+    if (!this.filesPort) {
       throw new BadRequestException('Storage provider is not available');
     }
 
-    const uploadRes = await this.storagePort.uploadFile({
+    const uploadRes = await this.filesPort.uploadFile({
       userId: authorId,
       filename,
       buffer,
@@ -688,21 +688,21 @@ export class AttachmentService {
 
     const metaFileId = getAttachmentMeta(attachment).fileId;
     const urlMatch = attachment.url?.match(
-      /\/api\/v1\/storage\/files\/([a-zA-Z0-9_-]+)/,
+      /\/api\/v1\/(?:files|experiments\/files)\/([a-zA-Z0-9_-]+)/,
     );
     const fileId = metaFileId || urlMatch?.[1];
 
-    if (fileId && this.storagePort?.deleteFile) {
+    if (fileId && this.filesPort?.deleteFile) {
       try {
-        await this.storagePort.deleteFile(fileId);
+        await this.filesPort.deleteFile(fileId);
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to delete storage file ${fileId}: ${(err as Error).message}`,
         );
       }
-    } else if (attachment.storageKey && this.storagePort?.deleteObject) {
+    } else if (attachment.storageKey && this.filesPort?.deleteObject) {
       try {
-        await this.storagePort.deleteObject(attachment.storageKey);
+        await this.filesPort.deleteObject(attachment.storageKey);
       } catch (err: unknown) {
         this.logger.warn(
           `Failed to delete storage object ${attachment.storageKey}: ${(err as Error).message}`,

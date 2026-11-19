@@ -98,11 +98,17 @@ export class CacheInvalidationListener {
   async handleFileChanged(event: EntityChangeEvent) {
     if (event.userId) {
       await this.redisCache.delPattern(`files:${event.userId}:*`);
-      await this.redisCache.delPattern(`storage:${event.userId}:*`);
+      await this.redisCache.delPattern(`experiments:${event.userId}:*`);
+      await this.redisCache.delPattern(
+        `flux:experiments:tree:user:${event.userId}:*`,
+      );
     }
     if (event.projectId) {
       await this.redisCache.delPattern(`files:${event.projectId}:*`);
-      await this.redisCache.delPattern(`storage:${event.projectId}:*`);
+      await this.redisCache.delPattern(`experiments:${event.projectId}:*`);
+      await this.redisCache.delPattern(
+        `flux:experiments:tree:project:${event.projectId}:*`,
+      );
     }
   }
 

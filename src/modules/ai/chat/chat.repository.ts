@@ -83,15 +83,34 @@ export class ChatRepository implements IChatRepository {
     pageId: string,
     userId: string,
     projectId?: string | null,
-  ): Promise<{ count: number }> {
-    const chat = await this.findPageChat(pageId, userId, projectId);
-    if (chat) {
-      await this.prisma.aiChat.delete({
-        where: { id: chat.id },
-      });
-      return { count: 1 };
+  ): Promise<{ count: number; chatIds?: string[]; spaceIds?: string[] }> {
+    const where: Prisma.AiChatWhereInput = {
+      pageId,
+      createdById: userId,
+    };
+    if (projectId !== undefined) {
+      where.spaceId = projectId || userId;
     }
-    return { count: 0 };
+
+    const matches = await this.prisma.aiChat.findMany({
+      where,
+      select: { id: true, spaceId: true },
+    });
+    if (!matches || matches.length === 0) {
+      return { count: 0, chatIds: [], spaceIds: [] };
+    }
+
+    const chatIds = matches.map((m) => m.id);
+    const spaceIds = Array.from(new Set(matches.map((m) => m.spaceId)));
+    const deleted = await this.prisma.aiChat.deleteMany({
+      where: { id: { in: chatIds } },
+    });
+
+    return {
+      count: deleted.count,
+      chatIds,
+      spaceIds,
+    };
   }
 
   async createChat(

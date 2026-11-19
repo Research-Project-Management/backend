@@ -131,7 +131,8 @@ export class AuthGuard implements CanActivate {
         url.includes('/events') ||
         url.includes('/sse') ||
         url.includes('/artifacts') ||
-        url.includes('/storage/files/');
+        url.includes('/experiments/files/') ||
+        url.includes('/files/');
       if (isAllowedDownloadOrStreamPath) {
         token = String(request.query.token);
       }

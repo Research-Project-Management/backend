@@ -1,10 +1,13 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { STORAGE_PORT, IStoragePort } from '@/modules/storage/storage.port';
+import {
+  EXPERIMENTS_PORT,
+  IExperimentsPort,
+  FileUploadedEvent,
+} from '@/modules/experiments';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import { EngineService } from '../../engine/engine.service';
 import { ScientificChunkingService } from './scientific-chunking.service';
-import { FileUploadedEvent } from '@/modules/storage';
 
 @Injectable()
 export class DocumentAiIngestionService {
@@ -12,7 +15,7 @@ export class DocumentAiIngestionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(STORAGE_PORT) private readonly storagePort: IStoragePort,
+    @Inject(EXPERIMENTS_PORT) private readonly experimentsPort: IExperimentsPort,
     @Inject(LIBRARY_FACADE)
     private readonly libraryFacade: ILibraryFacade,
     private readonly chunkingService: ScientificChunkingService,
@@ -63,8 +66,8 @@ export class DocumentAiIngestionService {
     });
 
     try {
-      // 2. Read physical binary buffer via StoragePort
-      const storageFile = await this.storagePort.readOwnedFile({
+      // 2. Read physical binary buffer via experimentsPort
+      const storageFile = await this.experimentsPort.readOwnedFile({
         fileId,
         userId: event.authorId,
         projectId: event.projectId ?? undefined,

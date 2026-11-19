@@ -67,7 +67,7 @@ export class CreateAttachmentDto extends BaseAttachmentMetadataDto {
 
   @ApiProperty({
     description: 'Public URL or streaming path of the attachment',
-    example: '/api/v1/storage/files/r2/...',
+    example: '/api/v1/files/01950000-0000-7000-8000-000000000000/content',
   })
   @IsNotEmpty()
   @IsString()
@@ -149,7 +149,7 @@ export class AddAttachmentDto extends BaseAttachmentMetadataDto {
 
   @ApiProperty({
     description: 'URL of the uploaded attachment',
-    example: '/api/v1/storage/files/r2/...',
+    example: '/api/v1/files/01950000-0000-7000-8000-000000000000/content',
   })
   @IsNotEmpty()
   @IsString()

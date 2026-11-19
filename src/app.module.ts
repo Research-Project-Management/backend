@@ -6,7 +6,8 @@ import { CoreModule, getBullMqConfig } from './core';
 import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ActivityModule } from './modules/activity/activity.module';
-import { StorageModule } from './modules/storage/storage.module';
+import { FilesModule } from './modules/files/files.module';
+import { ExperimentsModule } from './modules/experiments/experiments.module';
 import { LibraryModule } from './modules/library/library.module';
 import { PagesModule } from './modules/pages/pages.module';
 
@@ -36,10 +37,11 @@ import { AppController } from './app.controller';
     IdentityModule,
     ProjectModule,
     ActivityModule,
+    FilesModule,
     PagesModule,
 
     LibraryModule,
-    StorageModule,
+    ExperimentsModule,
     AiModule,
     RealtimeModule,
     NotificationsModule,

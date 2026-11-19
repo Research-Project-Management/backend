@@ -62,7 +62,7 @@ export interface IChatRepository {
     pageId: string,
     userId: string,
     projectId?: string | null,
-  ): Promise<{ count: number }>;
+  ): Promise<{ count: number; chatIds?: string[]; spaceIds?: string[] }>;
   clearUserChats(
     userId: string,
     projectId?: string | null,

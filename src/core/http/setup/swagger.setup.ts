@@ -37,8 +37,12 @@ export function setupSwagger(app: NestFastifyApplication): void {
     .addTag('Identity', 'Authentication, OAuth2, JWT Refresh, Profile')
     .addTag('Organization', 'Projects, Members, and Roles')
     .addTag(
-      'Storage',
-      'Cloudflare R2 Files, Presigned URLs, Virtual Tree, Labels',
+      'Experiments',
+      'Experiment Files, Virtual Tree, Versions, Uploads & Streaming',
+    )
+    .addTag(
+      'Files',
+      'Platform Binary Transfer & Signed Local Object Endpoints',
     )
     .addTag('Library', 'Academic Papers, CSL Metadata, BibTeX, Collections')
     .addTag(

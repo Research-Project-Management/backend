@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { FileUploadedEvent } from '@/modules/storage';
+import { FileUploadedEvent } from '@/modules/experiments';
 import { DocumentAiIngestionService } from '../services/document-ai-ingestion.service';
 
 import * as path from 'path';

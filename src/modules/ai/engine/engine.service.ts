@@ -350,6 +350,53 @@ export class EngineService {
     );
   }
 
+  /**
+   * Single-turn text generation helper backed by Python AI Engine /chat/sync.
+   * Used by server-side CLSI writing transformations, error remediation, and table synthesis.
+   */
+  async generate(params: {
+    prompt: string;
+    systemInstruction?: string;
+    temperature?: number;
+    userId?: string;
+    spaceId?: string;
+    projectId?: string | null;
+  }): Promise<{ text: string }> {
+    const messages: StreamChatPayload['messages'] = [];
+    if (params.systemInstruction) {
+      messages.push({
+        role: 'system',
+        content: params.systemInstruction,
+      });
+    }
+    messages.push({
+      role: 'user',
+      content: params.prompt,
+    });
+
+    const res = await this.syncChat({
+      messages,
+      user_id: params.userId || '00000000-0000-0000-0000-000000000000',
+      space_id: params.spaceId || params.userId || 'personal',
+      project_id: params.projectId ?? null,
+      chat_id: `clsi-gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      intent_hint: 'direct',
+      context:
+        params.temperature !== undefined
+          ? { temperature: params.temperature }
+          : {},
+    });
+
+    const record = res as Record<string, unknown> | undefined;
+    const text =
+      typeof res?.content === 'string'
+        ? res.content
+        : typeof record?.text === 'string'
+          ? record.text
+          : '';
+    return { text };
+  }
+
   async uploadDocument(
     rawBody: Buffer,
     contentType: string,

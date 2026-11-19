@@ -7,7 +7,8 @@ import {
   getBullMqConfig,
   MANUSCRIPT_CLSI_QUEUE,
 } from './core/infrastructure/queue/bullmq.config';
-import { StorageModule } from './modules/storage/storage.module';
+import { FilesModule } from './modules/files/files.module';
+import { ExperimentsModule } from './modules/experiments/experiments.module';
 import { LibraryModule } from './modules/library/library.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
@@ -40,7 +41,8 @@ import { ClsiCompileProcessor } from './modules/pages/clsi/processors/clsi-compi
     CoreModule,
     IdentityModule,
     ProjectModule,
-    StorageModule,
+    FilesModule,
+    ExperimentsModule,
     LibraryModule,
     PagesModule,
   ],

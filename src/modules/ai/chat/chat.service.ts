@@ -100,26 +100,164 @@ export class ChatService {
     return normalizeProjectId(projectId, userId) ?? null;
   }
 
+  private async resolveValidSpaceUuid(
+    userId: string,
+    rawSpaceId?: string | null,
+  ): Promise<{ spaceId: string; projectId: string | null }> {
+    const cleanAlias = this.sanitizeProjectId(rawSpaceId, userId);
+
+    if (!cleanAlias) {
+      const personalSpace = await Promise.resolve(
+        this.prisma.space?.findFirst?.({
+          where: {
+            OR: [{ id: userId }, { ownerUserId: userId, type: 'personal' }],
+          },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      return {
+        spaceId: personalSpace?.id || userId,
+        projectId: null,
+      };
+    }
+
+    const space = await Promise.resolve(
+      this.prisma.space?.findFirst?.({
+        where: { OR: [{ id: cleanAlias }, { projectId: cleanAlias }] },
+        select: {
+          id: true,
+          type: true,
+          ownerUserId: true,
+          projectId: true,
+        },
+      }),
+    ).catch(() => null);
+
+    if (space) {
+      if (space.type === 'personal') {
+        if (space.ownerUserId && space.ownerUserId !== userId) {
+          throw new ForbiddenException(
+            'User does not have access to this workspace',
+          );
+        }
+        return { spaceId: space.id, projectId: null };
+      }
+
+      if (space.projectId) {
+        const project = await this.prisma.project.findFirst({
+          where: {
+            id: space.projectId,
+            deletedAt: null,
+            OR: [{ createdById: userId }, { members: { some: { userId } } }],
+          },
+          select: { id: true },
+        });
+        if (!project) {
+          throw new ForbiddenException(
+            'User does not have access to this project',
+          );
+        }
+        return { spaceId: space.id, projectId: project.id };
+      }
+    }
+
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        cleanAlias,
+      );
+    const project = await this.prisma.project.findFirst({
+      where: {
+        OR: [
+          ...(isUuid ? [{ id: cleanAlias }] : []),
+          { identifier: cleanAlias },
+        ],
+        deletedAt: null,
+        AND: [
+          {
+            OR: [{ createdById: userId }, { members: { some: { userId } } }],
+          },
+        ],
+      },
+      select: { id: true, identifier: true, space: { select: { id: true } } },
+    });
+    if (!project) {
+      throw new ForbiddenException('User does not have access to this project');
+    }
+
+    return {
+      spaceId: project.space?.id || project.id,
+      projectId: project.id,
+    };
+  }
+
+  private async canonicalizeAndVerifyPageAccess(
+    pageId: string,
+    userId: string,
+    fallbackSpaceId?: string | null,
+  ): Promise<{
+    canonicalPageId: string;
+    spaceId: string;
+    projectId: string | null;
+    titleHint: string | null;
+  }> {
+    const page = await Promise.resolve(
+      this.prisma.page?.findFirst?.({
+        where: { id: pageId, deletedAt: null },
+        select: { id: true, title: true, spaceId: true },
+      }),
+    ).catch(() => null);
+
+    const doc = !page
+      ? await Promise.resolve(
+          this.prisma.pageDoc?.findFirst?.({
+            where: { id: pageId, deletedAt: null },
+            select: {
+              id: true,
+              pageId: true,
+              spaceId: true,
+              lastKnownPath: true,
+              node: { select: { path: true } },
+            },
+          }),
+        ).catch(() => null)
+      : null;
+
+    const hasDelegate = Boolean(
+      this.prisma.page?.findFirst || this.prisma.pageDoc?.findFirst,
+    );
+    if (hasDelegate && !page && !doc) {
+      throw new NotFoundException('Manuscript page not found');
+    }
+
+    const canonicalPageId =
+      page?.id ||
+      (doc as { pageId?: string | null } | null)?.pageId ||
+      doc?.id ||
+      pageId;
+    const rawSpaceId =
+      page?.spaceId ||
+      doc?.spaceId ||
+      (doc as { projectId?: string | null } | null)?.projectId ||
+      fallbackSpaceId;
+
+    const resolvedSpace = await this.resolveValidSpaceUuid(userId, rawSpaceId);
+    const titleHint =
+      page?.title || doc?.node?.path || doc?.lastKnownPath || null;
+
+    return {
+      canonicalPageId,
+      spaceId: resolvedSpace.spaceId,
+      projectId: resolvedSpace.projectId,
+      titleHint,
+    };
+  }
+
   async getChats(
     userId: string,
     projectId?: string | null,
   ): Promise<FormattedChatSession[]> {
-    const cleanProjectId = this.sanitizeProjectId(projectId, userId);
-    if (cleanProjectId) {
-      const project = await this.prisma.project.findFirst({
-        where: {
-          id: cleanProjectId,
-          deletedAt: null,
-          OR: [{ createdById: userId }, { members: { some: { userId } } }],
-        },
-        select: { id: true },
-      });
-      if (!project) {
-        throw new ForbiddenException(
-          'User does not have access to this project',
-        );
-      }
-    }
+    const resolvedScope = await this.resolveValidSpaceUuid(userId, projectId);
+    const cleanProjectId = resolvedScope.projectId ?? resolvedScope.spaceId;
 
     const cacheKey = AI_REDIS_KEYS.userChats(userId, cleanProjectId);
     if (this.cache) {
@@ -127,7 +265,10 @@ export class ChatService {
       if (cached) return cached;
     }
 
-    const rawChats = await this.chatRepo.findUserChats(userId, cleanProjectId);
+    const rawChats = await this.chatRepo.findUserChats(
+      userId,
+      resolvedScope.spaceId,
+    );
     const result = rawChats.map(formatChat);
 
     if (this.cache) {
@@ -141,10 +282,15 @@ export class ChatService {
     if (!pageId) {
       throw new BadRequestException('pageId is required');
     }
-    const raw = await this.chatRepo.findPageChat(pageId, userId);
+    const pageMeta = await this.canonicalizeAndVerifyPageAccess(pageId, userId);
+    const raw = await this.chatRepo.findPageChat(
+      pageMeta.canonicalPageId,
+      userId,
+    );
+    const formatted = raw ? formatChat(raw) : null;
     return {
-      chat: raw ? formatChat(raw) : null,
-      messages: raw?.messages || [],
+      chat: formatted,
+      messages: formatted?.messages || [],
     };
   }
 
@@ -152,8 +298,25 @@ export class ChatService {
     if (!pageId) {
       throw new BadRequestException('pageId is required');
     }
-    await this.chatRepo.deletePageChat(pageId, userId);
-    await this.invalidateChatCache(userId);
+    const pageMeta = await this.canonicalizeAndVerifyPageAccess(pageId, userId);
+    const result = await this.chatRepo.deletePageChat(
+      pageMeta.canonicalPageId,
+      userId,
+    );
+    if (result.chatIds && result.chatIds.length > 0) {
+      await Promise.all([
+        ...result.chatIds.map((id) =>
+          this.engineService
+            ?.deleteDocumentsByChat(id, userId)
+            .catch(() => undefined),
+        ),
+        ...result.chatIds.map((id) =>
+          this.invalidateChatCache(userId, id, pageMeta.spaceId),
+        ),
+      ]);
+    } else {
+      await this.invalidateChatCache(userId, undefined, pageMeta.spaceId);
+    }
     return { success: true };
   }
 
@@ -165,36 +328,31 @@ export class ChatService {
     if (!pageId) {
       throw new BadRequestException('pageId is required');
     }
-    const raw = await this.chatRepo.findPageChat(pageId, userId);
+    const pageMeta = await this.canonicalizeAndVerifyPageAccess(
+      pageId,
+      userId,
+      projectId,
+    );
+    const raw = await this.chatRepo.findPageChat(
+      pageMeta.canonicalPageId,
+      userId,
+    );
     if (raw) {
       return formatChat(raw);
     }
 
-    const doc = await this.prisma.pageDoc.findUnique({
-      where: { id: pageId },
-      select: {
-        lastKnownPath: true,
-        spaceId: true,
-        node: { select: { path: true } },
-      },
-    });
-
-    const docTitle = doc?.node?.path || doc?.lastKnownPath;
-    const title = docTitle
-      ? `${sanitizeChatTitle(docTitle)} Discussion`
+    const title = pageMeta.titleHint
+      ? `${sanitizeChatTitle(pageMeta.titleHint)} Discussion`
       : 'Manuscript Chat';
-    const effectiveSpaceId = projectId || doc?.spaceId || userId;
-    const effectiveProjectId =
-      effectiveSpaceId !== userId ? effectiveSpaceId : null;
 
     const created = await this.chatRepo.createChat({
       createdById: userId,
-      spaceId: effectiveSpaceId,
-      pageId,
+      spaceId: pageMeta.spaceId,
+      pageId: pageMeta.canonicalPageId,
       title,
     });
 
-    await this.invalidateChatCache(userId, created.id, effectiveProjectId);
+    await this.invalidateChatCache(userId, created.id, pageMeta.spaceId);
     return formatChat(created);
   }
 
@@ -222,71 +380,27 @@ export class ChatService {
     userId: string,
     dto: CreateChatDto,
   ): Promise<FormattedChatSession> {
-    let cleanProjectId = this.sanitizeProjectId(dto.spaceId, userId);
-    // Verify project access if specified
-    if (cleanProjectId) {
-      const isUuid =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-          cleanProjectId,
-        );
-      const project = await this.prisma.project.findFirst({
-        where: {
-          OR: [
-            ...(isUuid ? [{ id: cleanProjectId }] : []),
-            { identifier: cleanProjectId },
-          ],
-          deletedAt: null,
-          AND: [
-            {
-              OR: [{ createdById: userId }, { members: { some: { userId } } }],
-            },
-          ],
-        },
-        select: { id: true, identifier: true },
-      });
-      if (!project) {
-        throw new ForbiddenException(
-          'User does not have access to this project',
-        );
-      }
-      cleanProjectId = project.id;
-    }
+    let resolvedScope = await this.resolveValidSpaceUuid(userId, dto.spaceId);
+    let canonicalPageId = dto.pageId;
 
     // Verify document access if specified
     if (dto.pageId) {
-      const doc = await this.prisma.pageDoc.findFirst({
-        where: { id: dto.pageId, deletedAt: null },
-        select: { id: true, spaceId: true },
-      });
-      if (!doc) {
-        throw new NotFoundException('Manuscript doc not found');
-      }
-      if (doc.spaceId !== userId) {
-        const project = await this.prisma.project.findFirst({
-          where: { id: doc.spaceId },
-          select: {
-            id: true,
-            identifier: true,
-            createdById: true,
-            members: { where: { userId }, select: { userId: true } },
-          },
-        });
-        const canAccess =
-          project?.createdById === userId ||
-          (project?.members && project.members.length > 0);
-        if (!canAccess) {
-          throw new ForbiddenException(
-            'User does not have access to this manuscript document',
-          );
-        }
-      }
+      const pageMeta = await this.canonicalizeAndVerifyPageAccess(
+        dto.pageId,
+        userId,
+        dto.spaceId,
+      );
+      canonicalPageId = pageMeta.canonicalPageId;
+      resolvedScope = {
+        spaceId: pageMeta.spaceId,
+        projectId: pageMeta.projectId,
+      };
     }
 
-    const spaceId = cleanProjectId || userId;
     const created = await this.chatRepo.createChat({
       createdById: userId,
-      spaceId,
-      pageId: dto.pageId,
+      spaceId: resolvedScope.spaceId,
+      pageId: canonicalPageId,
       title: sanitizeChatTitle(dto.title),
       documentIds: dto.documentIds,
     });
@@ -310,12 +424,12 @@ export class ChatService {
         throw new NotFoundException('Chat not found');
       }
       const result = formatChat(updated);
-      await this.invalidateChatCache(userId, created.id, cleanProjectId);
+      await this.invalidateChatCache(userId, created.id, resolvedScope.spaceId);
       return result;
     }
 
     const result = formatChat(created);
-    await this.invalidateChatCache(userId, created.id, cleanProjectId);
+    await this.invalidateChatCache(userId, created.id, resolvedScope.spaceId);
     return result;
   }
 
@@ -400,10 +514,15 @@ export class ChatService {
   }
 
   async clearMemory(userId: string, scopeId?: string) {
-    const targetProject =
+    const rawTarget =
       scopeId && scopeId !== 'clear' && scopeId !== userId ? scopeId : null;
-    await this.chatRepo.clearUserChats(userId, targetProject);
-    await this.invalidateChatCache(userId, undefined, targetProject);
+    const resolvedScope = await this.resolveValidSpaceUuid(userId, rawTarget);
+    await this.chatRepo.clearUserChats(userId, resolvedScope.spaceId);
+    await this.invalidateChatCache(
+      userId,
+      undefined,
+      resolvedScope.projectId ?? resolvedScope.spaceId,
+    );
     return { success: true };
   }
 }

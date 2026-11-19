@@ -83,6 +83,12 @@ export async function setupFastifyPlugins(
     },
   });
 
+  // Pass unrecognized binary PUT payloads (e.g. signed local-upload / local-upload-part)
+  // straight through as a Readable stream without buffering in RAM or rejecting with 415.
+  fastifyInstance.addContentTypeParser('*', (_req, payload, done) => {
+    done(null, payload);
+  });
+
   // Security Headers (Helmet)
   await fastifyInstance.register(helmet, {
     contentSecurityPolicy: false,
