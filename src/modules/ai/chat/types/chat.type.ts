@@ -1,82 +1,48 @@
-/**
- * AI Chat Domain Types & Repository Port Interface
- *
- * Implements Hexagonal / Clean Architecture decoupling Prisma models from services.
- */
+import type { AiChat, AiMessage, MessageRole } from '@prisma/client';
+import type {
+  EngineCitation,
+  FrontendSourceItem,
+} from '../../engine/types/engine.type';
 
-import { AiChat, AiMessage, MessageRole, Prisma } from '@prisma/client';
+export type ChatWithMessages = AiChat & {
+  messages: AiMessage[];
+  space?: { projectId: string | null } | null;
+};
 
-export type ChatWithMessages = Prisma.AiChatGetPayload<{
-  include: {
-    messages: true;
-  };
-}>;
+export interface FormattedChatMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  sources?: unknown;
+  attachments?: unknown;
+  widgets?: unknown;
+  createdAt: string;
+}
 
 export interface FormattedChatSession {
   id: string;
   title: string;
-  spaceId?: string;
-  projectId?: string | null;
-  pageId?: string | null;
-  scopeSlug?: string;
+  spaceId: string;
+  projectId: string | null;
+  pageId: string | null;
   messageCount: number;
   lastMessage: string;
   documentIds: string[];
   createdAt: string;
   updatedAt: string;
-  messages?: Array<{
-    id: string;
-    role: string;
-    content: string;
-    sources?: unknown;
-    attachments?: unknown;
-    widgets?: unknown;
-    createdAt: string;
-  }>;
+  messages: FormattedChatMessage[];
 }
 
-export interface IChatRepository {
-  findUserChats(
-    userId: string,
-    projectId?: string | null,
-  ): Promise<ChatWithMessages[]>;
-  findChatById(chatId: string): Promise<ChatWithMessages | null>;
-  findChatByIdAndUser(
-    chatId: string,
-    userId: string,
-  ): Promise<ChatWithMessages | null>;
-  findPageChat(
-    pageId: string,
-    userId: string,
-    projectId?: string | null,
-  ): Promise<ChatWithMessages | null>;
-  createChat(
-    data: Prisma.AiChatCreateInput | Prisma.AiChatUncheckedCreateInput,
-  ): Promise<ChatWithMessages>;
-  updateChat(
-    chatId: string,
-    data: Prisma.AiChatUpdateInput | Prisma.AiChatUncheckedUpdateInput,
-  ): Promise<ChatWithMessages>;
-  deleteChat(chatId: string): Promise<AiChat>;
-  deletePageChat(
-    pageId: string,
-    userId: string,
-    projectId?: string | null,
-  ): Promise<{ count: number; chatIds?: string[]; spaceIds?: string[] }>;
-  clearUserChats(
-    userId: string,
-    projectId?: string | null,
-  ): Promise<{ count: number }>;
-  createMessages(
-    chatId: string,
-    messages: Array<{
-      role: MessageRole;
-      content: string;
-      sources?: Prisma.InputJsonValue;
-      widgets?: Prisma.InputJsonValue;
-      selectionContext?: Prisma.InputJsonValue;
-    }>,
-    documentIds?: string[],
-  ): Promise<ChatWithMessages | null>;
-  updateChatTitle(chatId: string, title: string): Promise<ChatWithMessages>;
+export interface ExecuteChatResult {
+  role: 'assistant';
+  content: string;
+  route: string;
+  status: 'completed' | 'interrupted';
+  sources: FrontendSourceItem[];
+  citations: EngineCitation[];
+  interrupts: unknown[];
+  usage: Record<string, unknown>;
+  chatId: string;
+  title: string;
+  trace_id: string;
 }

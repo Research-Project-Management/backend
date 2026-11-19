@@ -1,31 +1,20 @@
 import { Module } from '@nestjs/common';
-import { EngineModule } from './engine/engine.module';
+import { AI_FACADE } from './ai.constant';
+import { AiFacade } from './ai.facade';
+import { AccessModule } from './access/access.module';
 import { ChatModule } from './chat/chat.module';
-import { LibraryModule } from '@/modules/library';
-import { AiController } from './ai.controller';
-import { AiService } from './ai.service';
-import { ScientificChunkingService } from './ingestion/services/scientific-chunking.service';
-import { DocumentAiIngestionService } from './ingestion/services/document-ai-ingestion.service';
-import { FileUploadedAiListener } from './ingestion/listeners/file-uploaded-ai.listener';
-
-import { VerifiedEmailGuard } from '@/modules/identity/auth';
+import { EngineModule } from './engine/engine.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 
 @Module({
-  imports: [EngineModule, ChatModule, LibraryModule],
-  controllers: [AiController],
+  imports: [EngineModule, AccessModule, ChatModule, KnowledgeModule],
   providers: [
-    AiService,
-    ScientificChunkingService,
-    DocumentAiIngestionService,
-    FileUploadedAiListener,
-    VerifiedEmailGuard,
+    AiFacade,
+    {
+      provide: AI_FACADE,
+      useExisting: AiFacade,
+    },
   ],
-  exports: [
-    AiService,
-    EngineModule,
-    ChatModule,
-    ScientificChunkingService,
-    DocumentAiIngestionService,
-  ],
+  exports: [AiFacade, AI_FACADE],
 })
 export class AiModule {}

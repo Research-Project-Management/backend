@@ -1,31 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { MessageRole, Prisma, AiChat, AiMessage } from '@prisma/client';
-import { IChatRepository, ChatWithMessages } from './types/chat.type';
+import type { AiChat, MessageRole, Prisma } from '@prisma/client';
+import type { ChatWithMessages } from './types/chat.type';
 
-export type { ChatWithMessages };
+const CHAT_INCLUDE = {
+  messages: {
+    orderBy: { createdAt: 'asc' as const },
+  },
+  space: {
+    select: { projectId: true },
+  },
+};
 
 @Injectable()
-export class ChatRepository implements IChatRepository {
+export class ChatRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findUserChats(
     userId: string,
-    projectId?: string | null,
+    spaceId?: string | null,
   ): Promise<ChatWithMessages[]> {
-    const spaceId = projectId || userId;
-    const where: Prisma.AiChatWhereInput = {
-      spaceId,
-      createdById: userId,
-    };
-
     return this.prisma.aiChat.findMany({
-      where,
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-        },
+      where: {
+        spaceId: spaceId || userId,
+        createdById: userId,
       },
+      include: CHAT_INCLUDE,
       orderBy: { updatedAt: 'desc' },
     });
   }
@@ -33,11 +33,7 @@ export class ChatRepository implements IChatRepository {
   async findChatById(chatId: string): Promise<ChatWithMessages | null> {
     return this.prisma.aiChat.findUnique({
       where: { id: chatId },
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
+      include: CHAT_INCLUDE,
     });
   }
 
@@ -47,34 +43,26 @@ export class ChatRepository implements IChatRepository {
   ): Promise<ChatWithMessages | null> {
     return this.prisma.aiChat.findFirst({
       where: { id: chatId, createdById: userId },
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
+      include: CHAT_INCLUDE,
     });
   }
 
   async findPageChat(
     pageId: string,
     userId: string,
-    projectId?: string | null,
+    spaceId?: string | null,
   ): Promise<ChatWithMessages | null> {
     const where: Prisma.AiChatWhereInput = {
       pageId,
       createdById: userId,
     };
-    if (projectId !== undefined) {
-      where.spaceId = projectId || userId;
+    if (spaceId !== undefined) {
+      where.spaceId = spaceId || userId;
     }
 
     return this.prisma.aiChat.findFirst({
       where,
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
+      include: CHAT_INCLUDE,
       orderBy: { updatedAt: 'desc' },
     });
   }
@@ -82,14 +70,14 @@ export class ChatRepository implements IChatRepository {
   async deletePageChat(
     pageId: string,
     userId: string,
-    projectId?: string | null,
-  ): Promise<{ count: number; chatIds?: string[]; spaceIds?: string[] }> {
+    spaceId?: string | null,
+  ): Promise<{ count: number; chatIds: string[]; spaceIds: string[] }> {
     const where: Prisma.AiChatWhereInput = {
       pageId,
       createdById: userId,
     };
-    if (projectId !== undefined) {
-      where.spaceId = projectId || userId;
+    if (spaceId !== undefined) {
+      where.spaceId = spaceId || userId;
     }
 
     const matches = await this.prisma.aiChat.findMany({
@@ -118,24 +106,18 @@ export class ChatRepository implements IChatRepository {
   ): Promise<ChatWithMessages> {
     return this.prisma.aiChat.create({
       data: data as Prisma.AiChatCreateInput,
-      include: {
-        messages: true,
-      },
+      include: CHAT_INCLUDE,
     });
   }
 
-  async updateChat(
+  async updateChatTitle(
     chatId: string,
-    data: Prisma.AiChatUpdateInput | Prisma.AiChatUncheckedUpdateInput,
+    title: string,
   ): Promise<ChatWithMessages> {
     return this.prisma.aiChat.update({
       where: { id: chatId },
-      data,
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
+      data: { title },
+      include: CHAT_INCLUDE,
     });
   }
 
@@ -149,42 +131,29 @@ export class ChatRepository implements IChatRepository {
       selectionContext?: Prisma.InputJsonValue;
     }>,
     documentIds?: string[],
-  ) {
+  ): Promise<ChatWithMessages | null> {
     if (messages.length > 0) {
       await this.prisma.aiMessage.createMany({
         data: messages.map((m) => ({
           chatId,
           role: m.role,
           content: m.content || '',
-          sources: m.sources || [],
-          widgets: m.widgets || [],
+          sources: m.sources ?? [],
+          widgets: m.widgets ?? [],
           selectionContext: m.selectionContext,
         })),
       });
     }
 
-    if (documentIds && documentIds.length > 0) {
-      await this.prisma.aiChat.update({
-        where: { id: chatId },
-        data: {
-          documentIds,
-          updatedAt: new Date(),
-        },
-      });
-    } else {
-      await this.prisma.aiChat.update({
-        where: { id: chatId },
-        data: {
-          updatedAt: new Date(),
-        },
-      });
-    }
+    await this.prisma.aiChat.update({
+      where: { id: chatId },
+      data: {
+        ...(documentIds && documentIds.length > 0 ? { documentIds } : {}),
+        updatedAt: new Date(),
+      },
+    });
 
     return this.findChatById(chatId);
-  }
-
-  async updateChatTitle(chatId: string, title: string) {
-    return this.updateChat(chatId, { title });
   }
 
   async deleteChat(chatId: string): Promise<AiChat> {
@@ -195,15 +164,37 @@ export class ChatRepository implements IChatRepository {
 
   async clearUserChats(
     userId: string,
-    projectId?: string | null,
-  ): Promise<{ count: number }> {
-    const spaceId = projectId || userId;
+    spaceId?: string | null,
+  ): Promise<{ count: number; chatIds: string[] }> {
+    const targetSpaceId = spaceId || userId;
     const where: Prisma.AiChatWhereInput = {
-      spaceId,
+      spaceId: targetSpaceId,
       createdById: userId,
     };
-    return this.prisma.aiChat.deleteMany({
-      where,
-    });
+    const matches = await this.prisma.aiChat
+      .findMany({
+        where,
+        select: { id: true },
+      })
+      .catch(() => []);
+    const chatIds = Array.isArray(matches) ? matches.map((m) => m.id) : [];
+
+    const deleted = await this.prisma.aiChat.deleteMany({ where });
+    return { count: deleted.count, chatIds };
+  }
+
+  async findFirstDocumentFilename(
+    documentIds: string[],
+  ): Promise<string | null> {
+    if (!documentIds.length || !this.prisma.storageFile?.findFirst) {
+      return null;
+    }
+    const file = await this.prisma.storageFile
+      .findFirst({
+        where: { id: { in: documentIds } },
+        select: { filename: true },
+      })
+      .catch(() => null);
+    return file?.filename ?? null;
   }
 }
