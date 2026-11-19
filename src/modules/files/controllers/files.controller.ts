@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -28,7 +29,13 @@ import {
   sanitizeFilename,
   streamToBuffer,
 } from '../domain/files.policy';
-import { FilesCompletePresignDto, FilesPresignDto } from '../files.dto';
+import {
+  FilesCompleteMultipartDto,
+  FilesCompletePresignDto,
+  FilesInitiateMultipartDto,
+  FilesMultipartPartUrlDto,
+  FilesPresignDto,
+} from '../files.dto';
 import { FilesFacade } from '../files.facade';
 import { BlobService } from '../services/blob.service';
 
@@ -279,6 +286,122 @@ export class FilesController {
       size: result.size,
       mimeType: result.mimeType,
     };
+  }
+
+  private async resolvePartUploadUrl(
+    userId: string,
+    sessionId: string,
+    rawPartNumber: number | string,
+  ): Promise<{ partNumber: number; uploadUrl: string }> {
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
+    if (!sessionId || !sessionId.trim()) {
+      throw new BadRequestException('Session ID is required');
+    }
+    const parsedPartNumber = Number(rawPartNumber);
+    if (!Number.isInteger(parsedPartNumber) || parsedPartNumber < 1) {
+      throw new BadRequestException('Invalid partNumber parameter');
+    }
+    const uploadUrl = await this.filesFacade.getMultipartPartUrl(
+      sessionId,
+      parsedPartNumber,
+      { userId },
+    );
+    return { partNumber: parsedPartNumber, uploadUrl };
+  }
+
+  @Post('multipart/initiate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Initiate a resumable multipart upload session for FilesModule',
+  })
+  async initiateMultipart(
+    @CurrentUser('id') userId: string,
+    @Body() dto: FilesInitiateMultipartDto,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
+    const totalSize = dto.totalSize ?? dto.sizeBytes ?? dto.size;
+    if (!totalSize || totalSize <= 0) {
+      throw new BadRequestException(
+        'Total file size is required and must be greater than 0',
+      );
+    }
+    const projectId =
+      cleanUuid(dto.spaceId) ?? cleanUuid(dto.projectId) ?? undefined;
+
+    return this.filesFacade.initiateMultipartUpload({
+      userId,
+      projectId,
+      filename: dto.filename,
+      mimeType: dto.mimeType || 'application/octet-stream',
+      totalSize,
+      expectedHash: dto.expectedHash,
+    });
+  }
+
+  @Get('multipart/:sessionId/part-url')
+  @ApiOperation({ summary: 'Generate presigned part URL via query parameter' })
+  async getMultipartPartUrl(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+    @Query('partNumber') partNumber: string,
+  ) {
+    return this.resolvePartUploadUrl(userId, sessionId, partNumber);
+  }
+
+  @Post('multipart/part-url')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Generate presigned part URL via request body' })
+  async postMultipartPartUrl(
+    @CurrentUser('id') userId: string,
+    @Body() dto: FilesMultipartPartUrlDto,
+  ) {
+    return this.resolvePartUploadUrl(userId, dto.sessionId, dto.partNumber);
+  }
+
+  @Post('multipart/complete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete a multipart upload session and finalize CAS blob',
+  })
+  async completeMultipart(
+    @CurrentUser('id') userId: string,
+    @Body() dto: FilesCompleteMultipartDto,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
+    const res = await this.filesFacade.completeMultipartUpload({
+      sessionId: dto.sessionId,
+      parts: dto.parts,
+      actor: { userId },
+    });
+    return {
+      id: res.fileId,
+      fileId: res.fileId,
+      blobId: res.blobId,
+      url: res.url,
+      filename: res.filename,
+      size: res.size,
+      mimeType: res.mimeType,
+    };
+  }
+
+  @Delete('multipart/:sessionId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Abort an active multipart upload session' })
+  async abortMultipart(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
+    await this.filesFacade.abortMultipartUpload(sessionId, { userId });
+    return { aborted: true, success: true };
   }
 
   @Get('objects/*')
