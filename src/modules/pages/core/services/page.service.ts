@@ -468,6 +468,7 @@ export class PageService {
     return {
       ...result,
       rev: result.rev,
+      hash: result.doc.hash ?? null,
       liveSessionSynced: liveSynced,
       page: {
         id: result.doc.id,
@@ -478,6 +479,7 @@ export class PageService {
         projectId: recordProjectId,
         version: result.doc.version,
         rev: result.doc.rev,
+        hash: result.doc.hash ?? null,
         updatedAt: new Date().toISOString(),
       },
     };

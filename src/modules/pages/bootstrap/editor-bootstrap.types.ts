@@ -49,6 +49,7 @@ export interface EditorBootstrapTreeNodeDto {
   isRootDoc: boolean;
   sizeBytes: number;
   hash?: string | null;
+  rev?: number | null;
   sortOrder: number;
   createdAt: string | Date;
   updatedAt: string | Date;
@@ -72,12 +73,14 @@ export interface EditorBootstrapActiveDocDto {
     rootPageId: string;
     version: number;
     rev: number;
+    hash?: string | null;
     createdAt: Date | string;
     updatedAt: Date | string;
   };
   lines: string[];
   version: number;
   rev: number;
+  hash?: string | null;
   ranges: Record<string, unknown>;
   fallbackToRoot: boolean;
 }

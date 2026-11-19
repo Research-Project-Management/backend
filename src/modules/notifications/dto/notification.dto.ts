@@ -7,7 +7,7 @@ import {
   IsInt,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateNotificationDto {
   @IsString()
@@ -58,7 +58,11 @@ export class CreateNotificationDto {
 export class QueryNotificationsDto {
   @IsOptional()
   @IsBoolean()
-  @Type(() => Boolean)
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
+  })
   isRead?: boolean;
 
   @IsOptional()
@@ -84,8 +88,8 @@ export class ParseMentionsDto {
   text!: string;
 
   @IsString()
-  @IsNotEmpty()
-  actorId!: string;
+  @IsOptional()
+  actorId?: string;
 
   @IsString()
   @IsOptional()
@@ -96,8 +100,12 @@ export class ParseMentionsDto {
   spaceId?: string;
 
   @IsString()
-  @IsNotEmpty()
-  projectId!: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  pageId?: string;
 
   @IsString()
   @IsOptional()

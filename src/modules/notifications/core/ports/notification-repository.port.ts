@@ -18,6 +18,7 @@ export interface INotificationRepositoryPort {
   ): Promise<NotificationEntity[]>;
   countUnread(userId: string): Promise<number>;
   markAsRead(id: string, userId?: string): Promise<boolean>;
+  markManyAsRead?(ids: string[], userId?: string): Promise<number>;
   markAllAsRead(userId: string): Promise<number>;
   deleteById(id: string, userId?: string): Promise<boolean>;
   deleteByKey(key: string, userId?: string): Promise<number>;

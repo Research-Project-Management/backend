@@ -329,8 +329,11 @@ export class ClsiController {
     summary:
       'Transform academic LaTeX/Markdown text while masking math, citation, and reference macros',
   })
-  async transformAcademicText(@Body() dto: ClsiAiTransformDto) {
-    return this.clsiService.transformAcademicText(dto);
+  async transformAcademicText(
+    @Body() dto: ClsiAiTransformDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.clsiService.transformAcademicText(dto, userId);
   }
 
   @Post('clsi/ai/fix-error')
@@ -342,8 +345,11 @@ export class ClsiController {
     summary:
       'Analyze a LaTeX compilation error and suggest an automated or heuristic fix',
   })
-  async fixLatexError(@Body() dto: ClsiAiFixErrorDto) {
-    return this.clsiService.fixLatexError(dto);
+  async fixLatexError(
+    @Body() dto: ClsiAiFixErrorDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.clsiService.fixLatexError(dto, userId);
   }
 
   @Post('clsi/ai/generate-table')
@@ -354,7 +360,10 @@ export class ClsiController {
   @ApiOperation({
     summary: 'Generate a clean LaTeX tabular or TSV table from a prompt',
   })
-  async generateLatexTable(@Body() dto: ClsiAiGenerateTableDto) {
-    return this.clsiService.generateLatexTable(dto);
+  async generateLatexTable(
+    @Body() dto: ClsiAiGenerateTableDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.clsiService.generateLatexTable(dto, userId);
   }
 }

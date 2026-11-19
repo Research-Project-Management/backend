@@ -20,9 +20,10 @@ export interface CreateNotificationCommand {
   key?: string;
   templateKey: string;
   type?: NotificationTypeString;
-  projectId?: string;
-  docId?: string;
-  actorId?: string;
+  spaceId?: string | null;
+  projectId?: string | null;
+  docId?: string | null;
+  actorId?: string | null;
   messageOpts?: Record<string, unknown>;
   expiresAt?: Date | string;
   forceCreate?: boolean;
@@ -84,7 +85,11 @@ export class CreateNotificationUseCase {
       key: command.key ?? null,
       templateKey: command.templateKey,
       type,
-      projectId: command.projectId ?? null,
+      spaceId: command.spaceId ?? command.projectId ?? null,
+      projectId:
+        command.projectId !== undefined
+          ? command.projectId
+          : (command.spaceId ?? null),
       docId: command.docId ?? null,
       actorId: command.actorId ?? null,
       messageOpts: command.messageOpts ?? {},

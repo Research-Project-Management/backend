@@ -41,6 +41,7 @@ export class NotificationEntity {
   readonly key: string | null;
   readonly templateKey: string;
   readonly type: NotificationTypeString;
+  readonly spaceId: string | null;
   readonly projectId: string | null;
   readonly docId: string | null;
   readonly actorId: string | null;
@@ -56,7 +57,9 @@ export class NotificationEntity {
     this.key = props.key ?? null;
     this.templateKey = props.templateKey;
     this.type = props.type ?? 'mention';
-    this.projectId = props.projectId ?? props.spaceId ?? null;
+    this.spaceId = props.spaceId ?? props.projectId ?? null;
+    this.projectId =
+      props.projectId !== undefined ? props.projectId : (props.spaceId ?? null);
     this.docId = props.docId ?? null;
     this.actorId = props.actorId ?? null;
     this.messageOpts = props.messageOpts ?? {};
@@ -98,7 +101,7 @@ export class NotificationEntity {
       key: this.key,
       templateKey: this.templateKey,
       type: this.type,
-      spaceId: this.projectId,
+      spaceId: this.spaceId,
       projectId: this.projectId,
       docId: this.docId,
       actorId: this.actorId,

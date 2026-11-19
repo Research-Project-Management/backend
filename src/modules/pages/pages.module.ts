@@ -16,7 +16,7 @@ import { Module } from '@nestjs/common';
 // Subsystem 0: Shared Kernel
 import { ManuscriptsCoreModule } from './core/core.module';
 
-// Subsystem 1: Virtual File System & Storage (Unified with @/modules/storage/core)
+// Subsystem 1: Virtual File System & Storage (Unified with @/modules/files)
 import { FilestoreModule } from './filestore/filestore.module';
 import { DocstoreModule } from './docstore/docstore.module';
 import { StructureModule } from './structure/structure.module';

@@ -15,14 +15,19 @@ import { ReviewBundleStorePort } from '../ports/review-bundle-store.port';
 import {
   buildDigest,
   buildPendingBundles,
+  getBundleScopeInfo,
   isReviewNotification,
   PendingBundle,
   ReviewBundlingSettings,
   ReviewDigest,
   toBundledItem,
 } from '../domain/value-objects/review-bundle';
+import { NotificationEntity } from '../domain/entities/notification.entity';
 
 const SCAN_LIMIT = 500;
+
+export type FlushBundleTarget =
+  string | { scopeId?: string; spaceId?: string; pageId?: string };
 
 @Injectable()
 export class ReviewNotificationBundlingUseCase {
@@ -32,14 +37,62 @@ export class ReviewNotificationBundlingUseCase {
     private readonly store: ReviewBundleStorePort,
   ) {}
 
-  private async unreadReview(userId: string, projectId?: string) {
+  private matchesTarget(
+    n: NotificationEntity,
+    target?: FlushBundleTarget,
+  ): boolean {
+    if (!target) return true;
+    const info = getBundleScopeInfo(n);
+
+    if (typeof target === 'string') {
+      return (
+        info.scopeId === target ||
+        info.spaceId === target ||
+        n.projectId === target ||
+        info.explicitPageId === target ||
+        n.docId === target
+      );
+    }
+
+    const { scopeId, spaceId, pageId } = target;
+    if (pageId) {
+      const pageMatch =
+        info.explicitPageId === pageId ||
+        (!info.explicitPageId && n.docId === pageId);
+      if (!pageMatch) return false;
+      if (spaceId) {
+        return (
+          info.spaceId === spaceId || n.projectId === spaceId || !info.spaceId
+        );
+      }
+      return true;
+    }
+
+    if (scopeId) {
+      if (
+        info.scopeId === scopeId ||
+        info.spaceId === scopeId ||
+        n.projectId === scopeId ||
+        info.explicitPageId === scopeId
+      ) {
+        return true;
+      }
+    }
+
+    if (spaceId) {
+      return info.spaceId === spaceId || n.projectId === spaceId;
+    }
+
+    return true;
+  }
+
+  private async unreadReview(userId: string, target?: FlushBundleTarget) {
     const list = await this.repo.findByUser(userId, {
       isRead: false,
       limit: SCAN_LIMIT,
     });
     return list.filter(
-      (n) =>
-        isReviewNotification(n) && (!projectId || n.projectId === projectId),
+      (n) => isReviewNotification(n) && this.matchesTarget(n, target),
     );
   }
 
@@ -54,28 +107,51 @@ export class ReviewNotificationBundlingUseCase {
   }
 
   /**
-   * Collapses pending review notifications (optionally one project) into a
-   * digest, persists it, and marks the bundled notifications as read.
+   * Collapses pending review notifications (optionally scoped by space/page/scopeId)
+   * into a digest, persists it, and marks the bundled notifications as read.
    * Returns null when nothing is pending.
    */
   async flush(
     userId: string,
-    projectId?: string,
+    target?: FlushBundleTarget,
   ): Promise<ReviewDigest | null> {
     const settings = await this.store.getSettings(userId);
-    const pending = await this.unreadReview(userId, projectId);
+    const pending = await this.unreadReview(userId, target);
     if (pending.length === 0) return null;
+
+    const firstInfo = getBundleScopeInfo(pending[0]);
+    const scopeId =
+      typeof target === 'string'
+        ? target
+        : target?.scopeId || firstInfo.scopeId || undefined;
+    const spaceId =
+      typeof target === 'object'
+        ? (target.spaceId ?? firstInfo.spaceId)
+        : firstInfo.spaceId;
+    const pageId =
+      typeof target === 'object'
+        ? (target.pageId ?? firstInfo.explicitPageId)
+        : firstInfo.explicitPageId;
+    const legacyProjectId =
+      typeof target === 'string' ? target : firstInfo.projectId;
+
     const digest = buildDigest(
       userId,
       pending
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
         .map(toBundledItem),
       settings.windowMinutes,
-      projectId,
+      legacyProjectId,
+      new Date(),
+      { scopeId, spaceId, pageId },
     );
     await this.store.appendDigest(userId, digest);
-    for (const n of pending) {
-      await this.repo.markAsRead(n.id, userId);
+
+    const ids = pending.map((n) => n.id);
+    if (typeof this.repo.markManyAsRead === 'function') {
+      await this.repo.markManyAsRead(ids, userId);
+    } else {
+      await Promise.all(pending.map((n) => this.repo.markAsRead(n.id, userId)));
     }
     return digest;
   }
@@ -87,7 +163,15 @@ export class ReviewNotificationBundlingUseCase {
     );
     const out: ReviewDigest[] = [];
     for (const b of due) {
-      const d = await this.flush(userId, b.bundle.projectId);
+      const target: FlushBundleTarget | undefined =
+        b.bundle.scopeId || b.bundle.spaceId || b.bundle.pageId
+          ? {
+              scopeId: b.bundle.scopeId,
+              spaceId: b.bundle.spaceId ?? undefined,
+              pageId: b.bundle.pageId ?? undefined,
+            }
+          : b.bundle.projectId;
+      const d = await this.flush(userId, target);
       if (d) out.push(d);
     }
     return out;

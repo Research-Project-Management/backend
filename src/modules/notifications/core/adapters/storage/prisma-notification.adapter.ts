@@ -1,10 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import {
-  PageNotification,
-  PageNotificationType,
-  Prisma,
-} from '@prisma/client';
+import { PageNotification, PageNotificationType, Prisma } from '@prisma/client';
 import {
   INotificationRepositoryPort,
   QueryNotificationsOptions,
@@ -22,7 +18,7 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
       key: notification.key,
       templateKey: notification.templateKey,
       type: notification.type,
-      spaceId: notification.projectId,
+      spaceId: notification.spaceId ?? notification.projectId,
       docId: notification.docId,
       actorId: notification.actorId,
       messageOpts: (notification.messageOpts ?? {}) as Prisma.InputJsonObject,
@@ -159,6 +155,23 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
     return result.count;
   }
 
+  async markManyAsRead(ids: string[], userId?: string): Promise<number> {
+    if (!ids || ids.length === 0) return 0;
+    const where: Prisma.PageNotificationWhereInput = {
+      id: { in: ids },
+    };
+    if (userId) where.userId = userId;
+
+    const result = await this.prisma.pageNotification.updateMany({
+      where,
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+    return result.count;
+  }
+
   async deleteById(id: string, userId?: string): Promise<boolean> {
     const where: Prisma.PageNotificationWhereInput = { id };
     if (userId) where.userId = userId;
@@ -195,21 +208,29 @@ export class PrismaNotificationAdapter implements INotificationRepositoryPort {
   }
 
   private mapToEntity(record: PageNotification): NotificationEntity {
+    const msgOpts =
+      record.messageOpts &&
+      typeof record.messageOpts === 'object' &&
+      !Array.isArray(record.messageOpts)
+        ? (record.messageOpts as Record<string, unknown>)
+        : undefined;
+    const isPersonalSpace = msgOpts?.isPersonalSpace === true;
+    const projectIdFromOpts =
+      typeof msgOpts?.projectId === 'string' && msgOpts.projectId.length > 0
+        ? msgOpts.projectId
+        : null;
+
     return new NotificationEntity({
       id: record.id,
       userId: record.userId,
       key: record.key,
       templateKey: record.templateKey,
       type: record.type,
-      projectId: record.spaceId,
+      spaceId: record.spaceId,
+      projectId: isPersonalSpace ? null : (projectIdFromOpts ?? record.spaceId),
       docId: record.docId,
       actorId: record.actorId,
-      messageOpts:
-        record.messageOpts &&
-        typeof record.messageOpts === 'object' &&
-        !Array.isArray(record.messageOpts)
-          ? record.messageOpts
-          : undefined,
+      messageOpts: msgOpts,
       isRead: record.isRead,
       expiresAt: record.expiresAt ? new Date(record.expiresAt) : null,
       createdAt: new Date(record.createdAt),

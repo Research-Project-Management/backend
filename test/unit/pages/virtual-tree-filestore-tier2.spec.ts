@@ -35,8 +35,8 @@ import {
   BlobStatus,
   ContentHash as PlatformContentHash,
   StorageKey as PlatformStorageKey,
-} from '@/modules/storage/core';
-import type { IStorageBlobRepository } from '@/modules/storage/core/repositories/prisma-blob.repository';
+  type IBlobRepository,
+} from '@/modules/files';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
 const PAGE_B_ID = '22222222-2222-4222-8222-222222222222';
@@ -448,7 +448,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         put: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn().mockResolvedValue(undefined),
       };
-      const blobRepo: jest.Mocked<IStorageBlobRepository> = {
+      const blobRepo: jest.Mocked<IBlobRepository> = {
         findById: jest.fn(),
         findByHash: jest.fn().mockResolvedValue(deletedBlob),
         create: jest.fn(),

@@ -27,6 +27,8 @@ import { NotificationTypeString } from './core/domain/value-objects/notification
 @Controller([
   'notifications',
   'api/notifications',
+  'api/v1/notifications',
+  'api/v1/pages/notifications',
   'api/documents/notifications',
   'documents/notifications',
 ])
@@ -39,7 +41,8 @@ export class NotificationsController {
 
   @Get('bundles')
   @ApiOperation({
-    summary: 'Get pending review notification bundles (unread, per project)',
+    summary:
+      'Get pending review notification bundles (unread, per workspace/page)',
   })
   async getPendingBundles(@CurrentUser('id') userId: string) {
     // Elapsed windows are collapsed into digests before listing.
@@ -52,12 +55,17 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Flush pending review notifications into a digest' })
   async flushBundle(
     @CurrentUser('id') userId: string,
-    @Body() body: { scopeId?: string; spaceId?: string },
+    @Body() body: { scopeId?: string; spaceId?: string; pageId?: string },
   ) {
-    const digest = await this.bundling.flush(
-      userId,
-      body?.spaceId || body?.scopeId || undefined,
-    );
+    const target =
+      body?.pageId || (body?.spaceId && body?.scopeId)
+        ? {
+            scopeId: body?.scopeId,
+            spaceId: body?.spaceId,
+            pageId: body?.pageId,
+          }
+        : body?.spaceId || body?.scopeId || undefined;
+    const digest = await this.bundling.flush(userId, target);
     return { digest };
   }
 
@@ -154,14 +162,32 @@ export class NotificationsController {
     status: 200,
     description: 'Parsed tokens and dispatched notifications',
   })
-  async parseMentions(@Body() dto: ParseMentionsDto) {
-    const result = await this.notificationsService.parseAndNotifyMentions(dto);
+  async parseMentions(
+    @Body() dto: ParseMentionsDto,
+    @CurrentUser('id') currentUserId: string,
+  ) {
+    const resolvedActorId = this.extractUserId(currentUserId) || dto.actorId;
+    const result = await this.notificationsService.parseAndNotifyMentions({
+      ...dto,
+      actorId: resolvedActorId || '',
+    });
     return {
       tokens: result.tokens,
       dispatchedNotifications: result.dispatchedNotifications.map(
         (n: { toPlain: () => unknown }) => n.toPlain(),
       ),
     };
+  }
+
+  @Patch('read-all')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark all notifications as read for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Number of notifications marked as read',
+  })
+  async patchMarkAllAsRead(@CurrentUser('id') userId: string) {
+    return this.markAllAsRead(userId);
   }
 
   @Patch(':id/read')

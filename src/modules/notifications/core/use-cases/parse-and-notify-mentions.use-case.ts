@@ -11,11 +11,14 @@ export interface ParseAndNotifyMentionsCommand {
   text: string;
   actorId: string;
   actorName?: string;
-  projectId: string;
+  spaceId?: string | null;
+  projectId?: string | null;
   projectName?: string;
+  pageId?: string | null;
   docId?: string;
   threadId?: string;
   commentId?: string;
+  isPersonalSpace?: boolean;
   // Map of handle/email (lowercase) -> userId
   collaboratorMap?: Record<string, string>;
 }
@@ -75,21 +78,31 @@ export class ParseAndNotifyMentionsUseCase {
           : command.threadId || command.commentId || 'general';
       const idempotencyKey = `comment-mention-${refKey}-${recipientUserId}`;
 
+      const effectiveSpaceId = command.spaceId ?? command.projectId ?? null;
+      const effectiveProjectId = command.isPersonalSpace
+        ? null
+        : (command.projectId ?? null);
+
       const notification = await this.createNotificationUseCase.execute({
         userId: recipientUserId,
         key: idempotencyKey,
         templateKey: 'notification_comment_mention',
         type: 'mention',
-        projectId: command.projectId,
-        docId: command.docId,
+        spaceId: effectiveSpaceId,
+        projectId: effectiveProjectId,
+        docId: command.docId ?? null,
         actorId: command.actorId,
         messageOpts: {
           actorId: command.actorId,
           actorName: command.actorName ?? 'A collaborator',
-          projectId: command.projectId,
+          spaceId: effectiveSpaceId,
+          projectId: effectiveProjectId,
           projectName: command.projectName ?? 'Manuscript',
+          pageId: command.pageId ?? undefined,
+          docId: command.docId ?? undefined,
           threadId: command.threadId,
           commentId: command.commentId,
+          isPersonalSpace: Boolean(command.isPersonalSpace),
           snippet,
           handle: token.handle,
         },

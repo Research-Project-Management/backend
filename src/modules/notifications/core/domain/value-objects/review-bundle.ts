@@ -49,6 +49,8 @@ export interface BundledItem {
   authorId: string;
   authorName: string;
   pageId: string;
+  docId?: string | null;
+  spaceId?: string | null;
   projectId?: string;
   targetId?: string;
   contentSnippet: string;
@@ -58,8 +60,11 @@ export interface BundledItem {
 
 export interface PendingBundle {
   bundle: {
+    scopeId?: string;
     recipientId: string;
+    spaceId?: string | null;
     projectId?: string;
+    pageId?: string | null;
     items: BundledItem[];
     createdAt: string;
     flushAt: string;
@@ -71,7 +76,10 @@ export interface PendingBundle {
 export interface ReviewDigest {
   id: string;
   recipientId: string;
+  scopeId?: string;
+  spaceId?: string | null;
   projectId?: string;
+  pageId?: string | null;
   summary: string;
   itemCount: number;
   mentionCount: number;
@@ -111,10 +119,52 @@ export function toBundledType(n: NotificationEntity): BundledEventType {
   }
 }
 
+function getOptString(n: NotificationEntity, key: string): string | undefined {
+  const val = n.messageOpts?.[key];
+  return typeof val === 'string' && val.trim().length > 0
+    ? val.trim()
+    : undefined;
+}
+
+export function getBundleScopeInfo(n: NotificationEntity): {
+  scopeId: string;
+  spaceId: string | null;
+  projectId: string | undefined;
+  explicitPageId: string | null;
+} {
+  const spaceId =
+    n.spaceId ?? getOptString(n, 'spaceId') ?? n.projectId ?? null;
+  const projectId =
+    n.messageOpts?.isPersonalSpace === true
+      ? undefined
+      : (n.projectId ?? undefined);
+  const explicitPageId = getOptString(n, 'pageId') ?? null;
+
+  if (!spaceId && !projectId && !explicitPageId) {
+    return {
+      scopeId: '',
+      spaceId: null,
+      projectId: undefined,
+      explicitPageId: null,
+    };
+  }
+
+  const scopeId = explicitPageId
+    ? `${spaceId || projectId || 'personal'}:${explicitPageId}`
+    : spaceId || projectId || '';
+
+  return {
+    scopeId,
+    spaceId,
+    projectId: projectId || undefined,
+    explicitPageId,
+  };
+}
+
 export function toBundledItem(n: NotificationEntity): BundledItem {
   const o = n.messageOpts || {};
-  const optStr = (key: string): string | undefined =>
-    typeof o[key] === 'string' ? o[key] : undefined;
+  const optStr = (key: string): string | undefined => getOptString(n, key);
+  const { spaceId, projectId, explicitPageId } = getBundleScopeInfo(n);
 
   return {
     id: n.id,
@@ -125,8 +175,10 @@ export function toBundledItem(n: NotificationEntity): BundledItem {
       optStr('authorName') ||
       optStr('userName') ||
       'Collaborator',
-    pageId: n.docId || optStr('docId') || '',
-    projectId: n.projectId || undefined,
+    pageId: explicitPageId || n.docId || optStr('docId') || '',
+    docId: n.docId ?? optStr('docId') ?? null,
+    spaceId,
+    projectId,
     targetId:
       optStr('threadId') ||
       optStr('changeId') ||
@@ -145,7 +197,7 @@ export function isReviewNotification(n: NotificationEntity): boolean {
   return REVIEW_NOTIFICATION_TYPES.has(n.type) && !n.isRead;
 }
 
-/** Groups unread review notifications by project into pending bundles. */
+/** Groups unread review notifications by space/page into pending bundles. */
 export function buildPendingBundles(
   recipientId: string,
   notifications: NotificationEntity[],
@@ -153,22 +205,42 @@ export function buildPendingBundles(
   now: Date = new Date(),
 ): PendingBundle[] {
   const windowMs = settings.windowMinutes * 60_000;
-  const groups = new Map<string, NotificationEntity[]>();
+  const groups = new Map<
+    string,
+    {
+      spaceId: string | null;
+      projectId: string | undefined;
+      pageId: string | null;
+      items: NotificationEntity[];
+    }
+  >();
+
   for (const n of notifications.filter(isReviewNotification)) {
-    const key = n.projectId || '';
-    const list = groups.get(key) || [];
-    list.push(n);
-    groups.set(key, list);
+    const info = getBundleScopeInfo(n);
+    const key = info.scopeId;
+    const existing = groups.get(key) || {
+      spaceId: info.spaceId,
+      projectId: info.projectId,
+      pageId: info.explicitPageId,
+      items: [],
+    };
+    existing.items.push(n);
+    groups.set(key, existing);
   }
+
   const bundles: PendingBundle[] = [];
-  for (const [projectId, list] of groups) {
+  for (const [scopeId, group] of groups) {
+    const list = group.items;
     list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     const createdAt = list[0].createdAt;
     const flushAt = new Date(createdAt.getTime() + windowMs);
     bundles.push({
       bundle: {
+        scopeId: scopeId || undefined,
         recipientId,
-        projectId: projectId || undefined,
+        spaceId: group.spaceId,
+        projectId: group.projectId,
+        pageId: group.pageId,
         items: list.map(toBundledItem),
         createdAt: createdAt.toISOString(),
         flushAt: flushAt.toISOString(),
@@ -189,6 +261,11 @@ export function buildDigest(
   windowMinutes: number,
   projectId?: string,
   now: Date = new Date(),
+  scopeMeta?: {
+    scopeId?: string;
+    spaceId?: string | null;
+    pageId?: string | null;
+  },
 ): ReviewDigest {
   const counts = { mention: 0, comment: 0, reply: 0, suggestion: 0 };
   const authors = new Map<string, ReviewDigest['authorSummaries'][number]>();
@@ -216,10 +293,15 @@ export function buildDigest(
     parts.push(
       `${counts.suggestion} suggestion${counts.suggestion > 1 ? 's' : ''}`,
     );
+
+  const first = items[0];
   return {
     id: `digest-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     recipientId,
-    projectId,
+    scopeId: scopeMeta?.scopeId,
+    spaceId: scopeMeta?.spaceId ?? first?.spaceId ?? null,
+    projectId: projectId ?? first?.projectId,
+    pageId: scopeMeta?.pageId ?? first?.pageId ?? null,
     summary: parts.length
       ? `${parts.join(', ')} from ${authors.size} collaborator${authors.size > 1 ? 's' : ''}`
       : 'No new review activity',

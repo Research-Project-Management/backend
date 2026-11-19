@@ -10,8 +10,12 @@
 export type AiActionType =
   | 'academic-tone'
   | 'make-concise'
+  | 'rewrite-academic'
+  | 'concise'
+  | 'expand'
   | 'fix-grammar'
   | 'translate-english'
+  | 'explain-latex'
   | 'custom';
 
 export interface AiActionParams {
@@ -21,6 +25,8 @@ export interface AiActionParams {
   contextBefore?: string;
   contextAfter?: string;
   documentTitle?: string;
+  spaceId?: string;
+  pageId?: string;
 }
 
 export interface AiActionResult {
@@ -45,7 +51,7 @@ export interface AiErrorFixParams {
   surroundingCode?: string;
   fullCode?: string;
   pageId?: string;
-  projectId?: string;
+  spaceId?: string;
 }
 
 export interface AiErrorFixResult {
@@ -135,6 +141,12 @@ export const AI_ACTION_STRATEGIES: Readonly<
         .replace(/\buse\b/gi, 'utilize')
         .replace(/\babout\b(?=\s+\d+)/gi, 'approximately'),
   },
+  'rewrite-academic': {
+    buildSystemPrompt: () =>
+      'You are an expert scientific editor for top-tier peer-reviewed journals (Nature, IEEE, ACM, Science). Rewrite the provided text to elevate its academic tone, scholarly vocabulary, clarity, and precision. Maintain third-person or formal academic voice. Preserve any __LATEX_*__ placeholder tokens verbatim. Do NOT add preamble or meta-commentary, return ONLY the rewritten text.',
+    applyHeuristic: (text) =>
+      AI_ACTION_STRATEGIES['academic-tone'].applyHeuristic(text),
+  },
   'make-concise': {
     buildSystemPrompt: () =>
       'You are an expert scientific editor. Rewrite the provided text to make it significantly more concise and direct. Eliminate redundant modifiers, passive fluff, and wordiness while strictly preserving all technical nuance, factual points, and __LATEX_*__ placeholder tokens. Return ONLY the rewritten text.',
@@ -149,6 +161,17 @@ export const AI_ACTION_STRATEGIES: Readonly<
         .replace(/\bis able to\b/gi, 'can')
         .replace(/\bit is important to note that\b/gi, 'notably,'),
   },
+  concise: {
+    buildSystemPrompt: () =>
+      'You are an expert scientific editor. Rewrite the provided text to make it significantly more concise and direct. Eliminate redundant modifiers, passive fluff, and wordiness while strictly preserving all technical nuance, factual points, and __LATEX_*__ placeholder tokens. Return ONLY the rewritten text.',
+    applyHeuristic: (text) =>
+      AI_ACTION_STRATEGIES['make-concise'].applyHeuristic(text),
+  },
+  expand: {
+    buildSystemPrompt: () =>
+      'You are an expert academic co-author. Expand the provided text with clear scientific reasoning, transitional precision, and supporting elaboration while strictly preserving all factual claims and __LATEX_*__ placeholder tokens verbatim. Return ONLY the expanded text.',
+    applyHeuristic: (text) => text,
+  },
   'fix-grammar': {
     buildSystemPrompt: () =>
       'You are an expert academic proofreader. Fix all grammatical, typographical, punctuation, and structural flow errors in the following text. Improve transition phrases and preserve __LATEX_*__ placeholder tokens verbatim. Return ONLY the corrected text.',
@@ -162,6 +185,11 @@ export const AI_ACTION_STRATEGIES: Readonly<
   'translate-english': {
     buildSystemPrompt: () =>
       'You are an expert academic translator. Translate the provided text into formal, publication-ready academic English suitable for high-impact research papers. Preserve any __LATEX_*__ placeholder tokens verbatim. Return ONLY the translated English text.',
+    applyHeuristic: (text) => text,
+  },
+  'explain-latex': {
+    buildSystemPrompt: () =>
+      'You are an expert LaTeX mentor. Briefly explain what the selected LaTeX commands, environments, or equations do and highlight any formatting considerations. Return a clear, concise explanation.',
     applyHeuristic: (text) => text,
   },
   custom: {
@@ -278,10 +306,11 @@ export function fixLatexError(params: AiErrorFixParams): AiErrorFixResult {
 
     if (cmd && packageMap[cmd]) {
       const pkg = packageMap[cmd];
+      const primaryPkg = pkg.split(',')[0].trim();
       return {
-        explanation: `The command '\\${cmd}' requires the '${pkg}' package. Add \\usepackage{${pkg}} to your preamble.`,
+        explanation: `The command '\\${cmd}' requires the '${pkg}' package. Add \\usepackage{${primaryPkg}} to your preamble.`,
         originalSnippet: currentLineText || `\\${cmd}`,
-        fixedSnippet: `% Ensure \\usepackage{${pkg}} is in your preamble\n${currentLineText || `\\${cmd}`}`,
+        fixedSnippet: `\\usepackage{${primaryPkg}}`,
         startLine: lineNum,
         endLine: lineNum,
         confidence: 'high',

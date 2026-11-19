@@ -2,7 +2,7 @@
  * filestore/adapters/filestore.adapters.ts
  * Driven Storage & Content-Hashing Adapters for Manuscripts Filestore:
  * - ContentHasherAdapter (Port: IContentHasherPort)
- * - PlatformBinaryStorageAdapter (Port: IBinaryStoragePort -> unified with @/modules/storage/core)
+ * - PlatformBinaryStorageAdapter (Port: IBinaryStoragePort -> unified with @/modules/files)
  * - LocalDiskBinaryStorageAdapter (Port: IBinaryStoragePort - standalone/test fallback adapter)
  */
 
@@ -13,8 +13,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { STORAGE_DRIVER } from '@/modules/storage/storage.tokens';
-import { BlobService, IStorageDriver } from '@/modules/storage/core';
+import {
+  STORAGE_ADAPTER,
+  BlobService,
+  IStorageAdapter,
+} from '@/modules/files';
 import {
   IBinaryStoragePort,
   IContentHasherPort,
@@ -129,9 +132,9 @@ export class ContentHasherAdapter extends IContentHasherPort {
 export { ContentHasherAdapter as CryptoGitBlobHasherAdapter };
 
 /**
- * Unified Platform Binary Storage Adapter (Overleaf Filestore -> Flux StorageCoreModule bridge).
+ * Unified Platform Binary Storage Adapter (Overleaf Filestore -> Flux FilesModule bridge).
  * Delegates all physical object I/O for manuscript binary assets and cold-tier doc archives
- * to the platform-wide `@Global()` StorageCoreModule (`BlobService` / `IStorageDriver`),
+ * to FilesModule (`BlobService` / `IStorageAdapter`),
  * eliminating duplicate S3Client instances and fragmented disk storage.
  */
 @Injectable()
@@ -141,17 +144,17 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
   constructor(
     @Optional() private readonly blobService?: BlobService,
     @Optional()
-    @Inject(STORAGE_DRIVER)
-    private readonly storageDriver?: IStorageDriver,
+    @Inject(STORAGE_ADAPTER)
+    private readonly storageAdapter?: IStorageAdapter,
   ) {
     super();
   }
 
-  private get target(): BlobService | IStorageDriver {
-    const resolved = this.blobService ?? this.storageDriver;
+  private get target(): BlobService | IStorageAdapter {
+    const resolved = this.blobService ?? this.storageAdapter;
     if (!resolved) {
       throw new FilestoreValidationException(
-        'PlatformBinaryStorageAdapter requires either BlobService or STORAGE_DRIVER from StorageCoreModule',
+        'PlatformBinaryStorageAdapter requires either BlobService or STORAGE_ADAPTER from FilesModule',
       );
     }
     return resolved;
@@ -274,7 +277,7 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
       const url = await this.target.getPresignedDownloadUrl(physicalKey, {
         expiresInSeconds,
       });
-      if (!url || url.startsWith('/api/v1/storage/files/local-download')) {
+      if (!url || url.startsWith('/api/v1/files/local-download')) {
         return null;
       }
       return url;

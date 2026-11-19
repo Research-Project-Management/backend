@@ -53,6 +53,7 @@ import {
 import { ScopeRepository } from '../repositories/scope.repository';
 import { TrackChangesService } from '@/modules/pages/track-changes/track-changes.service';
 import { TrackChangesRepository } from '@/modules/pages/track-changes/track-changes.repository';
+import { PagesNotificationsService } from '@/modules/notifications/pages/pages-notifications.service';
 import {
   CommentThread,
   CommentReply,
@@ -105,6 +106,8 @@ export class ReviewController {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
+    @Optional()
+    private readonly pagesNotifications?: PagesNotificationsService,
   ) {
     this.liveCollab =
       liveCollabOrLegacyRef &&
@@ -212,6 +215,180 @@ export class ReviewController {
 
     const resolvedProj = await this.pageService.resolveProjectId(pageId);
     return { docId: pageId, projectId: resolvedProj || activeProjectId };
+  }
+
+  private async resolveSpaceNotificationContext(
+    spaceOrProjectId: string,
+    pageIdHint?: string | null,
+    docIdHint?: string | null,
+  ): Promise<{
+    spaceId: string;
+    projectId: string | null;
+    projectName?: string;
+    pageId?: string | null;
+    isPersonalSpace: boolean;
+    collaboratorMap: Record<string, string>;
+    fallbackOwnerId?: string | null;
+  }> {
+    const collaboratorMap: Record<string, string> = {};
+    const addCollaboratorEntries = (
+      id: string,
+      name?: string | null,
+      email?: string | null,
+    ) => {
+      if (!id) return;
+      if (email) {
+        const lowerEmail = email.toLowerCase();
+        collaboratorMap[lowerEmail] = id;
+        const localPart = lowerEmail.split('@')[0];
+        if (localPart) collaboratorMap[localPart] = id;
+      }
+      if (name) {
+        const lowerName = name.toLowerCase().trim();
+        collaboratorMap[lowerName] = id;
+        collaboratorMap[lowerName.replace(/\s+/g, '')] = id;
+        collaboratorMap[lowerName.replace(/\s+/g, '_')] = id;
+        collaboratorMap[lowerName.replace(/\s+/g, '.')] = id;
+      }
+    };
+
+    const prisma =
+      typeof this.pageScopeRepo.getPrisma === 'function'
+        ? this.pageScopeRepo.getPrisma()
+        : undefined;
+
+    let spaceId = spaceOrProjectId;
+    let projectId: string | null = spaceOrProjectId;
+    let projectName: string | undefined;
+    let isPersonalSpace = false;
+    let fallbackOwnerId: string | null = null;
+    let canonicalPageId = pageIdHint ?? null;
+
+    if (prisma) {
+      if (!canonicalPageId && docIdHint) {
+        const doc = await Promise.resolve(
+          prisma.pageDoc?.findFirst?.({
+            where: { id: docIdHint },
+            select: { pageId: true },
+          }),
+        ).catch(() => null);
+        if (doc?.pageId) canonicalPageId = doc.pageId;
+      }
+
+      const space = await Promise.resolve(
+        prisma.space?.findFirst?.({
+          where: {
+            OR: [{ id: spaceOrProjectId }, { projectId: spaceOrProjectId }],
+          },
+          select: {
+            id: true,
+            type: true,
+            ownerUserId: true,
+            projectId: true,
+          },
+        }),
+      ).catch(() => null);
+
+      if (space) {
+        spaceId = space.id;
+        isPersonalSpace = space.type === 'personal';
+        projectId = isPersonalSpace ? null : (space.projectId ?? null);
+        if (isPersonalSpace && space.ownerUserId) {
+          fallbackOwnerId = space.ownerUserId;
+          const [owner, ownerNames] = await Promise.all([
+            Promise.resolve(
+              prisma.user?.findUnique?.({
+                where: { id: space.ownerUserId },
+                select: { id: true, email: true },
+              }),
+            ).catch(() => null),
+            this.resolveUserNames([space.ownerUserId]).catch(
+              () => new Map<string, { id: string; name: string }>(),
+            ),
+          ]);
+          const ownerId = owner?.id || space.ownerUserId;
+          addCollaboratorEntries(
+            ownerId,
+            ownerNames.get(ownerId)?.name,
+            owner?.email,
+          );
+        }
+      }
+
+      const lookupProjectId = projectId;
+      if (lookupProjectId) {
+        const project = await Promise.resolve(
+          prisma.project?.findFirst?.({
+            where: { id: lookupProjectId, deletedAt: null },
+            include: {
+              members: {
+                select: {
+                  userId: true,
+                  user: { select: { id: true, email: true } },
+                },
+              },
+            },
+          }),
+        ).catch(() => null);
+        if (project) {
+          projectName = project.name;
+          fallbackOwnerId = project.createdById;
+          const memberIds = [
+            project.createdById,
+            ...(project.members || []).map((m) => m.userId),
+          ];
+          const [resolvedNames, ownerUser] = await Promise.all([
+            this.resolveUserNames(memberIds).catch(
+              () => new Map<string, { id: string; name: string }>(),
+            ),
+            Promise.resolve(
+              prisma.user?.findUnique?.({
+                where: { id: project.createdById },
+                select: { id: true, email: true },
+              }),
+            ).catch(() => null),
+          ]);
+          addCollaboratorEntries(
+            project.createdById,
+            resolvedNames.get(project.createdById)?.name,
+            ownerUser?.email,
+          );
+          for (const m of project.members || []) {
+            addCollaboratorEntries(
+              m.userId,
+              resolvedNames.get(m.userId)?.name,
+              m.user?.email,
+            );
+          }
+        }
+      }
+    }
+
+    return {
+      spaceId,
+      projectId,
+      projectName,
+      pageId: canonicalPageId,
+      isPersonalSpace,
+      collaboratorMap,
+      fallbackOwnerId,
+    };
+  }
+
+  private async dispatchReviewNotificationSafe(
+    label: string,
+    fn: () => Promise<unknown>,
+  ): Promise<void> {
+    if (!this.pagesNotifications) return;
+    try {
+      await fn();
+    } catch (err) {
+      this.logger.warn(
+        `Non-blocking notification dispatch (${label}) failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   // ─── 1. INLINE COMMENTS & THREADS ─────────────────────────────────────────────
@@ -405,6 +582,32 @@ export class ReviewController {
       comment: commentPayload,
     });
 
+    if (this.pagesNotifications && userId && isUuid(userId)) {
+      await this.dispatchReviewNotificationSafe(
+        'createComment:mentions',
+        async () => {
+          const ctx = await this.resolveSpaceNotificationContext(
+            resolvedProj,
+            resolvedPageId,
+            targetDocId,
+          );
+          await this.pagesNotifications?.parseAndNotifyMentions({
+            text: body.content,
+            actorId: userId,
+            actorName: authorName,
+            spaceId: ctx.spaceId,
+            projectId: ctx.projectId,
+            projectName: ctx.projectName,
+            pageId: ctx.pageId,
+            docId: targetDocId,
+            threadId: saved.id,
+            isPersonalSpace: ctx.isPersonalSpace,
+            collaboratorMap: ctx.collaboratorMap,
+          });
+        },
+      );
+    }
+
     return { comment: commentPayload };
   }
 
@@ -529,6 +732,45 @@ export class ReviewController {
       docId: updated.docId,
       comment: commentPayload,
     });
+
+    if (
+      this.pagesNotifications &&
+      userId &&
+      isUuid(userId) &&
+      (body.resolved !== undefined || body.status !== undefined) &&
+      isResolved !== thread.isResolved
+    ) {
+      await this.dispatchReviewNotificationSafe(
+        'updateComment:resolved',
+        async () => {
+          if (!isResolved) {
+            await this.pagesNotifications?.dismissThreadResolved(updated.id);
+            return;
+          }
+          if (updated.createdById && updated.createdById !== userId) {
+            const ctx = await this.resolveSpaceNotificationContext(
+              threadProjectId,
+              (updated as { pageId?: string | null }).pageId,
+              updated.docId,
+            );
+            const actorName = userMap.get(userId)?.name || 'Collaborator';
+            await this.pagesNotifications?.notifyThreadResolved({
+              recipientUserId: updated.createdById,
+              actorId: userId,
+              actorName,
+              spaceId: ctx.spaceId,
+              projectId: ctx.projectId,
+              projectName: ctx.projectName,
+              pageId: ctx.pageId,
+              docId: updated.docId,
+              threadId: updated.id,
+              quote: updated.quote || undefined,
+              isPersonalSpace: ctx.isPersonalSpace,
+            });
+          }
+        },
+      );
+    }
 
     return { comment: commentPayload };
   }
@@ -698,6 +940,55 @@ export class ReviewController {
       commentId: thread.id,
       comment: commentPayload,
     });
+
+    if (this.pagesNotifications && userId && isUuid(userId)) {
+      await this.dispatchReviewNotificationSafe('addCommentReply', async () => {
+        const ctx = await this.resolveSpaceNotificationContext(
+          this.getRecordSpaceId(thread) || targetProjectId,
+          (thread as { pageId?: string | null }).pageId,
+          thread.docId,
+        );
+        const replyActor = await this.resolveUserNames([userId]);
+        const actorName = replyActor.get(userId)?.name || 'Collaborator';
+        const lastReply =
+          thread.replies && thread.replies.length > 0
+            ? thread.replies[thread.replies.length - 1]
+            : null;
+        const replyId = lastReply?.id || replyEntity.id;
+
+        if (thread.createdById && thread.createdById !== userId) {
+          await this.pagesNotifications?.notifyCommentReply({
+            recipientUserId: thread.createdById,
+            actorId: userId,
+            actorName,
+            spaceId: ctx.spaceId,
+            projectId: ctx.projectId,
+            projectName: ctx.projectName,
+            pageId: ctx.pageId,
+            docId: thread.docId,
+            threadId: thread.id,
+            replyId,
+            snippet: body.content,
+            isPersonalSpace: ctx.isPersonalSpace,
+          });
+        }
+
+        await this.pagesNotifications?.parseAndNotifyMentions({
+          text: body.content,
+          actorId: userId,
+          actorName,
+          spaceId: ctx.spaceId,
+          projectId: ctx.projectId,
+          projectName: ctx.projectName,
+          pageId: ctx.pageId,
+          docId: thread.docId,
+          threadId: thread.id,
+          commentId: replyId,
+          isPersonalSpace: ctx.isPersonalSpace,
+          collaboratorMap: ctx.collaboratorMap,
+        });
+      });
+    }
 
     return { comment: commentPayload };
   }
@@ -944,6 +1235,7 @@ export class ReviewController {
     @Body() body: { resolved?: boolean },
     @Param('spaceId') routeProjectId?: string,
     @ResolvedSpace() authorizedProjectId?: string | { id: string } | null,
+    @CurrentUser('id') currentUserId?: string,
   ) {
     const isResolved = body.resolved ?? true;
     if (!isUuid(commentId)) {
@@ -983,6 +1275,7 @@ export class ReviewController {
 
     const userMap = await this.resolveUserNames([
       updated.createdById,
+      currentUserId,
       ...(updated.replies || []).map((r) => r.createdById),
     ]);
     const commentPayload = formatCommentThreadDto(updated, userMap);
@@ -993,6 +1286,41 @@ export class ReviewController {
       resolved: isResolved,
       comment: commentPayload,
     });
+
+    if (this.pagesNotifications) {
+      await this.dispatchReviewNotificationSafe('resolveComment', async () => {
+        if (!isResolved) {
+          await this.pagesNotifications?.dismissThreadResolved(updated.id);
+          return;
+        }
+        if (
+          currentUserId &&
+          isUuid(currentUserId) &&
+          updated.createdById &&
+          updated.createdById !== currentUserId
+        ) {
+          const ctx = await this.resolveSpaceNotificationContext(
+            this.getRecordSpaceId(updated) || targetProjectId,
+            (updated as { pageId?: string | null }).pageId,
+            updated.docId,
+          );
+          const actorName = userMap.get(currentUserId)?.name || 'Collaborator';
+          await this.pagesNotifications?.notifyThreadResolved({
+            recipientUserId: updated.createdById,
+            actorId: currentUserId,
+            actorName,
+            spaceId: ctx.spaceId,
+            projectId: ctx.projectId,
+            projectName: ctx.projectName,
+            pageId: ctx.pageId,
+            docId: updated.docId,
+            threadId: updated.id,
+            quote: updated.quote || undefined,
+            isPersonalSpace: ctx.isPersonalSpace,
+          });
+        }
+      });
+    }
 
     return { comment: commentPayload };
   }
@@ -1182,6 +1510,50 @@ export class ReviewController {
       docId: targetDocId,
       suggestion: suggestionPayload,
     });
+
+    if (this.pagesNotifications && userId && isUuid(userId)) {
+      await this.dispatchReviewNotificationSafe(
+        'createSuggestion',
+        async () => {
+          const ctx = await this.resolveSpaceNotificationContext(
+            resolvedProj,
+            resolvedPageId,
+            targetDocId,
+          );
+          if (ctx.fallbackOwnerId && ctx.fallbackOwnerId !== userId) {
+            await this.pagesNotifications?.notifyReviewSuggestion({
+              recipientUserId: ctx.fallbackOwnerId,
+              actorId: userId,
+              actorName: authorName,
+              spaceId: ctx.spaceId,
+              projectId: ctx.projectId,
+              projectName: ctx.projectName,
+              pageId: ctx.pageId,
+              docId: targetDocId,
+              changeId: saved.id,
+              changeType: saved.type === 'delete' ? 'delete' : 'insert',
+              snippet: text,
+              line: saved.range.startLine + 1,
+              isPersonalSpace: ctx.isPersonalSpace,
+            });
+          }
+          if (text && text.includes('@')) {
+            await this.pagesNotifications?.parseAndNotifyMentions({
+              text,
+              actorId: userId,
+              actorName: authorName,
+              spaceId: ctx.spaceId,
+              projectId: ctx.projectId,
+              projectName: ctx.projectName,
+              pageId: ctx.pageId,
+              docId: targetDocId,
+              isPersonalSpace: ctx.isPersonalSpace,
+              collaboratorMap: ctx.collaboratorMap,
+            });
+          }
+        },
+      );
+    }
 
     return { suggestion: suggestionPayload };
   }

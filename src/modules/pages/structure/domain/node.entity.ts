@@ -26,6 +26,7 @@ export interface SerializedTreeNode {
   fileId?: string | null;
   sizeBytes: number;
   hash?: string | null;
+  rev?: number | null;
   sortOrder: number;
   children: SerializedTreeNode[];
 }
@@ -46,6 +47,7 @@ export interface ManuscriptNodeProps {
   isRootDoc?: boolean;
   sizeBytes?: number;
   hash?: string | null;
+  rev?: number | null;
   sortOrder?: number;
   createdAt?: Date;
   updatedAt?: Date;
@@ -170,6 +172,10 @@ export class ManuscriptNodeEntity {
 
   public get hash(): string | null {
     return this.props.hash ?? null;
+  }
+
+  public get rev(): number | null {
+    return this.props.type === 'DOC' ? (this.props.rev ?? null) : null;
   }
 
   public get sortOrder(): number {
@@ -313,6 +319,7 @@ export class ManuscriptNodeEntity {
       fileId: this.fileId,
       sizeBytes: this.sizeBytes,
       hash: this.hash,
+      rev: this.rev,
       sortOrder: this.sortOrder,
       children,
     };
@@ -334,6 +341,7 @@ export class ManuscriptNodeEntity {
       isRootDoc: this.isRootDoc,
       sizeBytes: this.sizeBytes,
       hash: this.hash,
+      rev: this.rev,
       sortOrder: this.sortOrder,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this.updatedAt.toISOString(),

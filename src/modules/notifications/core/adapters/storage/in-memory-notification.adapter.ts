@@ -96,6 +96,15 @@ export class InMemoryNotificationAdapter implements INotificationRepositoryPort 
     return true;
   }
 
+  async markManyAsRead(ids: string[], userId?: string): Promise<number> {
+    let updated = 0;
+    for (const id of ids) {
+      const ok = await this.markAsRead(id, userId);
+      if (ok) updated++;
+    }
+    return updated;
+  }
+
   async markAllAsRead(userId: string): Promise<number> {
     let updated = 0;
     for (const [id, item] of this.notifications.entries()) {

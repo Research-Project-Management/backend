@@ -24,13 +24,17 @@ import {
 } from './domain';
 
 const NODE_HYDRATION_INCLUDE = {
-  doc: { select: { sizeBytes: true, hash: true } },
+  doc: { select: { sizeBytes: true, hash: true, rev: true } },
   file: { select: { sizeBytes: true, hash: true, blobId: true } },
   page: { select: { rootDocId: true } },
 } as const;
 
 type HydratedPageNodeRow = PageNode & {
-  doc?: { sizeBytes?: number | null; hash?: string | null } | null;
+  doc?: {
+    sizeBytes?: number | null;
+    hash?: string | null;
+    rev?: number | null;
+  } | null;
   file?: {
     sizeBytes?: number | null;
     hash?: string | null;
@@ -40,6 +44,7 @@ type HydratedPageNodeRow = PageNode & {
   isRootDoc?: boolean | null;
   sizeBytes?: number | null;
   hash?: string | null;
+  rev?: number | null;
 };
 
 function isPrismaUniqueError(err: unknown): boolean {
@@ -254,6 +259,7 @@ export class StructureRepository extends IStructureRepository {
       isRootDoc?: boolean;
       sizeBytes?: number;
       hash?: string | null;
+      rev?: number | null;
     },
   ): ManuscriptNodeEntity {
     const projectId =
@@ -284,6 +290,10 @@ export class StructureRepository extends IStructureRepository {
           override?.hash ??
           raw.hash ??
           null);
+    const rev =
+      raw.type === 'DOC'
+        ? (raw.doc?.rev ?? override?.rev ?? raw.rev ?? null)
+        : null;
 
     return new ManuscriptNodeEntity({
       id: raw.id,
@@ -301,6 +311,7 @@ export class StructureRepository extends IStructureRepository {
       isRootDoc,
       sizeBytes,
       hash,
+      rev,
       sortOrder: raw.sortOrder,
       createdAt: raw.createdAt,
       updatedAt: raw.updatedAt,

@@ -186,17 +186,36 @@ export class ClsiAiTransformDto {
     enum: [
       'academic-tone',
       'make-concise',
+      'rewrite-academic',
+      'concise',
+      'expand',
       'fix-grammar',
       'translate-english',
+      'explain-latex',
       'custom',
     ],
   })
   @IsString()
+  @IsIn([
+    'academic-tone',
+    'make-concise',
+    'rewrite-academic',
+    'concise',
+    'expand',
+    'fix-grammar',
+    'translate-english',
+    'explain-latex',
+    'custom',
+  ])
   action!:
     | 'academic-tone'
     | 'make-concise'
+    | 'rewrite-academic'
+    | 'concise'
+    | 'expand'
     | 'fix-grammar'
     | 'translate-english'
+    | 'explain-latex'
     | 'custom';
 
   @ApiProperty({ description: 'Selected LaTeX/Markdown text to transform' })
@@ -224,6 +243,16 @@ export class ClsiAiTransformDto {
   @IsOptional()
   @IsString()
   documentTitle?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  spaceId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  pageId?: string;
 }
 
 export class ClsiAiFixErrorDto {
@@ -271,4 +300,14 @@ export class ClsiAiGenerateTableDto {
   @ApiProperty({ description: 'Natural language description of the table' })
   @IsString()
   prompt!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  spaceId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  pageId?: string;
 }

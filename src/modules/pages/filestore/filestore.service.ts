@@ -9,12 +9,12 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { isUuid } from '@/core';
-import { STORAGE_QUOTA_REPOSITORY } from '@/modules/storage/storage.tokens';
 import {
+  STORAGE_QUOTA_REPOSITORY,
   BlobService,
   ContentHash as PlatformContentHash,
-} from '@/modules/storage/core';
-import { IStorageQuotaRepository } from '@/modules/storage/drive';
+  IQuotaRepository,
+} from '@/modules/files';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { FilestoreRepository } from './filestore.repository';
 import {
@@ -39,7 +39,7 @@ export class FilestoreService {
     @Optional() private readonly blobService?: BlobService,
     @Optional()
     @Inject(STORAGE_QUOTA_REPOSITORY)
-    private readonly quotaRepo?: IStorageQuotaRepository,
+    private readonly quotaRepo?: IQuotaRepository,
   ) {}
 
   /**

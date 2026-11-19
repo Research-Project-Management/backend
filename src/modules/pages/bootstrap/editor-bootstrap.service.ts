@@ -475,6 +475,8 @@ export class EditorBootstrapService {
               fileId: null,
               isRootDoc: true,
               sizeBytes: rootRecord.sizeBytes || 0,
+              hash: rootRecord.hash ?? null,
+              rev: rootRecord.rev ?? 1,
               sortOrder: 0,
               createdAt:
                 rootRecord.createdAt instanceof Date
@@ -543,6 +545,8 @@ export class EditorBootstrapService {
       activeRecord.node?.path ||
       activeRecord.lastKnownPath ||
       (activeRecord as { path?: string }).path;
+    const activeHash =
+      (formatted as { hash?: string | null }).hash ?? activeRecord.hash ?? null;
     const activeDoc: EditorBootstrapActiveDocDto = {
       id: activeRecord.id,
       nodeId: activeRecord.node?.id ?? null,
@@ -554,10 +558,12 @@ export class EditorBootstrapService {
         mainFile: { id: rootRecord.id, title: mainFilePath },
         mainFileId: rootRecord.id,
         rootPageId: canonicalPageId,
+        hash: activeHash,
       },
       lines: Array.isArray(formatted.lines) ? formatted.lines : [],
       version: formatted.version ?? activeRecord.version ?? 1,
       rev: formatted.rev ?? activeRecord.rev ?? 1,
+      hash: activeHash,
       ranges: (formatted.ranges && typeof formatted.ranges === 'object'
         ? formatted.ranges
         : activeRecord.ranges || {}) as Record<string, unknown>,

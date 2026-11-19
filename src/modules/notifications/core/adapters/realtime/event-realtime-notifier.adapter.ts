@@ -28,8 +28,10 @@ export class EventRealtimeNotifierAdapter implements IRealtimeNotifierPort {
     notification: NotificationEntity,
     unreadCount: number,
   ): Promise<void> {
-    const payload = {
-      notification: notification.toPlain(),
+    const plain = notification.toPlain();
+    const payload: DispatchedNotificationPayload = {
+      ...plain,
+      notification: plain,
       unreadCount,
     };
 

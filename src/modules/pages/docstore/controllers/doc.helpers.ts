@@ -381,6 +381,11 @@ export async function formatPageByIdResponse(
       rootPageId: doc._id,
       version: doc.version,
       rev: doc.rev,
+      hash: (doc as { hash?: string | null }).hash ?? record.hash ?? null,
+      sizeBytes:
+        (doc as { sizeBytes?: number | null }).sizeBytes ??
+        record.sizeBytes ??
+        undefined,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     },
