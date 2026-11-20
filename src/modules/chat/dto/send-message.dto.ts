@@ -10,13 +10,13 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MessageType } from '@prisma/client';
 
 export class SendMessageDto {
-  @ApiProperty({
-    description: 'Message text content',
+  @ApiPropertyOptional({
+    description: 'Message text content (optional if attachments are provided)',
     example: 'Hello everyone, I have uploaded the updated draft!',
   })
   @IsString()
-  @IsNotEmpty({ message: 'Message content cannot be empty' })
-  content!: string;
+  @IsOptional()
+  content?: string;
 
   @ApiPropertyOptional({
     description: 'Message type',

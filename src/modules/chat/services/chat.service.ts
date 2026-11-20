@@ -536,18 +536,33 @@ export class ChatService {
     conversationId: string,
     senderId: string,
     dto: {
-      content: string;
+      content?: string;
       type?: MessageType;
       attachments?: unknown[];
       replyToId?: string;
     },
   ): Promise<CachedMessage> {
-    const cleanContent = dto.content.trim();
-    if (!cleanContent && (!dto.attachments || dto.attachments.length === 0)) {
+    const cleanContent = (dto.content || '').trim();
+    const hasAttachments = Boolean(
+      dto.attachments && dto.attachments.length > 0,
+    );
+    if (!cleanContent && !hasAttachments) {
       throw new BadRequestException('Message cannot be empty');
     }
 
     await this.verifyConversationAccess(conversationId, senderId);
+
+    // Determine message type if not explicitly supplied
+    let messageType = dto.type || MessageType.text;
+    if (!dto.type && hasAttachments) {
+      const allImages = (dto.attachments as any[]).every(
+        (att) =>
+          att?.type === 'image' ||
+          att?.mimeType?.startsWith('image/') ||
+          /\.(png|jpe?g|gif|webp|svg)$/i.test(att?.url || att?.name || ''),
+      );
+      messageType = allImages ? MessageType.image : MessageType.file;
+    }
 
     // Fetch sender profile for metadata
     const sender = await this.prisma.user.findUnique({
@@ -567,7 +582,7 @@ export class ChatService {
       data: {
         conversationId,
         senderId,
-        type: dto.type || MessageType.text,
+        type: messageType,
         content: cleanContent,
         attachments: (dto.attachments as Prisma.InputJsonValue) || [],
         replyToId: dto.replyToId || null,
@@ -587,7 +602,15 @@ export class ChatService {
     });
 
     // 2. Update conversation snippet for super fast conversation list loading
-    const snippet = cleanContent.slice(0, 150);
+    let snippet = cleanContent.slice(0, 150);
+    if (!snippet && hasAttachments) {
+      const firstAtt = (dto.attachments as any[])[0];
+      snippet =
+        messageType === MessageType.image
+          ? '[Image]'
+          : `[File: ${firstAtt?.name || 'Attachment'}]`;
+    }
+
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {

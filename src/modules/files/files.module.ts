@@ -64,6 +64,6 @@ const maintenanceWorkerProviders = shouldRunWorkerConsumers()
       useExisting: FilesFacade,
     },
   ],
-  exports: [FilesFacade, FILES_PORT],
+  exports: [FilesFacade, FILES_PORT, STORAGE_ADAPTER],
 })
 export class FilesModule {}

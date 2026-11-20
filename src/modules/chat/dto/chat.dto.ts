@@ -41,8 +41,8 @@ export class CreateProjectChannelDto {
 
 export class SendMessageDto {
   @IsString()
-  @IsNotEmpty()
-  content!: string;
+  @IsOptional()
+  content?: string;
 
   @IsEnum(MessageType)
   @IsOptional()
@@ -56,6 +56,8 @@ export class SendMessageDto {
   @IsOptional()
   replyToId?: string;
 }
+
+export * from './attachment.dto';
 
 export class AddReactionDto {
   @IsString()
