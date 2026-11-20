@@ -1,20 +1,15 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
-import { UserPresence, CursorPosition } from './types/presence.type';
-import { REDIS_KEYS } from '../core/realtime.constant';
+import { UserPresence, CursorPosition } from './presence.types';
+import { PAGES_REDIS_KEYS } from '../pages.constants';
 
 @Injectable()
-export class RoomStore {
-  private readonly logger = new Logger(RoomStore.name);
+export class RoomPresenceStore {
+  private readonly logger = new Logger(RoomPresenceStore.name);
 
-  // In-memory hot storage:
-  // socketId -> UserPresence
   private readonly sessions = new Map<string, UserPresence>();
-  // projectId -> Set<socketId>
   private readonly projectRooms = new Map<string, Set<string>>();
-  // `${projectId}:${docId}` -> Set<socketId>
   private readonly docRooms = new Map<string, Set<string>>();
-  // socketId -> last Redis cursor sync timestamp (ms)
   private readonly lastCursorRedisSync = new Map<string, number>();
   private static readonly CURSOR_REDIS_THROTTLE_MS = 2000;
 
@@ -49,8 +44,8 @@ export class RoomStore {
       hash = (hash << 5) - hash + userId.charCodeAt(i);
       hash |= 0;
     }
-    const index = Math.abs(hash) % RoomStore.COLOR_PALETTE.length;
-    return RoomStore.COLOR_PALETTE[index];
+    const index = Math.abs(hash) % RoomPresenceStore.COLOR_PALETTE.length;
+    return RoomPresenceStore.COLOR_PALETTE[index];
   }
 
   public getSession(socketId: string): UserPresence | null {
@@ -75,13 +70,13 @@ export class RoomStore {
         const client = this.redis!.getClient()!;
         await Promise.all([
           client.set(
-            REDIS_KEYS.presence(session.socketId),
+            PAGES_REDIS_KEYS.presence(session.socketId),
             JSON.stringify(session),
             'EX',
             86400,
           ),
           client.sadd(
-            REDIS_KEYS.projectRoom(session.spaceId),
+            PAGES_REDIS_KEYS.projectRoom(session.spaceId),
             session.socketId,
           ),
         ]);
@@ -116,8 +111,8 @@ export class RoomStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
-        const sessionKey = REDIS_KEYS.presence(socketId);
-        const projectKey = REDIS_KEYS.projectRoom(projectId);
+        const sessionKey = PAGES_REDIS_KEYS.presence(socketId);
+        const projectKey = PAGES_REDIS_KEYS.projectRoom(projectId);
 
         if (!activeDocId) {
           const raw = await client.get(sessionKey);
@@ -137,7 +132,10 @@ export class RoomStore {
         ];
         if (activeDocId) {
           tasks.push(
-            client.srem(REDIS_KEYS.docRoom(projectId, activeDocId), socketId),
+            client.srem(
+              PAGES_REDIS_KEYS.docRoom(projectId, activeDocId),
+              socketId,
+            ),
           );
         }
         await Promise.all(tasks);
@@ -153,14 +151,16 @@ export class RoomStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
-        const projectKey = REDIS_KEYS.projectRoom(projectId);
+        const projectKey = PAGES_REDIS_KEYS.projectRoom(projectId);
         const socketIds = await client.smembers(projectKey);
 
         if (!socketIds || socketIds.length === 0) {
           return [];
         }
 
-        const keys = socketIds.map((sId: string) => REDIS_KEYS.presence(sId));
+        const keys = socketIds.map((sId: string) =>
+          PAGES_REDIS_KEYS.presence(sId),
+        );
         const rawSessions = await client.mget(...keys);
 
         const results: UserPresence[] = [];
@@ -232,9 +232,9 @@ export class RoomStore {
       try {
         const client = this.redis!.getClient()!;
         await Promise.all([
-          client.sadd(REDIS_KEYS.docRoom(projectId, docId), socketId),
+          client.sadd(PAGES_REDIS_KEYS.docRoom(projectId, docId), socketId),
           client.set(
-            REDIS_KEYS.presence(socketId),
+            PAGES_REDIS_KEYS.presence(socketId),
             JSON.stringify(session),
             'EX',
             86400,
@@ -273,12 +273,12 @@ export class RoomStore {
       try {
         const client = this.redis!.getClient()!;
         const tasks: Promise<unknown>[] = [
-          client.srem(REDIS_KEYS.docRoom(projectId, docId), socketId),
+          client.srem(PAGES_REDIS_KEYS.docRoom(projectId, docId), socketId),
         ];
         if (session) {
           tasks.push(
             client.set(
-              REDIS_KEYS.presence(socketId),
+              PAGES_REDIS_KEYS.presence(socketId),
               JSON.stringify(session),
               'EX',
               86400,
@@ -299,14 +299,16 @@ export class RoomStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
-        const docKey = REDIS_KEYS.docRoom(projectId, docId);
+        const docKey = PAGES_REDIS_KEYS.docRoom(projectId, docId);
         const socketIds = await client.smembers(docKey);
 
         if (!socketIds || socketIds.length === 0) {
           return [];
         }
 
-        const keys = socketIds.map((sId: string) => REDIS_KEYS.presence(sId));
+        const keys = socketIds.map((sId: string) =>
+          PAGES_REDIS_KEYS.presence(sId),
+        );
         const rawSessions = await client.mget(...keys);
 
         const results: UserPresence[] = [];
@@ -383,12 +385,12 @@ export class RoomStore {
 
     if (this.isRedisActive()) {
       const lastSync = this.lastCursorRedisSync.get(socketId) ?? 0;
-      if (now - lastSync >= RoomStore.CURSOR_REDIS_THROTTLE_MS) {
+      if (now - lastSync >= RoomPresenceStore.CURSOR_REDIS_THROTTLE_MS) {
         this.lastCursorRedisSync.set(socketId, now);
         try {
           const client = this.redis!.getClient()!;
           await client.set(
-            REDIS_KEYS.presence(socketId),
+            PAGES_REDIS_KEYS.presence(socketId),
             JSON.stringify(session),
             'EX',
             86400,

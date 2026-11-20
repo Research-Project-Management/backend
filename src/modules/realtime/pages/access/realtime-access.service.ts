@@ -2,9 +2,9 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AccessService, Role, Permission } from '@/modules/project/access';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { PrismaService, isUuid } from '@/core';
-import { RealtimeConfigService } from '../core/realtime.config';
-import { WsAccessLevel } from '../core/ws-access.decorator';
-import { RealtimeServiceUnavailableException } from '../core/ws-errors';
+import { RealtimeConfigService } from '../../core/realtime.config';
+import { RealtimeServiceUnavailableException } from '../../core/ws-errors';
+import { WsAccessLevel } from './ws-access.decorator';
 
 export type RealtimeAccessDecision = 'allowed' | 'denied' | 'unavailable';
 
@@ -65,10 +65,6 @@ export class RealtimeAccessService {
     return `${projectId}:${userId}`;
   }
 
-  /**
-   * Evicts cached access decisions for a project, optionally scoped to a single user.
-   * Invoked upon receiving access revocation or role modification events (R-07).
-   */
   public evictCache(projectId: string, userId?: string): void {
     if (userId) {
       this.cache.delete(this.getCacheKey(projectId, userId));
@@ -82,10 +78,6 @@ export class RealtimeAccessService {
     }
   }
 
-  /**
-   * Resolves the user's realtime access permissions for a given project, leveraging
-   * a short-lived in-memory decision cache (default 30s) and failing closed on outages (R-04).
-   */
   public async getProjectAccess(
     projectId: string,
     userId: string,
@@ -267,7 +259,6 @@ export class RealtimeAccessService {
       };
 
       this.setCacheEntry(cacheKey, accessResult, now);
-
       return accessResult;
     } catch (err: unknown) {
       this.logger.error(
@@ -282,10 +273,6 @@ export class RealtimeAccessService {
     }
   }
 
-  /**
-   * Resolves canonical `(spaceId, pageId)` from a client-supplied room/project parameter
-   * (handling personal aliases, `Page.id`, `PageDoc.id`, `Project.id`, and `Space.id`).
-   */
   public async resolveCanonicalSpaceAndPage(
     rawId: string,
     userId: string,
@@ -341,9 +328,6 @@ export class RealtimeAccessService {
     return { spaceId: trimmed };
   }
 
-  /**
-   * Checks whether a user satisfies a required WsAccessLevel for a project.
-   */
   public async checkAccess(
     projectId: string,
     userId: string,
@@ -378,10 +362,6 @@ export class RealtimeAccessService {
     return 'denied';
   }
 
-  /**
-   * Validates that the requested document actually belongs to the specified project (space)
-   * and optional page scope, and is not soft-deleted. Prevents cross-project/cross-page IDOR.
-   */
   public async validateDocInProject(
     projectId: string,
     docId: string,

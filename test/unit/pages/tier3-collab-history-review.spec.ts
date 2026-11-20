@@ -7,8 +7,8 @@ import {
   validateSuggestionRange,
   formatSuggestionItemDto,
 } from '@/modules/pages/track-changes/services/review.helpers';
-import { YjsUpdateValidator } from '@/modules/realtime/pages/yjs-update-validator';
-import { YjsService } from '@/modules/realtime/pages/yjs.service';
+import { YjsUpdateValidator } from '@/modules/realtime/pages/yjs/yjs-update.validator';
+import { YjsService } from '@/modules/realtime/pages/yjs/yjs.service';
 import { RealtimeValidationFailedException } from '@/modules/realtime/core/ws-errors';
 import type { RealtimeConfigService } from '@/modules/realtime/core/realtime.config';
 import {

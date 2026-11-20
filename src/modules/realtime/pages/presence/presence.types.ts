@@ -25,6 +25,7 @@ export interface ClientSocketData {
   color?: string;
   avatar?: string;
   spaceId?: string | null;
+  pageId?: string;
   activeDocId?: string | null;
   authenticated: boolean;
 }

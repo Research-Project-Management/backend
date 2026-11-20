@@ -1,18 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as Y from 'yjs';
 import * as decoding from 'lib0/decoding';
-import { RealtimeValidationFailedException } from '../core/ws-errors';
+import { RealtimeValidationFailedException } from '../../core/ws-errors';
 
 @Injectable()
 export class YjsUpdateValidator {
   private readonly logger = new Logger(YjsUpdateValidator.name);
 
-  /**
-   * Strictly validates incoming sync data:
-   * 1. Requires binary payload (Uint8Array or Buffer) - rejects base64 string, arrays, or objects.
-   * 2. Enforces maximum byte cap (default 512 KiB).
-   * 3. Verifies that the frame is decodeable without corruption (RT-09).
-   */
   public validateSyncPayload(
     data: unknown,
     maxSizeBytes: number = 512 * 1024,
@@ -40,10 +34,8 @@ export class YjsUpdateValidator {
       );
     }
 
-    // Verify basic lib0 frame decodability
     try {
       const decoder = decoding.createDecoder(bytes);
-      // Attempting to read if non-empty to ensure decoder doesn't immediately crash
       if (bytes.byteLength > 0) {
         decoding.hasContent(decoder);
       }
@@ -59,9 +51,6 @@ export class YjsUpdateValidator {
     return bytes;
   }
 
-  /**
-   * Pre-validates whether applying an update would push the document beyond size limits.
-   */
   public validatePreApplySize(
     doc: Y.Doc,
     incomingUpdateBytes: number,
@@ -81,16 +70,11 @@ export class YjsUpdateValidator {
     }
   }
 
-  /**
-   * Asserts that the document size following an update application remains within
-   * the maximum allowed boundary (R-06).
-   */
   public validatePostApplySize(
     doc: Y.Doc,
     maxDocumentSizeBytes: number = 20 * 1024 * 1024,
     approxEncodedBytes: number = 0,
   ): void {
-    // Fast path: skip full serialization only if both visible text AND cumulative CRDT bytes are well below cap
     if (maxDocumentSizeBytes > 1024) {
       let approxChars = 0;
       for (const item of doc.share.values()) {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 export interface RealtimeStats {
   status: 'ok' | 'degraded';
@@ -7,8 +7,7 @@ export interface RealtimeStats {
 }
 
 @Injectable()
-export class CoreService {
-  private readonly logger = new Logger(CoreService.name);
+export class RealtimeHealthService {
   private readonly startTime = Date.now();
 
   public getStats(): RealtimeStats {

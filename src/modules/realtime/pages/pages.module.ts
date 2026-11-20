@@ -5,16 +5,17 @@ import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { LiveCollaborationPort } from '@/modules/pages/core';
 
 import { RealtimeCoreModule } from '../core/core.module';
-import { WsAccessGuard } from '../core/ws-access.guard';
+import { WsAccessGuard } from './access/ws-access.guard';
+import { RealtimeAccessService } from './access/realtime-access.service';
+import { AccessRevocationListener } from './access/access-revocation.listener';
+import { RoomPresenceStore } from './presence/room-presence.store';
+import { YjsUpdateValidator } from './yjs/yjs-update.validator';
+import { YjsService } from './yjs/yjs.service';
+import { PagesChatService } from './chat/pages-chat.service';
+import { LiveCollaborationAdapter } from './bridges/live-collab.adapter';
+import { PagesDomainEventsListener } from './bridges/pages-domain-events.listener';
+import { PagesSessionService } from './pages-session.service';
 import { PagesGateway } from './pages.gateway';
-import { PagesService } from './pages.service';
-import { RealtimeAccessService } from './realtime-access.service';
-import { RoomStore } from './room.store';
-import { YjsService } from './yjs.service';
-import { YjsUpdateValidator } from './yjs-update-validator';
-import { ChatService } from './chat.service';
-import { LiveCollaborationProvider } from './live-collab.provider';
-import { AccessRevocationListener } from './access-revocation.listener';
 
 @Module({
   imports: [
@@ -26,31 +27,31 @@ import { AccessRevocationListener } from './access-revocation.listener';
   ],
   providers: [
     PagesGateway,
-    PagesService,
+    PagesSessionService,
     RealtimeAccessService,
     WsAccessGuard,
     AccessRevocationListener,
-    RoomStore,
+    RoomPresenceStore,
     YjsUpdateValidator,
     YjsService,
-    ChatService,
-    LiveCollaborationProvider,
+    PagesChatService,
+    LiveCollaborationAdapter,
+    PagesDomainEventsListener,
     {
       provide: LiveCollaborationPort,
-      useExisting: LiveCollaborationProvider,
+      useExisting: LiveCollaborationAdapter,
     },
   ],
   exports: [
     PagesGateway,
-    PagesService,
+    PagesSessionService,
     RealtimeAccessService,
     WsAccessGuard,
-    RoomStore,
+    RoomPresenceStore,
     YjsUpdateValidator,
     YjsService,
-    ChatService,
+    PagesChatService,
     LiveCollaborationPort,
   ],
 })
 export class RealtimePagesModule {}
-export { RealtimePagesModule as PagesModule };

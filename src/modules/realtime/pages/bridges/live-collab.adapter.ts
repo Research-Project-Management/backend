@@ -1,20 +1,19 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   LiveCollaborationPort,
   LivePresenceUser,
 } from '@/modules/pages/core/ports/live-collaboration.port';
-import { YjsService } from './yjs.service';
-import { RoomStore } from './room.store';
-import { PagesGateway } from './pages.gateway';
-import { REALTIME_EVENTS } from '../core/realtime.constant';
+import { PAGES_EVENTS, PAGES_ROOMS } from '../pages.constants';
+import { YjsService } from '../yjs/yjs.service';
+import { RoomPresenceStore } from '../presence/room-presence.store';
+import type { ClientSocketData } from '../presence/presence.types';
+import { PagesGateway } from '../pages.gateway';
 
 @Injectable()
-export class LiveCollaborationProvider extends LiveCollaborationPort {
-  private readonly logger = new Logger(LiveCollaborationProvider.name);
-
+export class LiveCollaborationAdapter extends LiveCollaborationPort {
   constructor(
     private readonly yjs: YjsService,
-    private readonly rooms: RoomStore,
+    private readonly rooms: RoomPresenceStore,
     @Optional()
     private readonly gateway?: PagesGateway,
   ) {
@@ -34,9 +33,9 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
     if (!active) return false;
     if (frame && this.gateway?.server) {
       this.gateway.server
-        .to(`doc:${projectId}:${docId}`)
-        .emit(REALTIME_EVENTS.YJS_SYNC_UPDATE, {
-          projectId,
+        .to(PAGES_ROOMS.doc(projectId, docId))
+        .emit(PAGES_EVENTS.YJS_SYNC_UPDATE, {
+          spaceId: projectId,
           docId,
           data: frame,
         });
@@ -81,8 +80,8 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
 
   async evictDoc(projectId: string, docId: string): Promise<void> {
     if (this.gateway?.server) {
-      const room = `doc:${projectId}:${docId}`;
-      this.gateway.server.to(room).emit('doc:evicted', {
+      const room = PAGES_ROOMS.doc(projectId, docId);
+      this.gateway.server.to(room).emit(PAGES_EVENTS.DOC_EVICTED, {
         projectId,
         spaceId: projectId,
         docId,
@@ -91,8 +90,9 @@ export class LiveCollaborationProvider extends LiveCollaborationPort {
         try {
           const sockets = await this.gateway.server.in(room).fetchSockets();
           for (const socket of sockets) {
-            if (socket.data?.activeDocId === docId) {
-              socket.data.activeDocId = null;
+            const socketData = socket.data as ClientSocketData | undefined;
+            if (socketData?.activeDocId === docId) {
+              socketData.activeDocId = null;
             }
             socket.leave(room);
             await this.rooms

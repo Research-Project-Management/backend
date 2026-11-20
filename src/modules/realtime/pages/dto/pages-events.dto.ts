@@ -3,12 +3,9 @@ import {
   IsNotEmpty,
   IsInt,
   IsOptional,
-  IsArray,
   ValidateNested,
   Min,
-  Max,
   MaxLength,
-  ArrayMaxSize,
   IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -39,54 +36,6 @@ export class LeaveDocDto {
   @IsUUID()
   @IsNotEmpty()
   docId!: string;
-}
-
-export class LineSpliceDto {
-  @IsInt()
-  @Min(0)
-  startLine!: number;
-
-  @IsInt()
-  @Min(0)
-  deleteCount!: number;
-
-  @IsArray()
-  @IsString({ each: true })
-  @ArrayMaxSize(2000)
-  @MaxLength(20000, { each: true })
-  newLines!: string[];
-}
-
-export class SendUpdateDto {
-  @IsString()
-  @IsNotEmpty()
-  spaceId!: string;
-
-  @IsUUID()
-  @IsNotEmpty()
-  docId!: string;
-
-  @IsInt()
-  @Min(0)
-  clientRev!: number;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  @ArrayMaxSize(2000)
-  @MaxLength(20000, { each: true })
-  lines?: string[];
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => LineSpliceDto)
-  splice?: LineSpliceDto;
-
-  @IsOptional()
-  @IsInt()
-  @Min(100)
-  @Max(10000)
-  debounceMs?: number;
 }
 
 export class CursorPointDto {

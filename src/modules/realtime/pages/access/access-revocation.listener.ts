@@ -1,11 +1,14 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import type { RemoteSocket, Server } from 'socket.io';
+import type { DefaultEventsMap } from 'socket.io';
+import { PAGES_EVENTS, PAGES_ROOMS } from '../pages.constants';
+import { RoomPresenceStore } from '../presence/room-presence.store';
+import { PresenceMapper } from '../presence/presence.mapper';
+import type { ClientSocketData } from '../presence/presence.types';
+import { YjsService } from '../yjs/yjs.service';
+import { PagesGateway } from '../pages.gateway';
 import { RealtimeAccessService } from './realtime-access.service';
-import { PagesGateway } from './pages.gateway';
-import { RoomStore } from './room.store';
-import { PresenceMapper } from './presence.mapper';
-import { YjsService } from './yjs.service';
-import { REALTIME_EVENTS } from '../core/realtime.constant';
 
 export interface MemberRemovedPayload {
   projectId?: string;
@@ -26,6 +29,8 @@ export interface MemberUpdatedPayload {
   metadata?: { targetId?: string; oldRole?: string; newRole?: string };
 }
 
+type ManagedSocket = RemoteSocket<DefaultEventsMap, ClientSocketData>;
+
 @Injectable()
 export class AccessRevocationListener {
   private readonly logger = new Logger(AccessRevocationListener.name);
@@ -33,9 +38,23 @@ export class AccessRevocationListener {
   constructor(
     private readonly realtimeAccess: RealtimeAccessService,
     private readonly gateway: PagesGateway,
-    @Optional() private readonly roomStore?: RoomStore,
+    @Optional() private readonly roomStore?: RoomPresenceStore,
     @Optional() private readonly yjs?: YjsService,
   ) {}
+
+  private async fetchProjectSockets(
+    server: Server,
+    spaceId: string,
+  ): Promise<ManagedSocket[]> {
+    const projectRoom = PAGES_ROOMS.project(spaceId);
+    if (typeof server.in === 'function') {
+      return (await server.in(projectRoom).fetchSockets()) as ManagedSocket[];
+    }
+    if (typeof server.fetchSockets === 'function') {
+      return (await server.fetchSockets()) as ManagedSocket[];
+    }
+    return [];
+  }
 
   @OnEvent('project.member_removed')
   public async handleMemberRemoved(event: MemberRemovedPayload): Promise<void> {
@@ -50,31 +69,26 @@ export class AccessRevocationListener {
       `Handling project.member_removed for user ${userId} in project ${projectId}`,
     );
 
-    // 1. Evict cached access decision
     this.realtimeAccess.evictCache(projectId, userId);
 
-    // 2. Disconnect/evict matching live sockets from project and document rooms
     try {
       const server = this.gateway?.server;
-      if (!server || typeof server.fetchSockets !== 'function') {
-        return;
-      }
+      if (!server) return;
 
-      const sockets = await server.fetchSockets();
+      const sockets = await this.fetchProjectSockets(server, projectId);
       for (const socket of sockets) {
         const clientUserId = socket.data?.userId;
         const clientSpaceId = socket.data?.spaceId;
 
         if (clientUserId === userId && clientSpaceId === projectId) {
-          // Notify client of revocation (RT-08 / SC-007)
-          socket.emit('access:revoked', { spaceId: projectId });
+          socket.emit(PAGES_EVENTS.ACCESS_REVOKED, { spaceId: projectId });
 
           const activeDocId = socket.data?.activeDocId;
           if (activeDocId) {
             this.gateway.broadcastToDoc?.(
               projectId,
               activeDocId,
-              REALTIME_EVENTS.USER_LEFT_DOC,
+              PAGES_EVENTS.USER_LEFT_DOC,
               PresenceMapper.toLeavePresence(userId, socket.id),
               socket.id,
             );
@@ -82,7 +96,7 @@ export class AccessRevocationListener {
 
           this.gateway.broadcastToProject?.(
             projectId,
-            REALTIME_EVENTS.USER_LEFT_PROJECT,
+            PAGES_EVENTS.USER_LEFT_PROJECT,
             PresenceMapper.toLeavePresence(userId, socket.id),
             socket.id,
           );
@@ -93,19 +107,17 @@ export class AccessRevocationListener {
               .catch(() => null);
           }
 
-          // Leave rooms
-          socket.leave(`project:${projectId}`);
+          socket.leave(PAGES_ROOMS.project(projectId));
           if (activeDocId) {
-            socket.leave(`doc:${projectId}:${activeDocId}`);
+            socket.leave(PAGES_ROOMS.doc(projectId, activeDocId));
           }
 
-          // Clear joined context
           socket.data.spaceId = null;
           socket.data.activeDocId = null;
 
           if (activeDocId && this.yjs) {
             const docRoom = server.sockets?.adapter?.rooms?.get(
-              `doc:${projectId}:${activeDocId}`,
+              PAGES_ROOMS.doc(projectId, activeDocId),
             );
             if (!docRoom || docRoom.size === 0) {
               await this.yjs.evictDoc(projectId, activeDocId).catch(() => null);
@@ -142,15 +154,12 @@ export class AccessRevocationListener {
       `Handling project.member_updated for user ${userId} in project ${projectId} (newRole: ${newRole ?? 'unspecified'})`,
     );
 
-    // Evict cached access decision so the next write/read operation re-evaluates permissions immediately (RT-10)
     this.realtimeAccess.evictCache(projectId, userId);
 
-    // Notify live sockets of the updated role so the frontend immediately switches to read-only if downgraded to reviewer
     try {
       const server = this.gateway?.server;
-      if (!server || typeof server.fetchSockets !== 'function') {
-        return;
-      }
+      if (!server) return;
+
       const freshAccess =
         typeof this.realtimeAccess.getProjectAccess === 'function'
           ? await this.realtimeAccess
@@ -166,13 +175,13 @@ export class AccessRevocationListener {
             : undefined;
       const resolvedRole = newRole ?? freshAccess?.role;
 
-      const sockets = await server.fetchSockets();
+      const sockets = await this.fetchProjectSockets(server, projectId);
       for (const socket of sockets) {
         if (
           socket.data?.userId === userId &&
           socket.data?.spaceId === projectId
         ) {
-          socket.emit('access:updated', {
+          socket.emit(PAGES_EVENTS.ACCESS_UPDATED, {
             spaceId: projectId,
             userId,
             role: resolvedRole,
@@ -211,18 +220,18 @@ export class AccessRevocationListener {
     if (!projectId) return;
     try {
       const server = this.gateway?.server;
-      if (server && typeof server.fetchSockets === 'function') {
-        const sockets = await server.fetchSockets();
+      if (server) {
+        const sockets = await this.fetchProjectSockets(server, projectId);
         for (const socket of sockets) {
           if (socket.data?.spaceId === projectId) {
-            socket.emit('access:revoked', {
+            socket.emit(PAGES_EVENTS.ACCESS_REVOKED, {
               spaceId: projectId,
               reason: 'project_deleted',
             });
             const docId = socket.data?.activeDocId;
-            socket.leave(`project:${projectId}`);
+            socket.leave(PAGES_ROOMS.project(projectId));
             if (docId) {
-              socket.leave(`doc:${projectId}:${docId}`);
+              socket.leave(PAGES_ROOMS.doc(projectId, docId));
             }
             socket.data.spaceId = null;
             socket.data.activeDocId = null;

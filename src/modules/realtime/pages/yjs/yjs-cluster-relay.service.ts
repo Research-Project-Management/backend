@@ -1,8 +1,3 @@
-/**
- * modules/realtime/pages/yjs-cluster-relay.helper.ts
- * Redis binary snapshot persistence and multi-instance cluster pub/sub relay helpers for YjsService.
- */
-
 import { Logger } from '@nestjs/common';
 import type { Server } from 'socket.io';
 import * as Y from 'yjs';
@@ -10,54 +5,20 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { RedisCacheService } from '@/core';
 import { YjsCursorDiffEngine } from './yjs-cursor-diff.engine';
-import { REALTIME_EVENTS } from '../core/realtime.constant';
+import { PAGES_EVENTS, PAGES_ROOMS } from '../pages.constants';
+import {
+  type ActiveDocSession,
+  type YjsClusterRelayMessage,
+  YJS_CLUSTER_CHANNEL,
+  YJS_REDIS_SNAPSHOT_TTL_SECONDS,
+  yjsDocKey,
+  yjsRedisBinaryKey,
+  yjsRedisMetaKey,
+} from './yjs.types';
 
-export interface ActiveDocSession {
-  doc: Y.Doc;
-  yText: Y.Text;
-  projectId: string;
-  docId: string;
-  flushTimeout?: NodeJS.Timeout;
-  lastActiveAt: number;
-  firstUnflushedAt?: number;
-  currentVersion?: number;
-  lastFlushedRev?: number;
-  lastFlushedText?: string;
-  approxEncodedBytes?: number;
-}
-
-export interface SyncMessageResult {
-  reply?: Buffer | null;
-  broadcastUpdate?: Buffer | null;
-  msgType?: number;
-}
-
-export interface YjsClusterRelayMessage {
-  instanceId: string;
-  type: 'yjs-update' | 'external-text' | 'evict';
-  projectId: string;
-  docId: string;
-  updateBase64?: string;
-  text?: string;
-}
-
-export const YJS_CLUSTER_CHANNEL = 'manuscript:crdt:cluster';
-export const YJS_REDIS_SNAPSHOT_TTL_SECONDS = 7 * 24 * 3600;
-
-export function yjsDocKey(projectId: string, docId: string): string {
-  return `${projectId}:${docId}`;
-}
-
-export function yjsRedisBinaryKey(projectId: string, docId: string): string {
-  return `manuscript:crdt:bin:${projectId}:${docId}`;
-}
-
-export function yjsRedisMetaKey(projectId: string, docId: string): string {
-  return `manuscript:crdt:meta:${projectId}:${docId}`;
-}
-
-export function yjsRedisFlushLockKey(projectId: string, docId: string): string {
-  return `lock:yjs:flush:${projectId}:${docId}`;
+export interface YjsRelaySubscriber {
+  quit?: () => Promise<unknown>;
+  disconnect?: () => void;
 }
 
 export async function deleteRedisSnapshotHelper(
@@ -108,7 +69,7 @@ export async function initRedisClusterRelayHelper(
   redis: RedisCacheService | undefined,
   logger: Logger,
   onRawMessage: (raw: string) => void,
-): Promise<any> {
+): Promise<YjsRelaySubscriber | null> {
   if (!redis || !redis.isReady()) return null;
   const baseClient = redis.getClient?.();
   if (!baseClient || typeof baseClient.duplicate !== 'function') return null;
@@ -217,8 +178,8 @@ export function handleClusterRelayMessageHelper(
       const frame = Buffer.from(encoding.toUint8Array(encoder));
       if (ctx.server) {
         ctx.server
-          .to(`doc:${msg.projectId}:${msg.docId}`)
-          .emit(REALTIME_EVENTS.YJS_SYNC_UPDATE, {
+          .to(PAGES_ROOMS.doc(msg.projectId, msg.docId))
+          .emit(PAGES_EVENTS.YJS_SYNC_UPDATE, {
             spaceId: msg.projectId,
             docId: msg.docId,
             data: frame,

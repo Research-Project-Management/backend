@@ -1,5 +1,4 @@
 /**
- * modules/realtime/pages/domain/three-way-merge.ts
  * Pure line-based three-way merge algorithm for resolving OCC conflicts between
  * Docstore revisions and live Yjs CRDT buffers.
  */
@@ -56,7 +55,6 @@ export function mergeThreeWayText(
     return [...head, ...rMid, ...tail].join('\n');
   }
 
-  // Disjoint edit separation when one side edited strictly the prefix or suffix of mid
   let rLeadSame = 0;
   while (
     rLeadSame < bMid.length &&

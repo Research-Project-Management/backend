@@ -1,29 +1,26 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
-import { RoomStore } from './pages/room.store';
-import { YjsService } from './pages/yjs.service';
+import { Injectable, Optional } from '@nestjs/common';
+import {
+  RealtimeHealthService,
+  RealtimeStats,
+} from './core/realtime-health.service';
+import { PAGES_EVENTS } from './pages/pages.constants';
 import { PagesGateway } from './pages/pages.gateway';
-import { CoreService, RealtimeStats } from './core/core.service';
-import { UserPresence } from './pages/types/presence.type';
-import { REALTIME_EVENTS } from './core/realtime.constant';
+import { RoomPresenceStore } from './pages/presence/room-presence.store';
+import { UserPresence } from './pages/presence/presence.types';
+import { YjsService } from './pages/yjs/yjs.service';
 
 @Injectable()
 export class RealtimeFacade {
-  private readonly logger = new Logger(RealtimeFacade.name);
-
   constructor(
-    private readonly roomStore: RoomStore,
-    @Optional() private readonly coreService?: CoreService,
+    private readonly roomStore: RoomPresenceStore,
+    @Optional() private readonly healthService?: RealtimeHealthService,
     @Optional() private readonly yjs?: YjsService,
-    @Optional() private readonly PagesGateway?: PagesGateway,
+    @Optional() private readonly pagesGateway?: PagesGateway,
   ) {}
 
-  /**
-   * Health and runtime stats for realtime engine.
-   */
   public getStats(): RealtimeStats {
-    if (this.coreService) {
-      return this.coreService.getStats();
+    if (this.healthService) {
+      return this.healthService.getStats();
     }
     return {
       status: 'ok',
@@ -32,9 +29,6 @@ export class RealtimeFacade {
     };
   }
 
-  /**
-   * Flushes all active Y.Doc documents for a project to storage.
-   */
   public async flushProject(projectId: string): Promise<number> {
     if (this.yjs) {
       return await this.yjs.flushProject(projectId);
@@ -42,29 +36,17 @@ export class RealtimeFacade {
     return 0;
   }
 
-  /**
-   * Pre-Compile Flush Barrier:
-   * Synchronously flushes all in-memory Y.Doc sessions for a project to Docstore/Redis before CLSI compile begins.
-   */
   public async flushProjectBeforeCompile(projectId: string): Promise<number> {
     return await this.flushProject(projectId);
   }
 
-  /**
-   * Structure Subsystem Integration:
-   * Broadcasts file tree mutations (node created, renamed, moved, deleted) to all active project peers.
-   */
   public broadcastFileTreeChange(
     projectId: string,
     change: { action: string; node: unknown },
   ): void {
-    this.broadcastEvent(projectId, REALTIME_EVENTS.FILE_TREE_UPDATE, change);
+    this.broadcastEvent(projectId, PAGES_EVENTS.FILE_TREE_UPDATE, change);
   }
 
-  /**
-   * CLSI Subsystem Integration:
-   * Broadcasts LaTeX compilation progress, logs, and PDF artifacts to IDE preview clients.
-   */
   public broadcastCompileProgress(
     projectId: string,
     progress: {
@@ -79,13 +61,9 @@ export class RealtimeFacade {
       logArtifactUrl?: string;
     },
   ): void {
-    this.broadcastEvent(projectId, REALTIME_EVENTS.COMPILE_PROGRESS, progress);
+    this.broadcastEvent(projectId, PAGES_EVENTS.COMPILE_PROGRESS, progress);
   }
 
-  /**
-   * Project History Subsystem Integration:
-   * Broadcasts new version snapshot creation or label assignment.
-   */
   public broadcastSnapshotCreated(
     projectId: string,
     snapshot: {
@@ -94,78 +72,25 @@ export class RealtimeFacade {
       label?: string | null;
     },
   ): void {
-    this.broadcastEvent(
-      projectId,
-      REALTIME_EVENTS.HISTORY_NEW_VERSION,
-      snapshot,
-    );
+    this.broadcastEvent(projectId, PAGES_EVENTS.HISTORY_NEW_VERSION, snapshot);
   }
 
-  /**
-   * Generic project-wide event dispatch.
-   */
   public broadcastEvent(
     projectId: string,
     event: string,
     payload: unknown,
   ): void {
-    if (this.PagesGateway) {
-      this.PagesGateway.broadcastToProject(projectId, event, payload);
-    }
+    this.pagesGateway?.broadcastToProject(projectId, event, payload);
   }
 
-  /**
-   * Queries active collaborator presence in a project.
-   */
   public async getProjectPresence(projectId: string): Promise<UserPresence[]> {
     return await this.roomStore.getProjectSessions(projectId);
   }
 
-  /**
-   * Queries active collaborator presence in a specific document.
-   */
   public async getDocPresence(
     projectId: string,
     docId: string,
   ): Promise<UserPresence[]> {
     return await this.roomStore.getDocSessions(projectId, docId);
-  }
-
-  /**
-   * Decoupled Event Listener: Manuscripts Track Changes & Comments
-   */
-  @OnEvent('manuscripts.track-changes.event')
-  public handleTrackChangesEvent(payload: {
-    projectId: string;
-    eventName: string;
-    data: unknown;
-  }): void {
-    if (!payload?.projectId || !payload?.eventName) return;
-    this.broadcastEvent(payload.projectId, payload.eventName, payload.data);
-  }
-
-  /**
-   * Decoupled Event Listener: Manuscripts File Tree Changes
-   */
-  @OnEvent('manuscripts.file-tree.change')
-  public handleFileTreeChangeEvent(payload: {
-    projectId: string;
-    change: { action: string; node: unknown };
-  }): void {
-    if (!payload?.projectId || !payload?.change) return;
-    this.broadcastFileTreeChange(payload.projectId, payload.change);
-  }
-
-  /**
-   * Decoupled Event Listener: Manuscripts Generic Project Event
-   */
-  @OnEvent('manuscripts.project.event')
-  public handleProjectEvent(payload: {
-    projectId: string;
-    event: string;
-    payload: unknown;
-  }): void {
-    if (!payload?.projectId || !payload?.event) return;
-    this.broadcastEvent(payload.projectId, payload.event, payload.payload);
   }
 }

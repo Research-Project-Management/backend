@@ -11,9 +11,6 @@ export class PresenceMapper {
   private static readonly COLOR_HEX_REGEX =
     /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
-  /**
-   * Sanitizes color value to valid hex code or fallback.
-   */
   public static sanitizeColor(color?: string | null): string {
     if (!color || typeof color !== 'string') {
       return PresenceMapper.DEFAULT_COLOR;
@@ -24,9 +21,6 @@ export class PresenceMapper {
       : PresenceMapper.DEFAULT_COLOR;
   }
 
-  /**
-   * Sanitizes avatar URL: trims, enforces length cap (1,000 chars), ensures http/https or data URL.
-   */
   public static sanitizeAvatar(avatar?: string | null): string | undefined {
     if (!avatar || typeof avatar !== 'string') {
       return undefined;
@@ -45,10 +39,6 @@ export class PresenceMapper {
     return undefined;
   }
 
-  /**
-   * Maps a socket data object to the public presence contract (Section 7).
-   * Strips authentication flag, project/document internals, and extra metadata.
-   */
   public static toPublicPresence(
     data: {
       userId?: string;
@@ -67,9 +57,6 @@ export class PresenceMapper {
     };
   }
 
-  /**
-   * Maps a leave presence event payload.
-   */
   public static toLeavePresence(
     userId: string,
     socketId: string,

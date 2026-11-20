@@ -1,8 +1,3 @@
-/**
- * manuscripts/yjs.service.ts
- * Real-time Binary Yjs CRDT Synchronization Engine (Overleaf/Yjs Parity).
- */
-
 import {
   Injectable,
   Logger,
@@ -15,35 +10,37 @@ import { randomUUID } from 'node:crypto';
 import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
-import * as decoding from 'lib0/decoding';
 
 import { RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { YjsUpdateValidator } from './yjs-update-validator';
+import { RealtimeConfigService } from '../../core/realtime.config';
+import { YjsUpdateValidator } from './yjs-update.validator';
 import {
   YjsCursorDiffEngine,
   type YjsCursorPreservingEdit,
 } from './yjs-cursor-diff.engine';
-import { RealtimeConfigService } from '../core/realtime.config';
-import { RealtimeException } from '../core/ws-errors';
 import {
   type ActiveDocSession,
   type SyncMessageResult,
   type YjsClusterRelayMessage,
+  yjsDocKey,
+  yjsRedisBinaryKey,
+} from './yjs.types';
+import {
+  type YjsRelaySubscriber,
   deleteRedisSnapshotHelper,
   handleClusterRelayMessageHelper,
   initRedisClusterRelayHelper,
   publishClusterRelayHelper,
   saveBinaryToRedisHelper,
-  yjsDocKey,
-  yjsRedisBinaryKey,
-} from './yjs-cluster-relay.helper';
+} from './yjs-cluster-relay.service';
 import {
   type YjsPersistenceContext,
   evictDocHelper,
   executeFlushDocHelper,
   hydrateOrInitYDocSessionHelper,
-} from './yjs-persistence-flusher.helper';
+} from './yjs-persistence.service';
+import { YjsSyncProtocol } from './yjs-sync.protocol';
 
 export type { ActiveDocSession, SyncMessageResult, YjsClusterRelayMessage };
 
@@ -51,15 +48,10 @@ export type { ActiveDocSession, SyncMessageResult, YjsClusterRelayMessage };
 export class YjsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(YjsService.name);
   public readonly instanceId = randomUUID();
-  private pubSubSubscriber: any = null;
+  private pubSubSubscriber: YjsRelaySubscriber | null = null;
 
-  // Active in-memory documents: `${projectId}:${docId}` -> ActiveDocSession
   private readonly activeDocs = new Map<string, ActiveDocSession>();
-
-  // Secondary Index: projectId -> Set<docKey> for O(D_project) project-scoped flush
   private readonly projectDocKeys = new Map<string, Set<string>>();
-
-  // Single-Flight Request Coalescing Map
   private readonly inFlightDocInits = new Map<
     string,
     Promise<ActiveDocSession>
@@ -68,12 +60,13 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
 
   private readonly FLUSH_DEBOUNCE_MS = 2000;
   private readonly MAX_FLUSH_DELAY_MS = 10000;
-
   private readonly IDLE_THRESHOLD_MS = 15 * 60 * 1000;
   private readonly MAX_ACTIVE_DOCS = 2000;
   private readonly SWEEP_INTERVAL_MS = 5 * 60 * 1000;
   private sweepTimer: NodeJS.Timeout | null = null;
+
   private readonly validator: YjsUpdateValidator;
+  private readonly syncProtocol: YjsSyncProtocol;
   private server: Server | null = null;
 
   constructor(
@@ -83,6 +76,11 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly config?: RealtimeConfigService,
   ) {
     this.validator = validator ?? new YjsUpdateValidator();
+    this.syncProtocol = new YjsSyncProtocol(
+      this.validator,
+      this.logger,
+      this.config,
+    );
     this.startIdleSweeper();
   }
 
@@ -112,12 +110,12 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
   private startIdleSweeper(): void {
     this.sweepTimer = setInterval(() => {
       this.sweepIdleDocs().catch((err) => {
-        this.logger.warn(`Error during Y.Doc idle sweep: ${err?.message}`);
+        this.logger.warn(
+          `Error during Y.Doc idle sweep: ${(err as Error)?.message}`,
+        );
       });
     }, this.SWEEP_INTERVAL_MS);
-    if (this.sweepTimer && typeof this.sweepTimer.unref === 'function') {
-      this.sweepTimer.unref();
-    }
+    this.sweepTimer.unref?.();
   }
 
   public async sweepIdleDocs(): Promise<number> {
@@ -137,7 +135,6 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // Capacity overflow protection: evict least recently active docs if exceeding MAX_ACTIVE_DOCS
     if (this.activeDocs.size > this.MAX_ACTIVE_DOCS) {
       const sorted = [...this.activeDocs.values()].sort(
         (a, b) => a.lastActiveAt - b.lastActiveAt,
@@ -259,39 +256,6 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     return initPromise;
   }
 
-  private assertPostApplySizeBeforeMutation(
-    session: ActiveDocSession,
-    applyAction: (targetDoc: Y.Doc) => void,
-    incomingBytes: number = 0,
-  ): void {
-    const doc = session.doc;
-    const maxDocSize =
-      this.config?.getMaxDocumentSizeBytes() ?? 20 * 1024 * 1024;
-    let approxChars = 0;
-    for (const item of doc.share.values()) {
-      const anyItem = item as unknown as { length?: number };
-      if (typeof anyItem?.length === 'number') {
-        approxChars += anyItem.length;
-      }
-    }
-    const approxCumulative = (session.approxEncodedBytes ?? 0) + incomingBytes;
-    if (
-      maxDocSize <= 1024 ||
-      approxChars * 4 + approxCumulative > maxDocSize / 2
-    ) {
-      const tempDoc = new Y.Doc();
-      tempDoc.getText('latex');
-      Y.applyUpdate(tempDoc, Y.encodeStateAsUpdate(doc));
-      applyAction(tempDoc);
-      this.validator.validatePostApplySize(
-        tempDoc,
-        maxDocSize,
-        approxCumulative,
-      );
-      tempDoc.destroy();
-    }
-  }
-
   public async handleSyncMessage(
     projectId: string,
     docId: string,
@@ -299,84 +263,13 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     origin: string,
   ): Promise<SyncMessageResult> {
     const session = await this.getOrCreateDoc(projectId, docId);
-    const rawBytes = this.normalizeToUint8Array(data);
-
-    if (!rawBytes || rawBytes.length === 0) {
-      return { reply: null, broadcastUpdate: null };
-    }
-
-    try {
-      const peekDec = decoding.createDecoder(rawBytes);
-      const peekMsgType = decoding.readVarUint(peekDec);
-      if (
-        peekMsgType === syncProtocol.messageYjsUpdate ||
-        peekMsgType === syncProtocol.messageYjsSyncStep2
-      ) {
-        this.validator.validatePreApplySize(
-          session.doc,
-          rawBytes.byteLength,
-          this.config?.getMaxDocumentSizeBytes(),
-        );
-        this.assertPostApplySizeBeforeMutation(
-          session,
-          (tempDoc) => {
-            const tempDec = decoding.createDecoder(rawBytes);
-            const tempEnc = encoding.createEncoder();
-            syncProtocol.readSyncMessage(tempDec, tempEnc, tempDoc, origin);
-          },
-          rawBytes.byteLength,
-        );
-      }
-
-      const decoder = decoding.createDecoder(rawBytes);
-      const encoder = encoding.createEncoder();
-
-      const msgType = syncProtocol.readSyncMessage(
-        decoder,
-        encoder,
-        session.doc,
-        origin,
-      );
-
-      let reply: Buffer | null = null;
-      if (encoding.length(encoder) > 0) {
-        reply = Buffer.from(encoding.toUint8Array(encoder));
-      }
-
-      let broadcastUpdate: Buffer | null = null;
-      if (
-        msgType === syncProtocol.messageYjsUpdate ||
-        msgType === syncProtocol.messageYjsSyncStep2
-      ) {
-        session.approxEncodedBytes =
-          (session.approxEncodedBytes ?? 0) + rawBytes.byteLength;
-        this.validator.validatePostApplySize(
-          session.doc,
-          this.config?.getMaxDocumentSizeBytes(),
-          session.approxEncodedBytes,
-        );
-        const updateEncoder = encoding.createEncoder();
-        const rawUpdate = this.extractRawUpdateIfPresent(rawBytes, msgType);
-        if (rawUpdate) {
-          syncProtocol.writeUpdate(updateEncoder, rawUpdate);
-          broadcastUpdate = Buffer.from(encoding.toUint8Array(updateEncoder));
-        }
-      }
-
-      return {
-        reply,
-        broadcastUpdate,
-        msgType,
-      };
-    } catch (err: unknown) {
-      if (err instanceof RealtimeException) {
-        throw err;
-      }
-      this.logger.warn(
-        `Failed to decode or process sync message for ${projectId}:${docId}: ${(err as Error)?.message}`,
-      );
-      return { reply: null, broadcastUpdate: null };
-    }
+    return this.syncProtocol.handleSyncMessage(
+      session,
+      projectId,
+      docId,
+      data,
+      origin,
+    );
   }
 
   public async handleSyncStep1(
@@ -385,28 +278,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     stateVector: Uint8Array | Buffer | number[] | string,
   ): Promise<Buffer> {
     const session = await this.getOrCreateDoc(projectId, docId);
-    const rawVector = this.normalizeToUint8Array(stateVector);
-
-    try {
-      let stateVectorToUse = rawVector;
-      try {
-        const dec = decoding.createDecoder(rawVector);
-        const msgType = decoding.readVarUint(dec);
-        if (msgType === syncProtocol.messageYjsSyncStep1) {
-          stateVectorToUse = decoding.readVarUint8Array(dec);
-        }
-      } catch {
-        // Direct raw state vector
-      }
-
-      const encoder = encoding.createEncoder();
-      syncProtocol.writeSyncStep2(encoder, session.doc, stateVectorToUse);
-      syncProtocol.writeSyncStep1(encoder, session.doc);
-      return Buffer.from(encoding.toUint8Array(encoder));
-    } catch (err: unknown) {
-      this.logger.warn(`handleSyncStep1 error: ${(err as Error)?.message}`);
-      return Buffer.alloc(0);
-    }
+    return this.syncProtocol.handleSyncStep1(session, stateVector);
   }
 
   public async handleSyncStep2(
@@ -416,55 +288,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     origin: string,
   ): Promise<void> {
     const session = await this.getOrCreateDoc(projectId, docId);
-    const rawUpdate = this.normalizeToUint8Array(update);
-    if (!rawUpdate || rawUpdate.length === 0) return;
-
-    this.validator.validatePreApplySize(
-      session.doc,
-      rawUpdate.byteLength,
-      this.config?.getMaxDocumentSizeBytes(),
-    );
-
-    try {
-      const dec = decoding.createDecoder(rawUpdate);
-      const msgType = decoding.readVarUint(dec);
-      if (
-        msgType === syncProtocol.messageYjsSyncStep2 ||
-        msgType === syncProtocol.messageYjsUpdate
-      ) {
-        const innerUpdate = decoding.readVarUint8Array(dec);
-        this.assertPostApplySizeBeforeMutation(session, (tempDoc) => {
-          Y.applyUpdate(tempDoc, innerUpdate, origin);
-        });
-        Y.applyUpdate(session.doc, innerUpdate, origin);
-        this.validator.validatePostApplySize(
-          session.doc,
-          this.config?.getMaxDocumentSizeBytes(),
-        );
-        return;
-      }
-    } catch (err: unknown) {
-      if (err instanceof RealtimeException) {
-        throw err;
-      }
-      // Direct apply fallback
-    }
-
-    try {
-      this.assertPostApplySizeBeforeMutation(session, (tempDoc) => {
-        Y.applyUpdate(tempDoc, rawUpdate, origin);
-      });
-      Y.applyUpdate(session.doc, rawUpdate, origin);
-      this.validator.validatePostApplySize(
-        session.doc,
-        this.config?.getMaxDocumentSizeBytes(),
-      );
-    } catch (err: unknown) {
-      if (err instanceof RealtimeException) {
-        throw err;
-      }
-      this.logger.warn(`handleSyncStep2 error: ${(err as Error)?.message}`);
-    }
+    this.syncProtocol.handleSyncStep2(session, update, origin);
   }
 
   public async handleSyncUpdate(
@@ -474,71 +298,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     origin: string,
   ): Promise<Buffer> {
     const session = await this.getOrCreateDoc(projectId, docId);
-    const rawBytes = this.normalizeToUint8Array(update);
-    if (!rawBytes || rawBytes.length === 0) return Buffer.alloc(0);
-
-    this.validator.validatePreApplySize(
-      session.doc,
-      rawBytes.byteLength,
-      this.config?.getMaxDocumentSizeBytes(),
-    );
-
-    try {
-      let updateToApply: Uint8Array = rawBytes;
-      try {
-        const dec = decoding.createDecoder(rawBytes);
-        const msgType = decoding.readVarUint(dec);
-        if (
-          msgType === syncProtocol.messageYjsUpdate ||
-          msgType === syncProtocol.messageYjsSyncStep2
-        ) {
-          const candidate = decoding.readVarUint8Array(dec);
-          if (dec.pos === rawBytes.length) {
-            updateToApply = candidate;
-          }
-        }
-      } catch {
-        // Direct update bytes
-      }
-
-      this.assertPostApplySizeBeforeMutation(session, (tempDoc) => {
-        try {
-          Y.applyUpdate(tempDoc, updateToApply, origin);
-        } catch (applyErr) {
-          if (updateToApply !== rawBytes) {
-            Y.applyUpdate(tempDoc, rawBytes, origin);
-          } else {
-            throw applyErr;
-          }
-        }
-      });
-
-      try {
-        Y.applyUpdate(session.doc, updateToApply, origin);
-      } catch (applyErr) {
-        if (updateToApply !== rawBytes) {
-          Y.applyUpdate(session.doc, rawBytes, origin);
-          updateToApply = rawBytes;
-        } else {
-          throw applyErr;
-        }
-      }
-
-      this.validator.validatePostApplySize(
-        session.doc,
-        this.config?.getMaxDocumentSizeBytes(),
-      );
-
-      const encoder = encoding.createEncoder();
-      syncProtocol.writeUpdate(encoder, updateToApply);
-      return Buffer.from(encoding.toUint8Array(encoder));
-    } catch (err: unknown) {
-      if (err instanceof RealtimeException) {
-        throw err;
-      }
-      this.logger.warn(`handleSyncUpdate error: ${(err as Error)?.message}`);
-      return Buffer.alloc(0);
-    }
+    return this.syncProtocol.handleSyncUpdate(session, update, origin);
   }
 
   public async getText(projectId: string, docId: string): Promise<string> {
@@ -594,10 +354,6 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     return Buffer.from(encoding.toUint8Array(encoder));
   }
 
-  /**
-   * Computes minimal cursor-preserving character edits between `current` and `nextText`.
-   * Delegates to pure domain engine `YjsCursorDiffEngine`.
-   */
   public computeCursorPreservingEdits(
     current: string,
     nextText: string,
@@ -766,28 +522,5 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
       });
     }, this.FLUSH_DEBOUNCE_MS);
     session.flushTimeout.unref?.();
-  }
-
-  private normalizeToUint8Array(data: unknown): Uint8Array {
-    return this.validator.validateSyncPayload(
-      data,
-      this.config?.getMaxYjsUpdateSizeBytes() ?? 512 * 1024,
-    );
-  }
-
-  private extractRawUpdateIfPresent(
-    rawBytes: Uint8Array,
-    msgType: number,
-  ): Uint8Array | null {
-    try {
-      const dec = decoding.createDecoder(rawBytes);
-      const readType = decoding.readVarUint(dec);
-      if (readType === msgType) {
-        return decoding.readVarUint8Array(dec);
-      }
-    } catch {
-      // Fallback
-    }
-    return null;
   }
 }

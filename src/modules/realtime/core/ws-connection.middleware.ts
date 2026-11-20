@@ -1,5 +1,5 @@
 import { Socket } from 'socket.io';
-import { WsAuthService } from './ws-auth.guard';
+import { WsAuthService } from './ws-auth.service';
 import { RealtimeAuthRequiredException } from './ws-errors';
 
 export type SocketIOMiddleware = (
@@ -8,9 +8,8 @@ export type SocketIOMiddleware = (
 ) => void | Promise<void>;
 
 /**
- * Socket.IO Namespace Middleware
- * Authenticates the connection before the socket is admitted.
- * Refuses unauthenticated or invalid connections at the handshake layer (R-01).
+ * Socket.IO Namespace Middleware.
+ * Authenticates the connection before the socket is admitted and attaches WsUserSession.
  */
 export function createWsConnectionMiddleware(
   authService: WsAuthService,
@@ -25,10 +24,8 @@ export function createWsConnectionMiddleware(
       }
 
       socket.data = {
-        ...socket.data,
+        ...((socket.data as Record<string, unknown> | undefined) ?? {}),
         ...session,
-        spaceId: null,
-        activeDocId: null,
       };
 
       next();

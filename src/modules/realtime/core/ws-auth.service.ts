@@ -24,13 +24,13 @@ export class WsAuthService implements OnModuleInit {
   ) {}
 
   public onModuleInit(): void {
-    // Fail-fast on startup if signing secret is absent or empty (FR-002)
+    // Fail-fast on startup if signing secret is absent or empty
     this.configService.getJwtSecret();
   }
 
   /**
    * Extracts token strictly from the Authorization Bearer header or the handshake auth.token payload.
-   * Query string tokens are rejected to prevent credential leaks in logs (FR-003).
+   * Query string tokens are rejected to prevent credential leaks in logs.
    */
   public extractToken(client: Socket): string | null {
     const authHeader = client.handshake.headers?.authorization;
@@ -41,13 +41,12 @@ export class WsAuthService implements OnModuleInit {
     if (tokenAuth && typeof tokenAuth === 'string') {
       return tokenAuth.trim();
     }
-    // Query tokens are strictly rejected
     return null;
   }
 
   /**
    * Authenticates a WebSocket handshake.
-   * Rejects missing, invalid, or expired credentials without fallback or anonymous sessions (FR-001, FR-004).
+   * Rejects missing, invalid, or expired credentials without fallback or anonymous sessions.
    */
   public async authenticateSocket(client: Socket): Promise<WsUserSession> {
     const token = this.extractToken(client);
@@ -56,7 +55,7 @@ export class WsAuthService implements OnModuleInit {
     }
 
     const secret = this.configService.getJwtSecret();
-    let payload: Record<string, any>;
+    let payload: Record<string, unknown>;
     try {
       payload = await this.jwtService.verifyAsync(token, {
         secret,
@@ -75,8 +74,13 @@ export class WsAuthService implements OnModuleInit {
       );
     }
 
-    let userName = payload.name || payload.email || 'Collaborator';
-    let userAvatar: string | undefined = payload.avatar || undefined;
+    const rawName = payload.name || payload.email;
+    let userName =
+      typeof rawName === 'string' && rawName ? rawName : 'Collaborator';
+    let userAvatar: string | undefined =
+      typeof payload.avatar === 'string' && payload.avatar
+        ? payload.avatar
+        : undefined;
 
     if (this.identityFacade) {
       const activeUser = await this.identityFacade

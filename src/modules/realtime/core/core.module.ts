@@ -2,9 +2,9 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 
-import { WsAuthService } from './ws-auth.guard';
+import { WsAuthService } from './ws-auth.service';
 import { WsAllExceptionsFilter } from './ws-exception.filter';
-import { CoreService } from './core.service';
+import { RealtimeHealthService } from './realtime-health.service';
 import { RealtimeConfigService } from './realtime.config';
 import { WsRateLimiter } from './ws-rate-limiter';
 
@@ -13,17 +13,16 @@ import { WsRateLimiter } from './ws-rate-limiter';
   providers: [
     WsAuthService,
     WsAllExceptionsFilter,
-    CoreService,
+    RealtimeHealthService,
     RealtimeConfigService,
     WsRateLimiter,
   ],
   exports: [
     WsAuthService,
     WsAllExceptionsFilter,
-    CoreService,
+    RealtimeHealthService,
     RealtimeConfigService,
     WsRateLimiter,
   ],
 })
 export class RealtimeCoreModule {}
-export { RealtimeCoreModule as CoreModule };

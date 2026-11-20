@@ -1,13 +1,14 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '@/core/infrastructure/database/prisma.service';
 import { RedisCacheService } from '@/core/infrastructure/redis/redis.service';
-import { ChatMessage } from './types/presence.type';
-import { ProjectChatSendDto } from './dto/events.dto';
+import { PAGES_REDIS_KEYS } from '../pages.constants';
+import { ChatMessage } from '../presence/presence.types';
+import { ProjectChatSendDto } from '../dto/pages-events.dto';
 import * as crypto from 'crypto';
 
 @Injectable()
-export class ChatService {
-  private readonly logger = new Logger(ChatService.name);
+export class PagesChatService {
+  private readonly logger = new Logger(PagesChatService.name);
   private readonly projectChatStore = new Map<string, ChatMessage[]>();
   private static readonly MAX_CHAT_HISTORY = 200;
   private static readonly MAX_PROJECT_CHATS = 500;
@@ -17,21 +18,16 @@ export class ChatService {
     @Optional() private readonly redis?: RedisCacheService,
   ) {}
 
-  private cacheKey(projectId: string): string {
-    return `manuscript:chat:${projectId}`;
-  }
-
   private addMessageToMemoryStore(
     projectId: string,
     message: ChatMessage,
   ): void {
     let history = this.projectChatStore.get(projectId);
     if (history) {
-      // Refresh LRU order
       this.projectChatStore.delete(projectId);
     } else {
       history = [];
-      if (this.projectChatStore.size >= ChatService.MAX_PROJECT_CHATS) {
+      if (this.projectChatStore.size >= PagesChatService.MAX_PROJECT_CHATS) {
         const oldestKey = this.projectChatStore.keys().next().value;
         if (oldestKey !== undefined) {
           this.projectChatStore.delete(oldestKey);
@@ -41,8 +37,8 @@ export class ChatService {
     this.projectChatStore.set(projectId, history);
     history.push(message);
 
-    if (history.length > ChatService.MAX_CHAT_HISTORY) {
-      history.splice(0, history.length - ChatService.MAX_CHAT_HISTORY);
+    if (history.length > PagesChatService.MAX_CHAT_HISTORY) {
+      history.splice(0, history.length - PagesChatService.MAX_CHAT_HISTORY);
     }
   }
 
@@ -62,11 +58,8 @@ export class ChatService {
       createdAt: new Date().toISOString(),
     };
 
-    // 1. Instant in-memory cache update
     this.addMessageToMemoryStore(dto.spaceId, message);
     const currentHistory = this.projectChatStore.get(dto.spaceId) ?? [message];
-
-    // 2. Asynchronous cache & Prisma persistence
     void this.persistMessageAsync(dto, user, message, currentHistory);
 
     return message;
@@ -78,17 +71,19 @@ export class ChatService {
     message: ChatMessage,
     currentHistory: ChatMessage[],
   ): Promise<void> {
-    // Write-through to Redis cache
     if (this.redis) {
       try {
-        await this.redis.set(this.cacheKey(dto.spaceId), currentHistory, 3600);
+        await this.redis.set(
+          PAGES_REDIS_KEYS.chatCache(dto.spaceId),
+          currentHistory,
+          3600,
+        );
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.debug(`Redis chat cache update notice: ${msg}`);
       }
     }
 
-    // Persist to Prisma Conversation & Message models
     if (this.prisma) {
       try {
         let conversation = await this.prisma.conversation.findFirst({
@@ -194,9 +189,7 @@ export class ChatService {
       return [...inMemoryHistory];
     }
 
-    // Trigger background cache-aside hydration if in-memory is empty
     void this.hydrateHistoryAsync(projectId);
-
     return inMemoryHistory ? [...inMemoryHistory] : [];
   }
 
@@ -210,11 +203,10 @@ export class ChatService {
   }
 
   private async hydrateHistoryAsync(projectId: string): Promise<ChatMessage[]> {
-    // 1. Check Redis cache
     if (this.redis) {
       try {
         const cached = await this.redis.get<ChatMessage[]>(
-          this.cacheKey(projectId),
+          PAGES_REDIS_KEYS.chatCache(projectId),
         );
         if (cached && Array.isArray(cached) && cached.length > 0) {
           this.projectChatStore.set(projectId, cached);
@@ -226,7 +218,6 @@ export class ChatService {
       }
     }
 
-    // 2. Query Prisma Conversation & Message models
     if (this.prisma) {
       try {
         const conversation = await this.prisma.conversation.findFirst({
@@ -238,7 +229,7 @@ export class ChatService {
             messages: {
               where: { isDeleted: false },
               orderBy: { createdAt: 'desc' },
-              take: ChatService.MAX_CHAT_HISTORY,
+              take: PagesChatService.MAX_CHAT_HISTORY,
               include: {
                 sender: {
                   include: {
@@ -272,7 +263,7 @@ export class ChatService {
           this.projectChatStore.set(projectId, mapped);
           if (this.redis) {
             await this.redis
-              .set(this.cacheKey(projectId), mapped, 3600)
+              .set(PAGES_REDIS_KEYS.chatCache(projectId), mapped, 3600)
               .catch(() => {});
           }
           return mapped;

@@ -1,8 +1,3 @@
-/**
- * modules/realtime/pages/yjs-persistence-flusher.helper.ts
- * Y.Doc session hydration, distributed flush locking, OCC conflict reconciliation, and eviction helpers.
- */
-
 import { Logger } from '@nestjs/common';
 import type { Server } from 'socket.io';
 import * as Y from 'yjs';
@@ -12,19 +7,24 @@ import { RedisCacheService } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { LineArray, DocNotFoundError } from '@/modules/pages/docstore/domain';
 import { YjsCursorDiffEngine } from './yjs-cursor-diff.engine';
-import { REALTIME_EVENTS } from '../core/realtime.constant';
-import { mergeThreeWayText } from './domain/three-way-merge';
+import { PAGES_EVENTS, PAGES_ROOMS } from '../pages.constants';
+import { mergeThreeWayText } from './three-way-merge';
 import {
   type ActiveDocSession,
   type YjsClusterRelayMessage,
+  yjsDocKey,
+  yjsRedisBinaryKey,
+  yjsRedisMetaKey,
+} from './yjs.types';
+import {
+  acquireFlushLockHelper,
+  releaseFlushLockHelper,
+} from './yjs-flush-lock';
+import {
   deleteRedisSnapshotHelper,
   publishClusterRelayHelper,
   saveBinaryToRedisHelper,
-  yjsDocKey,
-  yjsRedisBinaryKey,
-  yjsRedisFlushLockKey,
-  yjsRedisMetaKey,
-} from './yjs-cluster-relay.helper';
+} from './yjs-cluster-relay.service';
 
 export interface YjsPersistenceContext {
   readonly instanceId: string;
@@ -48,14 +48,6 @@ export interface YjsPersistenceContext {
     session: ActiveDocSession,
   ) => void;
 }
-
-const RELEASE_FLUSH_LOCK_LUA = `
-  if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("del", KEYS[1])
-  else
-    return 0
-  end
-`;
 
 export async function hydrateOrInitYDocSessionHelper(
   ctx: YjsPersistenceContext,
@@ -142,14 +134,20 @@ export async function hydrateOrInitYDocSessionHelper(
 
   if (!loadedFromRedis && ctx.docstoreService) {
     let rawText: string | null = null;
+    const legacyDocstore = ctx.docstoreService as {
+      getRawDoc?: (
+        spaceId: string,
+        targetDocId: string,
+      ) => Promise<string | null>;
+    };
     if (baselineDocRecord && Array.isArray(baselineDocRecord.lines)) {
       rawText = baselineDocRecord.lines.join('\n');
     } else if (typeof ctx.docstoreService.getDoc === 'function') {
       const res = await ctx.docstoreService.getDoc(projectId, docId);
       baselineDocRecord = res;
       rawText = Array.isArray(res?.lines) ? res.lines.join('\n') : '';
-    } else if (typeof (ctx.docstoreService as any).getRawDoc === 'function') {
-      rawText = await (ctx.docstoreService as any).getRawDoc(projectId, docId);
+    } else if (typeof legacyDocstore.getRawDoc === 'function') {
+      rawText = await legacyDocstore.getRawDoc(projectId, docId);
     }
     if (rawText && rawText.length > 0) {
       doc.transact(() => {
@@ -208,59 +206,6 @@ export async function hydrateOrInitYDocSessionHelper(
   }
   projSet.add(key);
   return session;
-}
-
-async function acquireFlushLockHelper(
-  redis: RedisCacheService | undefined,
-  instanceId: string,
-  projectId: string,
-  docId: string,
-): Promise<boolean> {
-  if (!redis || !redis.isReady()) return true;
-  const client = redis.getClient?.();
-  if (!client || typeof client.set !== 'function') return true;
-  try {
-    const lockKey = yjsRedisFlushLockKey(projectId, docId);
-    const res = await client.set(lockKey, instanceId, 'PX', 10000, 'NX');
-    return res === 'OK';
-  } catch {
-    return true;
-  }
-}
-
-async function releaseFlushLockHelper(
-  redis: RedisCacheService | undefined,
-  instanceId: string,
-  projectId: string,
-  docId: string,
-): Promise<void> {
-  if (!redis || !redis.isReady()) return;
-  const client = redis.getClient?.() as
-    | {
-        eval?: (
-          script: string,
-          numKeys: number,
-          key: string,
-          arg: string,
-        ) => Promise<unknown>;
-        get?: (key: string) => Promise<string | null>;
-        del?: (key: string) => Promise<unknown>;
-      }
-    | undefined;
-  if (!client) return;
-  try {
-    const lockKey = yjsRedisFlushLockKey(projectId, docId);
-    if (typeof client.eval === 'function') {
-      await client.eval(RELEASE_FLUSH_LOCK_LUA, 1, lockKey, instanceId);
-      return;
-    }
-    const owner = await client.get?.(lockKey);
-    if (!owner || owner === instanceId) {
-      await client.del?.(lockKey);
-    }
-  } catch {
-    // Ignore lock release error
-  }
 }
 
 export async function executeFlushDocHelper(
@@ -392,8 +337,8 @@ export async function executeFlushDocHelper(
                   const enc = encoding.createEncoder();
                   syncProtocol.writeUpdate(enc, captured);
                   ctx.server
-                    .to(`doc:${projectId}:${docId}`)
-                    .emit(REALTIME_EVENTS.YJS_SYNC_UPDATE, {
+                    .to(PAGES_ROOMS.doc(projectId, docId))
+                    .emit(PAGES_EVENTS.YJS_SYNC_UPDATE, {
                       spaceId: projectId,
                       docId,
                       data: Buffer.from(encoding.toUint8Array(enc)),
@@ -519,7 +464,6 @@ export async function evictDocHelper(
     } catch {
       // Ignore flush errors on forced eviction
     }
-    // Best-effort Redis snapshot save in case distributed lock was busy during flushDoc
     if (
       session.firstUnflushedAt !== undefined &&
       ctx.redis &&

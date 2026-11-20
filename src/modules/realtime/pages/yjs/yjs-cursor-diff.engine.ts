@@ -1,10 +1,3 @@
-/**
- * modules/realtime/manuscripts/yjs-cursor-diff.engine.ts
- * Pure Domain Engine for computing minimal cursor-preserving UTF-16 / line-level LCS
- * edits between two text states and applying them atomically in reverse offset order
- * to a Yjs `Y.Text` CRDT instance without invalidating collaborator `RelativePosition` cursors.
- */
-
 import * as Y from 'yjs';
 
 export interface YjsCursorPreservingEdit {
@@ -22,10 +15,6 @@ export class YjsCursorDiffEngine {
     return code >= 0xdc00 && code <= 0xdfff;
   }
 
-  /**
-   * Trims common prefix and suffix (respecting UTF-16 surrogate pairs on both old and new spans)
-   * and returns a single replacement edit if the spans differ.
-   */
   public static trimSpanToSingleEdit(
     baseOffset: number,
     oldSpan: string,
@@ -70,11 +59,6 @@ export class YjsCursorDiffEngine {
     };
   }
 
-  /**
-   * Computes minimal cursor-preserving character edits between `current` and `nextText`.
-   * Uses line-level LCS anchoring for multi-hunk mutations so unchanged middle lines
-   * are never deleted and re-inserted (preserving collaborator Yjs RelativePositions).
-   */
   public static computeCursorPreservingEdits(
     current: string,
     nextText: string,
@@ -84,7 +68,6 @@ export class YjsCursorDiffEngine {
     const oldLines = current.match(/[^\n]*\n|[^\n]+/g) ?? [];
     const newLines = nextText.match(/[^\n]*\n|[^\n]+/g) ?? [];
 
-    // Fallback to single-span diff for very large line counts or single-line docs
     if (
       oldLines.length <= 1 ||
       newLines.length <= 1 ||
@@ -94,7 +77,6 @@ export class YjsCursorDiffEngine {
       return single ? [single] : [];
     }
 
-    // Trim common leading and trailing lines first
     let startLine = 0;
     while (
       startLine < oldLines.length &&
@@ -125,7 +107,6 @@ export class YjsCursorDiffEngine {
       return single ? [single] : [];
     }
 
-    // DP LCS table on middle lines
     const dp = new Int32Array((m + 1) * (n + 1));
     const width = n + 1;
     for (let i = m - 1; i >= 0; i--) {
@@ -140,7 +121,6 @@ export class YjsCursorDiffEngine {
       }
     }
 
-    // Walk LCS anchors to partition non-matching line hunks
     let baseCharOffset = 0;
     for (let k = 0; k < startLine; k++) {
       baseCharOffset += oldLines[k].length;
@@ -181,10 +161,6 @@ export class YjsCursorDiffEngine {
     return edits;
   }
 
-  /**
-   * Computes and applies cursor-preserving edits inside a single Yjs transaction
-   * in reverse index order so character offsets remain valid.
-   */
   public static applyEditsToYText(
     doc: Y.Doc,
     yText: Y.Text,

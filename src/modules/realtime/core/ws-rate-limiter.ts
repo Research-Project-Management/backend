@@ -6,29 +6,7 @@ import { RealtimeRateLimitedException } from './ws-errors';
 export type RealtimeEventClass =
   'cursor' | 'update' | 'chat' | 'joinLeave' | 'other';
 
-/**
- * Lookup Table Pattern: Declarative event-to-rate-bucket classification map.
- */
-export const EVENT_RATE_CLASS_MAP: Readonly<
-  Record<string, RealtimeEventClass>
-> = Object.freeze({
-  'doc:cursor': 'cursor',
-  'doc:update': 'update',
-  'doc:sync:step1': 'update',
-  'doc:sync:step2': 'update',
-  'doc:sync:update': 'update',
-  'project:chat:send': 'chat',
-  'project:chat:history': 'chat',
-  'chat:history': 'chat',
-  'project:join': 'joinLeave',
-  'project:leave': 'joinLeave',
-  'doc:join': 'joinLeave',
-  'doc:leave': 'joinLeave',
-});
-
-export function classifyEvent(event: string): RealtimeEventClass {
-  return EVENT_RATE_CLASS_MAP[event] ?? 'other';
-}
+export type EventClassClassifier = (eventName: string) => RealtimeEventClass;
 
 interface BucketState {
   tokens: number;
@@ -49,8 +27,14 @@ export class WsRateLimiter {
 
   constructor(@Optional() private readonly config?: RealtimeConfigService) {}
 
-  public consumeOrThrow(client: Socket, eventName: string): void {
-    const eventClass = classifyEvent(eventName);
+  public consumeOrThrow(
+    client: Socket,
+    eventName: string,
+    classifier?: EventClassClassifier,
+  ): void {
+    const eventClass: RealtimeEventClass = classifier
+      ? classifier(eventName)
+      : 'other';
     if (eventClass === 'other') {
       return;
     }
@@ -93,7 +77,6 @@ export class WsRateLimiter {
       state.buckets.set(eventClass, bucket);
     }
 
-    // Refill tokens according to elapsed time
     const elapsedSec = (now - bucket.lastRefill) / 1000;
     bucket.tokens = Math.min(burst, bucket.tokens + elapsedSec * budgetPerSec);
     bucket.lastRefill = now;
@@ -103,10 +86,9 @@ export class WsRateLimiter {
       return;
     }
 
-    // Budget exceeded -> throttle
     const currentWindow = Math.floor(now / 1000);
     if (state.lastThrottledWindow === currentWindow) {
-      // Already marked as throttled in this 1-second window
+      // Already counted as throttled within this 1s window
     } else if (state.lastThrottledWindow === currentWindow - 1) {
       state.consecutiveThrottledWindows += 1;
       state.lastThrottledWindow = currentWindow;
