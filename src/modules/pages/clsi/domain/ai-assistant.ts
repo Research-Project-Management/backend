@@ -7,6 +7,8 @@
  * - Compiler error remediation heuristics (`fixLatexError`)
  */
 
+import { hasVietnameseCharacters } from '@/modules/pages/core';
+
 export type AiActionType =
   | 'academic-tone'
   | 'make-concise'
@@ -237,6 +239,113 @@ export function fixLatexError(params: AiErrorFixParams): AiErrorFixResult {
   const lines = surroundingCode ? surroundingCode.split('\n') : [];
   const currentLineText =
     lines.length > 0 ? lines[Math.min(lines.length - 1, 2)] : '';
+
+  const combinedErr = `${errorMessage}\n${detail}`;
+
+  const unicodeMatch = combinedErr.match(
+    /unicode character\s+(\S+)\s+\(U\+([0-9A-F]{4,6})\)[\s\S]*not set up for use with latex/i,
+  );
+  if (unicodeMatch?.[1] && unicodeMatch[2]) {
+    const charStr = unicodeMatch[1];
+    const cp = parseInt(unicodeMatch[2], 16);
+    const cpChar = Number.isFinite(cp) ? String.fromCodePoint(cp) : charStr;
+    if (hasVietnameseCharacters(charStr) || hasVietnameseCharacters(cpChar)) {
+      return {
+        explanation:
+          'pdfLaTeX encountered a Vietnamese Unicode character without T5 font encoding. Add \\usepackage[T5]{fontenc} to your preamble (T1 does not cover Vietnamese glyphs).',
+        originalSnippet: currentLineText || charStr,
+        fixedSnippet: '\\usepackage[T5]{fontenc}',
+        startLine: lineNum,
+        endLine: lineNum,
+        confidence: 'high',
+      };
+    }
+    if (Number.isFinite(cp) && cp >= 0x00a0 && cp <= 0x017f) {
+      return {
+        explanation:
+          'pdfLaTeX encountered an extended Latin character without T1 font encoding. Add \\usepackage[T1]{fontenc} to your preamble.',
+        originalSnippet: currentLineText || charStr,
+        fixedSnippet: '\\usepackage[T1]{fontenc}',
+        startLine: lineNum,
+        endLine: lineNum,
+        confidence: 'high',
+      };
+    }
+    return {
+      explanation:
+        'pdfLaTeX cannot typeset this Unicode character with 8-bit font encodings. Switch the compiler to XeLaTeX or LuaLaTeX in Project Settings and load \\usepackage{fontspec}.',
+      originalSnippet: currentLineText || charStr,
+      fixedSnippet: '',
+      startLine: lineNum,
+      endLine: lineNum,
+      confidence: 'medium',
+    };
+  }
+
+  if (/\\usepackage\s+before\s+\\documentclass/i.test(combinedErr)) {
+    const baseStartLine = Math.max(1, lineNum - 3);
+    const docClassTokenRe = /\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/;
+    const pkgTokenRe =
+      /\\(?:usepackage|RequirePackage)(?:\s*\[[^\]]*\])?\s*\{[^}]+\}/g;
+    const docLineIdx = lines.findIndex((ln) => docClassTokenRe.test(ln));
+
+    if (docLineIdx !== -1) {
+      const docLine = lines[docLineIdx];
+      const docMatch = docLine.match(docClassTokenRe);
+      const docIdxInLine = docMatch?.index ?? -1;
+      if (docMatch && docIdxInLine >= 0) {
+        let firstMisplacedIdx = -1;
+        for (let i = 0; i <= docLineIdx; i++) {
+          const segment =
+            i === docLineIdx ? docLine.slice(0, docIdxInLine) : lines[i];
+          if (
+            /\\(?:usepackage|RequirePackage)(?:\s*\[[^\]]*\])?\s*\{[^}]+\}/.test(
+              segment,
+            )
+          ) {
+            firstMisplacedIdx = i;
+            break;
+          }
+        }
+
+        if (firstMisplacedIdx !== -1) {
+          const slice = lines.slice(firstMisplacedIdx, docLineIdx + 1);
+          const beforeDocText =
+            slice.length > 1
+              ? `${slice.slice(0, -1).join('\n')}\n${docLine.slice(0, docIdxInLine)}`
+              : docLine.slice(0, docIdxInLine);
+          const pkgMatches = Array.from(
+            beforeDocText.matchAll(pkgTokenRe),
+            (m) => m[0].trim(),
+          );
+          if (pkgMatches.length > 0) {
+            const trailing = docLine.slice(docIdxInLine + docMatch[0].length);
+            return {
+              explanation:
+                'Moved \\usepackage declarations after \\documentclass so the document class is declared first.',
+              originalSnippet: slice.join('\n'),
+              fixedSnippet: [`${docMatch[0]}${trailing}`, ...pkgMatches].join(
+                '\n',
+              ),
+              startLine: baseStartLine + firstMisplacedIdx,
+              endLine: baseStartLine + docLineIdx,
+              confidence: 'high',
+            };
+          }
+        }
+      }
+    }
+
+    return {
+      explanation:
+        'A \\usepackage declaration appeared before \\documentclass{...}. Move all \\usepackage commands below \\documentclass{...} and above \\begin{document}.',
+      originalSnippet: currentLineText || '',
+      fixedSnippet: '',
+      startLine: lineNum,
+      endLine: lineNum,
+      confidence: 'high',
+    };
+  }
 
   if (
     /undefined control sequence/i.test(errorMessage) ||

@@ -170,6 +170,10 @@ export async function fixLatexErrorHelper(
         ? `\nSurrounding Code:\n\`\`\`latex\n${dto.surroundingCode}\n\`\`\``
         : '',
       '',
+      'Rules:',
+      '- Never place \\usepackage before \\documentclass{...}; all \\usepackage declarations must appear after \\documentclass{...} and before \\begin{document}.',
+      '- For Vietnamese Unicode errors in pdfLaTeX (e.g., ấ, ơ, ư, đ), use \\usepackage[T5]{fontenc} (NOT T1, which lacks Vietnamese glyphs, and omit legacy \\usepackage[utf8]{inputenc}). For non-Latin scripts (CJK, Cyrillic, Arabic), advise XeLaTeX or LuaLaTeX with \\usepackage{fontspec}.',
+      '',
       'Reply ONLY with a valid JSON object in this exact schema (no markdown fences, pure JSON):',
       '{',
       '  "explanation": "Brief 1-2 sentence description of what caused the error and how to fix it",',

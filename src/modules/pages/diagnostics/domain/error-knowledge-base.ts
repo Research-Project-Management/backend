@@ -154,6 +154,7 @@ export const CASCADE_SUPPRESSION_MAP: Record<string, string[]> = {
   ENVIRONMENT_UNDEFINED: ['EMERGENCY_STOP'],
   EXTRA_ALIGNMENT_TAB: ['EMERGENCY_STOP'],
   UNICODE_CHAR_NOT_SET_UP: ['EMERGENCY_STOP'],
+  USEPACKAGE_BEFORE_DOCUMENTCLASS: ['EMERGENCY_STOP'],
 };
 
 export const FATAL_CASCADE_PATTERNS: RegExp[] = [
@@ -411,6 +412,22 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
         '\\documentclass{article}\n\\begin{document}\nContent here\n\\end{document}',
       documentationUrl: `${LATEX_KB_BASE_URL}#Missing_\\begin{document}`,
       patterns: [/missing \\begin\{document\}/i],
+    },
+    {
+      code: 'USEPACKAGE_BEFORE_DOCUMENTCLASS',
+      title: '\\usepackage Before \\documentclass',
+      explanation:
+        'A \\usepackage command was placed before \\documentclass{...}. In LaTeX, the document class must be declared first before loading packages.',
+      commonCauses: [
+        'Inserting \\usepackage{...} at the very top of the file above \\documentclass{...}.',
+        'Pasting package declarations at line 1 without a newline before \\documentclass{...}.',
+      ],
+      suggestedFix:
+        'Move all \\usepackage{...} commands below \\documentclass{...} and above \\begin{document}.',
+      exampleSnippet:
+        '\\documentclass{article}\n\\usepackage[T5]{fontenc}\n\\begin{document}',
+      documentationUrl: `${LATEX_KB_BASE_URL}`,
+      patterns: [/\\usepackage\s+before\s+\\documentclass/i],
     },
     {
       code: 'BIB_SYNTAX_ERROR',

@@ -25,6 +25,7 @@ import {
   postProcessDiagnostics,
 } from '@/modules/pages/diagnostics/domain';
 import { resolveUnicodePreamblePackages } from '@/modules/pages/core/domain/latex-preamble';
+import { fixLatexError } from '@/modules/pages/clsi/domain/ai-assistant';
 
 describe('CLSI Log Harvesting, Validation & Diagnostics Pipeline', () => {
   afterEach(() => {
@@ -501,6 +502,62 @@ Warning--empty title in knuth1984
         magicComments: ['% !TEX program = xelatex'],
         packages: ['\\usepackage{fontspec}'],
       });
+    });
+
+    it('parses \\usepackage before \\documentclass with USEPACKAGE_BEFORE_DOCUMENTCLASS rule and explanation', () => {
+      const analyzer = new CompileLogAnalyzer();
+      const logText = [
+        '(./main.tex',
+        './main.tex:1: LaTeX Error: \\usepackage before \\documentclass.',
+        '',
+        'See the LaTeX manual or LaTeX Companion for explanation.',
+        'Type  H <return>  for immediate help.',
+        ' ...',
+        '',
+        'l.1 \\usepackage',
+        '               [utf8]{inputenc}',
+        ')',
+      ].join('\n');
+
+      const res = analyzer.parseWithSummary(logText, 'main.tex');
+      expect(res.summary.totalErrors).toBe(1);
+      expect(res.diagnostics).toHaveLength(1);
+      const err = res.diagnostics[0];
+      expect(err.code).toBe('USEPACKAGE_BEFORE_DOCUMENTCLASS');
+      expect(err.explanation?.title).toBe(
+        '\\usepackage Before \\documentclass',
+      );
+    });
+
+    it('fixLatexError returns T5 package for Vietnamese Unicode and reorders misplaced \\usepackage before \\documentclass', () => {
+      const unicodeFix = fixLatexError({
+        errorMessage:
+          'LaTeX Error: Unicode character ấ (U+1EA5) not set up for use with LaTeX.',
+        errorLine: 5,
+        surroundingCode: '\\title{flux}\n\\author{Tấn Thành}',
+      });
+      expect(unicodeFix.fixedSnippet).toBe('\\usepackage[T5]{fontenc}');
+      expect(unicodeFix.confidence).toBe('high');
+
+      const orderFix = fixLatexError({
+        errorMessage: 'LaTeX Error: \\usepackage before \\documentclass.',
+        errorLine: 1,
+        surroundingCode: [
+          '\\usepackage[utf8]{inputenc}',
+          '\\usepackage[T1]{fontenc}\\documentclass{article}',
+          '\\usepackage{graphicx}',
+        ].join('\n'),
+      });
+      expect(orderFix.startLine).toBe(1);
+      expect(orderFix.endLine).toBe(2);
+      expect(orderFix.fixedSnippet).toBe(
+        [
+          '\\documentclass{article}',
+          '\\usepackage[utf8]{inputenc}',
+          '\\usepackage[T1]{fontenc}',
+        ].join('\n'),
+      );
+      expect(orderFix.confidence).toBe('high');
     });
   });
 });
