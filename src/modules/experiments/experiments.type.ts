@@ -70,7 +70,6 @@ export interface UploadFileInput {
   buffer: Buffer;
   mimeType: string;
   projectId?: string;
-  source?: string;
   parentId?: string | null;
 }
 
@@ -205,7 +204,6 @@ export interface UploadDirectInput {
   linkedToType?: string;
   parentId?: string | null;
   scope?: FileScope;
-  source?: string;
   metaData?: Record<string, unknown> | null;
 }
 

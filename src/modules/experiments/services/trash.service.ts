@@ -1,29 +1,29 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FILES_PORT, type IFilesPort } from '@/modules/files';
-import {
-  EXPERIMENT_NODE_REPOSITORY,
-  EXPERIMENT_VERSION_REPOSITORY,
-} from '../experiments.constant';
-import { INodeRepository } from '../repositories/node.repository';
-import { IVersionRepository } from '../repositories/version.repository';
+import { NodeRepository } from '../repositories/node.repository';
+import { VersionRepository } from '../repositories/version.repository';
 import { ExperimentNode } from '../domain/node.domain';
 import { FileTrashedEvent } from '../domain/experiments.event';
 import { ExperimentsCacheService } from './cache.service';
+
+export interface TrashPurgeResult {
+  purgedCount: number;
+  reclaimedBytes: bigint;
+  errors: number;
+}
 
 @Injectable()
 export class TrashService {
   private readonly logger = new Logger(TrashService.name);
 
   constructor(
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
+    private readonly nodeRepo: NodeRepository,
     @Inject(FILES_PORT)
     private readonly filesPort: IFilesPort,
     private readonly cache: ExperimentsCacheService,
     private readonly eventEmitter: EventEmitter2,
-    @Inject(EXPERIMENT_VERSION_REPOSITORY)
-    private readonly versionRepo: IVersionRepository,
+    private readonly versionRepo: VersionRepository,
   ) {}
 
   async softDelete(nodeId: string): Promise<number> {
@@ -231,5 +231,39 @@ export class TrashService {
       }
     }
     return count;
+  }
+
+  async processExpiredTrash(retentionDays = 30): Promise<TrashPurgeResult> {
+    const expiredNodes = await this.nodeRepo.findExpiredTrash(
+      retentionDays,
+      500,
+    );
+    let purgedCount = 0;
+    let reclaimedBytes = 0n;
+    let errors = 0;
+
+    const processedIds = new Set<string>();
+
+    for (const node of expiredNodes) {
+      if (processedIds.has(node.id)) continue;
+
+      try {
+        const result = await this.purgeNodeAndSubtree(node, processedIds);
+        purgedCount += result.purgedCount;
+        reclaimedBytes += result.reclaimedBytes;
+      } catch (err: unknown) {
+        errors++;
+        this.logger.error(
+          `Failed to purge expired trash node ${node.id}: ${(err as Error)?.message}`,
+        );
+      }
+    }
+
+    if (purgedCount > 0) {
+      this.logger.log(
+        `TrashService purged ${purgedCount} expired items (older than ${retentionDays} days), reclaimed ${reclaimedBytes} bytes of storage quota`,
+      );
+    }
+    return { purgedCount, reclaimedBytes, errors };
   }
 }

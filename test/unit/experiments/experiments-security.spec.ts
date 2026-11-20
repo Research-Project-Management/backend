@@ -1,17 +1,13 @@
+import { sanitizeFilename, isDangerousInlineMime } from '@/modules/files';
+import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import {
-  validateMagicBytes,
   isBlockedExtension,
-  sanitizeFilename,
-  isDangerousInlineMime,
-  LocalStorageAdapter,
-} from '@/modules/files';
-import {
-  FileDownloadedEvent,
-  ExperimentsAccessPolicy,
-  ExperimentNode,
-  FileScope,
-  StreamController,
-} from '@/modules/experiments';
+  validateMagicBytes,
+} from '@/modules/files/domain/files.policy';
+import { FileDownloadedEvent } from '@/modules/experiments';
+import { StreamController } from '@/modules/experiments/controllers/stream.controller';
+import { ExperimentsAccessPolicy } from '@/modules/experiments/domain/access.policy';
+import { ExperimentNode, FileScope } from '@/modules/experiments/domain/node.domain';
 import {
   BadRequestException,
   ForbiddenException,
@@ -184,25 +180,16 @@ describe('Storage & File Security Suite', () => {
 
   describe('ExperimentsAccessPolicy - 5-Tier ReBAC & BOLA/IDOR Protection', () => {
     let accessPolicy: ExperimentsAccessPolicy;
-    let mockPrisma: any;
     let mockNodeRepo: any;
 
     beforeEach(() => {
-      const shareMock = {
-        findUnique: jest.fn(),
-        findMany: jest.fn().mockResolvedValue([]),
-      };
-      mockPrisma = {
-        fileShare: shareMock,
-        storageFileShare: shareMock,
-        projectMember: {
-          findUnique: jest.fn(),
-        },
-      };
       mockNodeRepo = {
         findById: jest.fn(),
+        findUserSharesForFiles: jest.fn().mockResolvedValue([]),
+        findProjectMemberRole: jest.fn().mockResolvedValue(null),
+        findSpaceOwnerId: jest.fn().mockResolvedValue(null),
       };
-      accessPolicy = new ExperimentsAccessPolicy(mockPrisma, mockNodeRepo);
+      accessPolicy = new ExperimentsAccessPolicy(mockNodeRepo);
     });
 
     it('should throw ForbiddenException when user attempts to access another user private file without permission', async () => {
@@ -220,7 +207,6 @@ describe('Storage & File Security Suite', () => {
           scope: FileScope.Personal,
         }),
       );
-      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
 
       await expect(
         accessPolicy.assertCanAccess(attackerId, fileId, 'read'),
@@ -266,18 +252,9 @@ describe('Storage & File Security Suite', () => {
         }),
       );
 
-      mockPrisma.fileShare.findMany.mockResolvedValue([
-        {
-          fileId,
-          userId: collaboratorId,
-          permission: 'view',
-        },
+      mockNodeRepo.findUserSharesForFiles.mockResolvedValue([
+        { permission: 'view' },
       ]);
-      mockPrisma.fileShare.findUnique.mockResolvedValue({
-        fileId,
-        userId: collaboratorId,
-        permission: 'view',
-      });
 
       const node = await accessPolicy.assertCanAccess(
         collaboratorId,
@@ -309,12 +286,7 @@ describe('Storage & File Security Suite', () => {
         }),
       );
 
-      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
-      mockPrisma.projectMember.findUnique.mockResolvedValue({
-        projectId,
-        userId: memberUserId,
-        role: 'MEMBER',
-      });
+      mockNodeRepo.findProjectMemberRole.mockResolvedValue('MEMBER');
 
       const node = await accessPolicy.assertCanAccess(
         memberUserId,
@@ -562,21 +534,16 @@ describe('Storage & File Security Suite', () => {
 
   describe('ExperimentsAccessPolicy - Extended Edge Cases & Actions (SEC-001)', () => {
     let accessPolicy: ExperimentsAccessPolicy;
-    let mockPrisma: any;
     let mockNodeRepo: any;
 
     beforeEach(() => {
-      const shareMock = {
-        findUnique: jest.fn(),
-        findMany: jest.fn().mockResolvedValue([]),
+      mockNodeRepo = {
+        findById: jest.fn(),
+        findUserSharesForFiles: jest.fn().mockResolvedValue([]),
+        findProjectMemberRole: jest.fn().mockResolvedValue(null),
+        findSpaceOwnerId: jest.fn().mockResolvedValue(null),
       };
-      mockPrisma = {
-        fileShare: shareMock,
-        storageFileShare: shareMock,
-        projectMember: { findUnique: jest.fn() },
-      };
-      mockNodeRepo = { findById: jest.fn() };
-      accessPolicy = new ExperimentsAccessPolicy(mockPrisma, mockNodeRepo);
+      accessPolicy = new ExperimentsAccessPolicy(mockNodeRepo);
     });
 
     it('should forbid "share" action for regular project members without coordinator or owner role', async () => {
@@ -596,12 +563,7 @@ describe('Storage & File Security Suite', () => {
         }),
       );
 
-      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
-      mockPrisma.projectMember.findUnique.mockResolvedValue({
-        projectId,
-        userId: memberUserId,
-        role: 'MEMBER',
-      });
+      mockNodeRepo.findProjectMemberRole.mockResolvedValue('MEMBER');
 
       await expect(
         accessPolicy.assertCanAccess(memberUserId, fileId, 'share'),
@@ -625,12 +587,7 @@ describe('Storage & File Security Suite', () => {
         }),
       );
 
-      mockPrisma.fileShare.findUnique.mockResolvedValue(null);
-      mockPrisma.projectMember.findUnique.mockResolvedValue({
-        projectId,
-        userId: coordinatorUserId,
-        role: 'COORDINATOR',
-      });
+      mockNodeRepo.findProjectMemberRole.mockResolvedValue('COORDINATOR');
 
       const node = await accessPolicy.assertCanAccess(
         coordinatorUserId,

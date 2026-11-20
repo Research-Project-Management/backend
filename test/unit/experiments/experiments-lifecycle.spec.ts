@@ -1,24 +1,16 @@
-import {
-  S3StorageAdapter,
-  LocalStorageAdapter,
-  BlobService,
-  StorageBlob,
-  BlobStatus,
-  ContentHash,
-  StorageKey,
-  FilesFacade,
-  FileStreamService,
-  PresignService,
-  QuotaService,
-} from '@/modules/files';
-import {
-  TrashRetentionJob,
-  ExperimentsLifecycleService,
-  ExperimentsQueueConsumer,
-  EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-  ExperimentNode,
-  TrashService,
-} from '@/modules/experiments';
+import { BlobStatus, FilesFacade, StorageBlobRecord } from '@/modules/files';
+import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
+import { S3StorageAdapter } from '@/modules/files/adapters/s3.adapter';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
+import { EXPERIMENTS_JOB_MAINTENANCE_TRASH } from '@/modules/experiments';
+import { ExperimentNode } from '@/modules/experiments/domain/node.domain';
+import { ExperimentsQueueConsumer } from '@/modules/experiments/processors/experiments.processor';
+import { ExperimentsQueueProducer } from '@/modules/experiments/processors/experiments.producer';
+import { TrashService } from '@/modules/experiments/services/trash.service';
 import { PutBucketLifecycleConfigurationCommand } from '@aws-sdk/client-s3';
 
 describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
@@ -126,8 +118,8 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
     });
   });
 
-  describe('TrashRetentionJob - Quota Rebalancing & Cascading Purge', () => {
-    let job: TrashRetentionJob;
+  describe('TrashService.processExpiredTrash - Quota Rebalancing & Cascading Purge', () => {
+    let trashService: TrashService;
     let mockNodeRepo: any;
     let mockBlobRepo: any;
     let mockQuotaRepo: any;
@@ -152,14 +144,20 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       };
 
       const blobService = new BlobService({} as any, mockBlobRepo);
-      const quotaService = new QuotaService(mockQuotaRepo);
       const filesPort = new FilesFacade(
+        {} as any,
         blobService,
-        quotaService,
-        new PresignService(blobService, quotaService, {} as any),
-        new FileStreamService(blobService),
+        mockBlobRepo as BlobRepository,
+        mockQuotaRepo,
+        new FilesUploadService(
+          {} as any,
+          blobService,
+          mockBlobRepo as BlobRepository,
+          mockQuotaRepo,
+          {} as SessionRepository,
+        ),
       );
-      const trashService = new TrashService(
+      trashService = new TrashService(
         mockNodeRepo,
         filesPort,
         mockCache,
@@ -169,8 +167,6 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
           deleteByFileId: jest.fn(),
         } as any,
       );
-
-      job = new TrashRetentionJob(mockNodeRepo, trashService);
     });
 
     it('should purge single expired file, decrement blob ref, reclaim quota, and invalidate cache', async () => {
@@ -184,19 +180,27 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         projectId: 'project-001',
       });
 
-      const blob = new StorageBlob({
+      const blob: StorageBlobRecord = {
         id: 'blob-001',
-        contentHash: ContentHash.fromHex('a'.repeat(64)),
+        contentHashHex: ContentHash.fromHex('a'.repeat(64)).toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 1048576n,
-        s3Key: StorageKey.fromString('blobs/aa/test.pdf'),
+        mimeType: 'application/pdf',
+        checksumVerified: true,
+        s3Key: StorageKey.fromString('blobs/aa/test.pdf').value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
+        status: BlobStatus.READY,
         refCount: 2,
-      });
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
 
       mockNodeRepo.findExpiredTrash.mockResolvedValue([expiredFile]);
       mockBlobRepo.findById.mockResolvedValue(blob);
 
-      const result = await job.processExpiredTrash(30);
+      const result = await trashService.processExpiredTrash(30);
 
       expect(result.purgedCount).toBe(1);
       expect(result.reclaimedBytes).toBe(1048576n);
@@ -236,14 +240,22 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         authorId: 'user-001',
       });
 
-      const childBlob = new StorageBlob({
+      const childBlob: StorageBlobRecord = {
         id: 'blob-child-01',
-        contentHash: ContentHash.fromHex('b'.repeat(64)),
+        contentHashHex: ContentHash.fromHex('b'.repeat(64)).toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 2048n,
-        s3Key: StorageKey.fromString('blobs/bb/dataset.csv'),
+        mimeType: 'text/csv',
+        checksumVerified: true,
+        s3Key: StorageKey.fromString('blobs/bb/dataset.csv').value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
+        status: BlobStatus.READY,
         refCount: 1,
-      });
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
 
       mockNodeRepo.findExpiredTrash.mockResolvedValue([expiredFolder]);
       mockNodeRepo.findSubtreeNodes.mockResolvedValue([
@@ -252,7 +264,7 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       ]);
       mockBlobRepo.findById.mockResolvedValue(childBlob);
 
-      const result = await job.processExpiredTrash(30);
+      const result = await trashService.processExpiredTrash(30);
 
       expect(result.purgedCount).toBe(2);
       expect(result.reclaimedBytes).toBe(2048n);
@@ -277,24 +289,33 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
         delete: jest.fn(),
       };
       mockBlobRepo = {
-        findTombstonedBlobs: jest.fn(),
+        reclaimStuckClaims: jest.fn().mockResolvedValue(0),
+        claimOrphanBlobsBatch: jest.fn().mockResolvedValue([]),
+        restoreClaimedBlob: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn(),
       };
       blobService = new BlobService(mockDriver, mockBlobRepo);
     });
 
     it('should delete zero-reference tombstoned blobs from physical storage and DB', async () => {
-      const deadBlob = new StorageBlob({
+      const deadBlob: StorageBlobRecord = {
         id: 'dead-blob-001',
-        contentHash: ContentHash.fromHex('c'.repeat(64)),
+        contentHashHex: ContentHash.fromHex('c'.repeat(64)).toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 4096n,
-        s3Key: StorageKey.fromString('blobs/cc/orphan.pdf'),
+        mimeType: 'application/pdf',
+        checksumVerified: true,
+        s3Key: StorageKey.fromString('blobs/cc/orphan.pdf').value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
         refCount: 0,
         status: BlobStatus.DELETED,
-      });
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
 
-      mockBlobRepo.findTombstonedBlobs.mockResolvedValue([deadBlob]);
+      mockBlobRepo.claimOrphanBlobsBatch.mockResolvedValueOnce([deadBlob]);
 
       const count = await blobService.reclaimOrphanBlobs();
 
@@ -309,70 +330,76 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
     let mockDriver: any;
     let mockNodeRepo: any;
     let mockBlobRepo: any;
-    let mockTrashJob: any;
+    let mockTrashService: any;
 
     beforeEach(() => {
       mockDriver = { getStream: jest.fn(), delete: jest.fn() };
       mockNodeRepo = { findById: jest.fn(), update: jest.fn() };
       mockBlobRepo = {
         findById: jest.fn(),
-        findTombstonedBlobs: jest.fn().mockResolvedValue([]),
+        reclaimStuckClaims: jest.fn().mockResolvedValue(0),
+        claimOrphanBlobsBatch: jest.fn().mockResolvedValue([]),
       };
-      mockTrashJob = {
+      mockTrashService = {
         processExpiredTrash: jest.fn().mockResolvedValue({ purgedCount: 3 }),
       };
 
       const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaService = new QuotaService({} as any);
+      const quotaRepo = {} as any;
       const filesPort = new FilesFacade(
+        mockDriver,
         blobService,
-        quotaService,
-        new PresignService(blobService, quotaService, {} as any),
-        new FileStreamService(blobService),
+        mockBlobRepo as BlobRepository,
+        quotaRepo,
+        new FilesUploadService(
+          mockDriver,
+          blobService,
+          mockBlobRepo as BlobRepository,
+          quotaRepo,
+          {} as SessionRepository,
+        ),
       );
       consumer = new ExperimentsQueueConsumer(
         filesPort,
         mockNodeRepo,
-        mockTrashJob,
+        mockTrashService,
       );
     });
 
-    it('should dispatch to TrashRetentionJob when job name is maintenance-trash-retention', async () => {
+    it('should dispatch to TrashService.processExpiredTrash when job name is maintenance-trash-retention', async () => {
       const res = await consumer.process({
         id: 'job-1',
         name: EXPERIMENTS_JOB_MAINTENANCE_TRASH,
         data: {},
       } as any);
 
-      expect(mockTrashJob.processExpiredTrash).toHaveBeenCalled();
+      expect(mockTrashService.processExpiredTrash).toHaveBeenCalled();
       expect(res).toEqual({ purgedCount: 3 });
     });
   });
 
-  describe('ExperimentsLifecycleService - Bootstrap & Coordination', () => {
-    let service: ExperimentsLifecycleService;
-    let mockProducer: any;
-    let mockPrisma: any;
+  describe('ExperimentsQueueProducer - Lifecycle Scheduling Bootstrap', () => {
+    let producer: ExperimentsQueueProducer;
+    let mockQueue: any;
 
     beforeEach(() => {
-      mockProducer = {
-        scheduleMaintenanceJobs: jest.fn().mockResolvedValue(undefined),
+      mockQueue = {
+        on: jest.fn(),
+        upsertJobScheduler: jest.fn().mockResolvedValue(undefined),
       };
-      mockPrisma = {
-        $executeRawUnsafe: jest.fn().mockResolvedValue(0),
-      };
-
-      service = new ExperimentsLifecycleService(mockProducer, mockPrisma);
+      producer = new ExperimentsQueueProducer(mockQueue);
     });
 
-    it('onApplicationBootstrap should run legacy URL backfill and schedule trash retention in BullMQ', async () => {
-      await service.onApplicationBootstrap();
+    it('onApplicationBootstrap should schedule trash retention repeatable job in BullMQ', async () => {
+      await producer.onApplicationBootstrap();
 
-      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(1);
-      const executedSql = String(mockPrisma.$executeRawUnsafe.mock.calls[0][0]);
-      expect(executedSql).toContain('/api/v1/experiments/files/');
-      expect(executedSql).toContain('/api/v1/files/local-');
-      expect(mockProducer.scheduleMaintenanceJobs).toHaveBeenCalled();
+      expect(mockQueue.upsertJobScheduler).toHaveBeenCalledWith(
+        'repeat-trash-retention',
+        { pattern: '0 3 * * *' },
+        expect.objectContaining({
+          name: EXPERIMENTS_JOB_MAINTENANCE_TRASH,
+        }),
+      );
     });
   });
 });

@@ -7,67 +7,42 @@ import {
   VersionMapper,
 } from '../domain/experiments.mapper';
 
-export interface IVersionRepository {
-  create(version: ExperimentVersion): Promise<ExperimentVersion>;
-  findByFileId(fileId: string): Promise<ExperimentVersion[]>;
-  findByFileAndVersion(
-    fileId: string,
-    versionNumber: number,
-  ): Promise<ExperimentVersion | null>;
-  getLatestVersionNumber(fileId: string): Promise<number>;
-  deleteByFileId(fileId: string): Promise<void>;
-}
-
 @Injectable()
-export class VersionRepository implements IVersionRepository {
+export class VersionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(version: ExperimentVersion): Promise<ExperimentVersion> {
-    const created = await this.prisma.storageFileVersion.create({
+    const created = await this.prisma.fileVersion.create({
       data: {
         id: version.id,
         fileId: version.fileId,
         blobId: version.blobId,
         versionNumber: version.versionNumber,
-        sizeBytes: version.sizeBytes,
-        mimeType: version.mimeType,
         changeComment: version.changeComment,
         createdById: version.createdById,
         createdAt: version.createdAt,
       },
       include: {
         blob: true,
+        createdBy: { select: VERSION_AUTHOR_SELECT },
       },
     });
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: created.createdById },
-      select: VERSION_AUTHOR_SELECT,
-    });
-
-    return VersionMapper.toDomain(created, mapVersionAuthor(user));
+    return VersionMapper.toDomain(created, mapVersionAuthor(created.createdBy));
   }
 
   async findByFileId(fileId: string): Promise<ExperimentVersion[]> {
-    const records = await this.prisma.storageFileVersion.findMany({
+    const records = await this.prisma.fileVersion.findMany({
       where: { fileId },
       orderBy: { versionNumber: 'desc' },
       include: {
         blob: true,
+        createdBy: { select: VERSION_AUTHOR_SELECT },
       },
     });
 
-    if (records.length === 0) return [];
-
-    const authorIds = Array.from(new Set(records.map((r) => r.createdById)));
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: authorIds } },
-      select: VERSION_AUTHOR_SELECT,
-    });
-    const userMap = new Map(users.map((u) => [u.id, mapVersionAuthor(u)]));
-
     return records.map((r) =>
-      VersionMapper.toDomain(r, userMap.get(r.createdById) || null),
+      VersionMapper.toDomain(r, mapVersionAuthor(r.createdBy)),
     );
   }
 
@@ -75,25 +50,21 @@ export class VersionRepository implements IVersionRepository {
     fileId: string,
     versionNumber: number,
   ): Promise<ExperimentVersion | null> {
-    const record = await this.prisma.storageFileVersion.findFirst({
+    const record = await this.prisma.fileVersion.findFirst({
       where: { fileId, versionNumber },
       include: {
         blob: true,
+        createdBy: { select: VERSION_AUTHOR_SELECT },
       },
     });
 
     if (!record) return null;
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: record.createdById },
-      select: VERSION_AUTHOR_SELECT,
-    });
-
-    return VersionMapper.toDomain(record, mapVersionAuthor(user));
+    return VersionMapper.toDomain(record, mapVersionAuthor(record.createdBy));
   }
 
   async getLatestVersionNumber(fileId: string): Promise<number> {
-    const latest = await this.prisma.storageFileVersion.findFirst({
+    const latest = await this.prisma.fileVersion.findFirst({
       where: { fileId },
       orderBy: { versionNumber: 'desc' },
       select: { versionNumber: true },
@@ -103,7 +74,7 @@ export class VersionRepository implements IVersionRepository {
   }
 
   async deleteByFileId(fileId: string): Promise<void> {
-    await this.prisma.storageFileVersion.deleteMany({
+    await this.prisma.fileVersion.deleteMany({
       where: { fileId },
     });
   }

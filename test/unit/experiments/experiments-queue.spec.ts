@@ -1,25 +1,16 @@
-import {
-  BlobService,
-  BlobStatus,
-  ContentHash,
-  FilesFacade,
-  FileStreamService,
-  IStorageAdapter,
-  IBlobRepository,
-  PresignService,
-  QuotaService,
-  StorageBlob,
-  StorageKey,
-  ThumbnailService,
-} from '@/modules/files';
-import {
-  ExperimentsQueueProducer,
-  ExperimentsQueueConsumer,
-  ExperimentsProcessingJobData,
-  INodeRepository,
-  ExperimentNode,
-  FileScope,
-} from '@/modules/experiments';
+import { BlobStatus, FilesFacade, StorageBlobRecord } from '@/modules/files';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { ThumbnailService } from '@/modules/files/services/thumbnail.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
+import type { IStorageAdapter } from '@/modules/files/types/adapter.type';
+import { type ExperimentsProcessingJobData } from '@/modules/experiments';
+import { ExperimentNode, FileScope } from '@/modules/experiments/domain/node.domain';
+import { ExperimentsQueueConsumer } from '@/modules/experiments/processors/experiments.processor';
+import { ExperimentsQueueProducer } from '@/modules/experiments/processors/experiments.producer';
+import { NodeRepository } from '@/modules/experiments/repositories/node.repository';
 import { Queue, Job } from 'bullmq';
 import { Readable } from 'node:stream';
 import { PDFDocument } from 'pdf-lib';
@@ -101,8 +92,8 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
   describe('ExperimentsQueueConsumer', () => {
     let consumer: ExperimentsQueueConsumer;
     let mockDriver: jest.Mocked<IStorageAdapter>;
-    let mockNodeRepo: jest.Mocked<INodeRepository>;
-    let mockBlobRepo: jest.Mocked<IBlobRepository>;
+    let mockNodeRepo: jest.Mocked<NodeRepository>;
+    let mockBlobRepo: jest.Mocked<BlobRepository>;
 
     beforeEach(() => {
       mockDriver = {
@@ -141,39 +132,56 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
           .fn()
           .mockResolvedValue({ items: [], total: 0 }),
         shareNode: jest.fn(),
-      };
+      } as unknown as jest.Mocked<NodeRepository>;
 
       mockBlobRepo = {
         findById: jest.fn().mockImplementation(async (id: string) => {
           const isPdf = id.includes('pdf');
-          return new StorageBlob({
+          const record: StorageBlobRecord = {
             id,
-            contentHash: ContentHash.fromHex((isPdf ? 'b' : 'a').repeat(64)),
+            contentHashHex: (isPdf ? 'b' : 'a').repeat(64),
+            hashAlgorithm: 'SHA256',
             sizeBytes: 1024n,
-            s3Key: StorageKey.fromString(
-              isPdf ? 'blobs/pdf-456' : 'blobs/img-123',
-            ),
+            mimeType: isPdf ? 'application/pdf' : 'image/png',
+            checksumVerified: true,
+            s3Key: isPdf ? 'blobs/pdf-456' : 'blobs/img-123',
             s3Bucket: 'flux',
+            storageClass: 'STANDARD',
             status: BlobStatus.READY,
             refCount: 1,
-          });
+            createdAt: new Date(),
+            tombstoneAt: null,
+            claimedAt: null,
+          };
+          return record;
         }),
         findByHash: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
-        findTombstonedBlobs: jest.fn(),
         incrementRefCount: jest.fn(),
         decrementRefCount: jest.fn(),
-      };
+      } as unknown as jest.Mocked<BlobRepository>;
 
       const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaService = new QuotaService({} as any);
-      const filesPort = new FilesFacade(
+      const quotaRepo = {} as QuotaRepository;
+      const thumbService = new ThumbnailService(
+        mockDriver,
+        mockBlobRepo,
         blobService,
-        quotaService,
-        new PresignService(blobService, quotaService, {} as any),
-        new FileStreamService(blobService),
-        new ThumbnailService(),
+      );
+      const filesPort = new FilesFacade(
+        mockDriver,
+        blobService,
+        mockBlobRepo,
+        quotaRepo,
+        new FilesUploadService(
+          mockDriver,
+          blobService,
+          mockBlobRepo,
+          quotaRepo,
+          {} as SessionRepository,
+        ),
+        thumbService,
       );
       consumer = new ExperimentsQueueConsumer(filesPort, mockNodeRepo);
     });
@@ -244,9 +252,11 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
 
       await consumer.process(job);
 
-      // Verify thumbnail saved
+      // Verify derivative thumbnail saved under sharded content hash
+      const imgHash = 'a'.repeat(64);
+      const expectedDerivKey = `derivatives/aa/aa/${imgHash}/thumb.webp`;
       expect(mockDriver.put).toHaveBeenCalledWith(
-        'thumbnails/blob-img-123.webp',
+        expectedDerivKey,
         expect.any(Buffer),
         expect.objectContaining({ mimeType: 'image/webp' }),
       );
@@ -254,7 +264,7 @@ describe('Storage BullMQ Queue & Worker Suite', () => {
       // Verify node metadata updated
       expect(mockNodeRepo.update).toHaveBeenCalledTimes(1);
       expect(node.metadata?.thumbnail).toBe(
-        '/api/v1/files/objects/thumbnails%2Fblob-img-123.webp',
+        `/api/v1/files/objects/${encodeURIComponent(expectedDerivKey)}`,
       );
       expect(node.metadata?.dimensions).toEqual({
         width: 100,

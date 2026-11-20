@@ -10,15 +10,16 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import * as path from 'path';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { Readable } from 'node:stream';
 import { BypassEnvelope } from '@/core';
 import { STORAGE_ADAPTER } from '../files.constant';
-import { sanitizeFilename } from '../domain/files.policy';
-import { ByteRange } from '../domain/session.domain';
+import { ByteRange } from '../domain/storage-vo';
 import { IStorageAdapter } from '../types/adapter.type';
 import { LocalStorageAdapter } from '../adapters/local.adapter';
+import { applyBinaryHeaders } from './files-http.helper';
 
 @ApiTags('Files')
 @Controller('api/v1/files')
@@ -60,6 +61,7 @@ export class LocalFilesController {
     @Query('key') key: string,
     @Query('expires') expiresStr: string,
     @Query('sig') sig: string,
+    @Query('sha256') sha256: string | undefined,
     @Req() req: FastifyRequest,
   ) {
     const localAdapter = this.requireLocalAdapter();
@@ -67,11 +69,12 @@ export class LocalFilesController {
       throw new BadRequestException('Missing signed upload parameters');
     }
     const expiresAt = Number(expiresStr);
-    if (!localAdapter.verifyToken('put', key, expiresAt, sig)) {
+    const resource = sha256 ? `${key}:sha256=${sha256}` : key;
+    if (!localAdapter.verifyToken('put', resource, expiresAt, sig)) {
       throw new ForbiddenException('Invalid or expired upload signature');
     }
 
-    await localAdapter.put(key, this.extractPayload(req));
+    await localAdapter.putVerified(key, this.extractPayload(req), sha256);
     return { ok: true };
   }
 
@@ -153,22 +156,15 @@ export class LocalFilesController {
     );
 
     res.status(byteRange ? 206 : 200);
-    res.header('Content-Type', meta.mimeType || 'application/octet-stream');
-    res.header('Content-Length', streamRes.contentLength);
-    res.header('Accept-Ranges', 'bytes');
-    res.header('X-Content-Type-Options', 'nosniff');
-    res.header('Cache-Control', 'private, max-age=300');
-    if (streamRes.contentRange) {
-      res.header('Content-Range', streamRes.contentRange);
-    }
-    if (filename) {
-      const cleanName = sanitizeFilename(filename);
-      const encoded = encodeURIComponent(cleanName);
-      res.header(
-        'Content-Disposition',
-        `attachment; filename="${cleanName}"; filename*=UTF-8''${encoded}`,
-      );
-    }
+    applyBinaryHeaders(res, {
+      mimeType: meta.mimeType || 'application/octet-stream',
+      filename: filename || path.basename(key) || 'download',
+      isDownload: Boolean(filename),
+      contentLength: streamRes.contentLength,
+      contentRange: streamRes.contentRange,
+      cacheControl: 'private, max-age=300',
+      varyHeader: 'Range',
+    });
 
     return res.send(streamRes.stream);
   }

@@ -7,18 +7,25 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
-import { FILES_PORT, type IFilesPort } from '@/modules/files';
-import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
 import {
+  FILES_PORT,
+  type FileActorContext,
+  type IFilesPort,
+} from '@/modules/files';
+import {
+  CompleteMultipartInput,
+  CompleteMultipartOutput,
   CompletePresignInput,
   CompletePresignOutput,
   getFileContentPath,
+  InitiateMultipartInput,
+  MultipartActorContext,
   PresignUploadInput,
   PresignUploadOutput,
   UploadDirectInput,
   UploadDirectOutput,
 } from '../experiments.type';
-import { INodeRepository } from '../repositories/node.repository';
+import { NodeRepository } from '../repositories/node.repository';
 import { FileScope, ExperimentNode } from '../domain/node.domain';
 import { FileUploadedEvent } from '../domain/experiments.event';
 import { ExperimentsCacheService } from './cache.service';
@@ -30,6 +37,10 @@ export type {
   PresignUploadOutput,
   CompletePresignInput,
   CompletePresignOutput,
+  MultipartActorContext,
+  InitiateMultipartInput,
+  CompleteMultipartInput,
+  CompleteMultipartOutput,
 };
 
 @Injectable()
@@ -39,36 +50,24 @@ export class UploadService {
   constructor(
     @Inject(FILES_PORT)
     private readonly filesPort: IFilesPort,
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
+    private readonly nodeRepo: NodeRepository,
     @Optional()
     private readonly cache?: ExperimentsCacheService,
     @Optional()
     private readonly eventEmitter?: EventEmitter2,
   ) {}
 
-  private resolveScopeAndMetadata(input: {
-    scope?: FileScope;
-    linkedToType?: string;
-    linkedToId?: string | null;
-    projectId?: string | null;
-    source?: string;
-    metaData?: Record<string, unknown> | null;
-  }) {
-    const resolvedScope =
-      input.scope ??
-      (input.linkedToType as FileScope | undefined) ??
-      (input.projectId ? FileScope.Project : FileScope.Personal);
-    const resolvedLinkedId = input.linkedToId ?? input.projectId ?? null;
-    const metadata: Record<string, unknown> = {
-      ...(input.metaData || {}),
-      ...(input.source ? { source: input.source } : {}),
+  private toFileActor(
+    actor?: MultipartActorContext,
+  ): FileActorContext | undefined {
+    if (!actor) return undefined;
+    return {
+      userId: actor.userId,
+      ...(actor.projectId ? { spaceId: actor.projectId } : {}),
     };
-    return { resolvedScope, resolvedLinkedId, metadata };
   }
 
-  private async invalidateAndEmitUpload(params: {
-    fileId: string;
+  private async persistUploadedNode(params: {
     blobId: string;
     userId: string;
     filename: string;
@@ -77,17 +76,43 @@ export class UploadService {
     storageKey: string;
     projectId?: string | null;
     parentId?: string | null;
-  }): Promise<void> {
+    linkedToType?: string;
+    linkedToId?: string | null;
+    scope?: FileScope;
+    metaData?: Record<string, unknown> | null;
+  }): Promise<string> {
+    const fileId = crypto.randomUUID();
+    const resolvedScope =
+      params.scope ??
+      (params.linkedToType as FileScope | undefined) ??
+      (params.projectId ? FileScope.Project : FileScope.Personal);
+
+    const node = new ExperimentNode({
+      id: fileId,
+      projectId: params.projectId ?? null,
+      linkedToId: params.linkedToId ?? params.projectId ?? null,
+      parentId: params.parentId ?? null,
+      name: params.filename,
+      isFolder: false,
+      size: params.sizeBytes,
+      mimeType: params.mimeType,
+      blobId: params.blobId,
+      scope: resolvedScope,
+      metadata: params.metaData || {},
+      authorId: params.userId,
+    });
+    await this.nodeRepo.create(node);
+
     const scopeKey = params.projectId ?? params.userId;
     if (this.cache) {
-      await this.cache.invalidateFolder(scopeKey, params.parentId ?? null);
-      await this.cache.invalidateScopeTree(scopeKey);
+      await this.cache.invalidateFolder?.(scopeKey, params.parentId ?? null);
+      await this.cache.invalidateScopeTree?.(scopeKey);
     }
 
     this.eventEmitter?.emit(
       'file.uploaded',
       new FileUploadedEvent(
-        params.fileId,
+        fileId,
         params.blobId,
         params.userId,
         params.filename,
@@ -97,6 +122,8 @@ export class UploadService {
         params.projectId,
       ),
     );
+
+    return fileId;
   }
 
   async upload(input: UploadDirectInput): Promise<UploadDirectOutput> {
@@ -110,31 +137,10 @@ export class UploadService {
       filename: input.filename,
       buffer: input.buffer,
       mimeType: input.mimeType,
-      source: input.source,
     });
 
     const sizeBytes = BigInt(uploaded.size);
-    const fileId = crypto.randomUUID();
-    const { resolvedScope, resolvedLinkedId, metadata } =
-      this.resolveScopeAndMetadata(input);
-    const node = new ExperimentNode({
-      id: fileId,
-      projectId: input.projectId ?? null,
-      linkedToId: resolvedLinkedId,
-      parentId: input.parentId ?? null,
-      name: uploaded.filename,
-      isFolder: false,
-      size: sizeBytes,
-      mimeType: uploaded.mimeType,
-      blobId: uploaded.blobId,
-      scope: resolvedScope,
-      metadata,
-      authorId: input.userId,
-    });
-    await this.nodeRepo.create(node);
-
-    await this.invalidateAndEmitUpload({
-      fileId,
+    const fileId = await this.persistUploadedNode({
       blobId: uploaded.blobId,
       userId: input.userId,
       filename: uploaded.filename,
@@ -143,6 +149,10 @@ export class UploadService {
       storageKey: uploaded.path,
       projectId: input.projectId,
       parentId: input.parentId,
+      linkedToType: input.linkedToType,
+      linkedToId: input.linkedToId,
+      scope: input.scope,
+      metaData: input.metaData,
     });
 
     return {
@@ -167,27 +177,7 @@ export class UploadService {
     });
 
     if (res.deduplicated && res.blob) {
-      const fileId = crypto.randomUUID();
-      const { resolvedScope, resolvedLinkedId, metadata } =
-        this.resolveScopeAndMetadata(input);
-      const node = new ExperimentNode({
-        id: fileId,
-        projectId: input.projectId ?? null,
-        linkedToId: resolvedLinkedId,
-        parentId: input.parentId ?? null,
-        name: res.cleanFilename,
-        isFolder: false,
-        size: res.blob.sizeBytes,
-        mimeType: input.mimeType,
-        blobId: res.blob.id,
-        scope: resolvedScope,
-        metadata,
-        authorId: input.userId,
-      });
-      await this.nodeRepo.create(node);
-
-      await this.invalidateAndEmitUpload({
-        fileId,
+      const fileId = await this.persistUploadedNode({
         blobId: res.blob.id,
         userId: input.userId,
         filename: res.cleanFilename,
@@ -196,6 +186,8 @@ export class UploadService {
         storageKey: res.storageKey,
         projectId: input.projectId,
         parentId: input.parentId,
+        scope: input.scope,
+        metaData: input.metaData,
       });
 
       return {
@@ -232,35 +224,17 @@ export class UploadService {
       contentHash: input.contentHash,
     });
 
-    const fileId = crypto.randomUUID();
-    const { resolvedScope, resolvedLinkedId, metadata } =
-      this.resolveScopeAndMetadata(input);
-    const node = new ExperimentNode({
-      id: fileId,
-      projectId: input.projectId ?? null,
-      linkedToId: resolvedLinkedId,
-      parentId: input.parentId ?? null,
-      name: completed.cleanFilename,
-      isFolder: false,
-      size: completed.sizeBytes,
-      mimeType: completed.mimeType,
-      blobId: completed.blobId,
-      scope: resolvedScope,
-      metadata,
-      authorId: input.userId,
-    });
-    await this.nodeRepo.create(node);
-
-    await this.invalidateAndEmitUpload({
-      fileId,
+    const fileId = await this.persistUploadedNode({
       blobId: completed.blobId,
       userId: input.userId,
       filename: completed.cleanFilename,
       mimeType: completed.mimeType,
       sizeBytes: completed.sizeBytes,
-      storageKey: completed.blob.s3Key.value(),
+      storageKey: completed.blob.s3Key,
       projectId: input.projectId,
       parentId: input.parentId,
+      scope: input.scope,
+      metaData: input.metaData,
     });
 
     return {
@@ -271,5 +245,112 @@ export class UploadService {
       size: completed.size,
       mimeType: completed.mimeType,
     };
+  }
+
+  async initiateMultipart(input: InitiateMultipartInput) {
+    const targetSpaceId = input.projectId ?? input.userId;
+    const res = await this.filesPort.initiateMultipart({
+      userId: input.userId,
+      spaceId: targetSpaceId,
+      parentId: input.parentId ?? null,
+      filename: input.filename,
+      mimeType: input.mimeType,
+      totalSize: input.totalSize,
+      expectedHash: input.expectedHash,
+    });
+
+    if (res.deduplicated && res.blob) {
+      const fileId = await this.persistUploadedNode({
+        blobId: res.blob.id,
+        userId: input.userId,
+        filename: res.cleanFilename,
+        mimeType: input.mimeType,
+        sizeBytes: res.blob.sizeBytes,
+        storageKey: res.storageKey,
+        projectId: input.projectId,
+        parentId: input.parentId,
+        scope: input.scope,
+      });
+
+      return {
+        deduplicated: true,
+        sessionId: '',
+        uploadId: '',
+        partSize: 0,
+        totalParts: 0,
+        fileId,
+        url: getFileContentPath(fileId),
+        filename: res.cleanFilename,
+        size: Number(res.blob.sizeBytes),
+      };
+    }
+
+    return {
+      sessionId: res.sessionId,
+      uploadId: res.uploadId,
+      partSize: res.partSize,
+      totalParts: res.totalParts,
+    };
+  }
+
+  async getMultipartPartUrl(
+    sessionId: string,
+    partNumber: number,
+    actor?: MultipartActorContext,
+  ): Promise<string> {
+    return this.filesPort.getMultipartPartUrl(
+      sessionId,
+      partNumber,
+      this.toFileActor(actor),
+    );
+  }
+
+  async getMultipartPartUrls(
+    sessionId: string,
+    partNumbers: number[],
+    actor?: MultipartActorContext,
+  ) {
+    return this.filesPort.presignMultipartParts(
+      sessionId,
+      partNumbers,
+      this.toFileActor(actor),
+    );
+  }
+
+  async completeMultipart(input: CompleteMultipartInput) {
+    const { blob, session } = await this.filesPort.completeMultipart({
+      sessionId: input.sessionId,
+      parts: input.parts,
+      actor: this.toFileActor(input.actor),
+    });
+
+    const sessionProjectId =
+      session.spaceId !== session.userId ? session.spaceId : null;
+    const fileId = await this.persistUploadedNode({
+      blobId: blob.id,
+      userId: session.userId,
+      filename: session.filename,
+      mimeType: session.mimeType,
+      sizeBytes: session.totalSize,
+      storageKey: blob.s3Key,
+      projectId: sessionProjectId,
+      parentId: session.parentId,
+      scope: sessionProjectId ? FileScope.Project : FileScope.Personal,
+    });
+
+    return {
+      fileId,
+      blobId: blob.id,
+      url: getFileContentPath(fileId),
+      filename: session.filename,
+      size: Number(session.totalSize),
+    };
+  }
+
+  async abortMultipart(
+    sessionId: string,
+    actor?: MultipartActorContext,
+  ): Promise<void> {
+    await this.filesPort.abortMultipart(sessionId, this.toFileActor(actor));
   }
 }

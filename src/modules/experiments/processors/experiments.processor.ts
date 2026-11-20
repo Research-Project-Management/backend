@@ -15,16 +15,15 @@ import {
   type IFilesPort,
 } from '@/modules/files';
 import {
-  EXPERIMENT_NODE_REPOSITORY,
   EXPERIMENTS_PROCESSING_QUEUE,
   EXPERIMENTS_JOB_MAINTENANCE_TRASH,
   EXPERIMENTS_JOB_PROCESS_FILE,
 } from '../experiments.constant';
 import { ExperimentsProcessingJobData } from '../experiments.type';
-import { INodeRepository } from '../repositories/node.repository';
+import { NodeRepository } from '../repositories/node.repository';
 import { ExperimentNode } from '../domain/node.domain';
 import { ExperimentsCacheService } from '../services/cache.service';
-import { TrashRetentionJob } from '../services/lifecycle.service';
+import { TrashService } from '../services/trash.service';
 
 @Processor(EXPERIMENTS_PROCESSING_QUEUE, { concurrency: 3 })
 export class ExperimentsQueueConsumer
@@ -36,10 +35,9 @@ export class ExperimentsQueueConsumer
   constructor(
     @Inject(FILES_PORT)
     private readonly filesPort: IFilesPort,
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
+    private readonly nodeRepo: NodeRepository,
     @Optional()
-    private readonly trashRetentionJob?: TrashRetentionJob,
+    private readonly trashService?: TrashService,
     @Optional()
     private readonly cacheService?: ExperimentsCacheService,
   ) {
@@ -66,7 +64,7 @@ export class ExperimentsQueueConsumer
         this.logger.log(
           `Starting scheduled maintenance: Trash Retention [${job.id}]`,
         );
-        return this.trashRetentionJob?.processExpiredTrash();
+        return this.trashService?.processExpiredTrash();
       }
       case EXPERIMENTS_JOB_PROCESS_FILE:
       default: {
@@ -202,7 +200,11 @@ export class ExperimentsQueueConsumer
             fileId: data.blobId,
           });
           if (thumbBuffer) {
-            thumbnailPath = this.filesPort.getThumbnailUrl(data.blobId);
+            const blob = await this.filesPort.findBlobById(data.blobId);
+            thumbnailPath = this.filesPort.getThumbnailUrl(
+              data.blobId,
+              blob?.contentHashHex,
+            );
             this.logger.log(
               `Generated and stored WebP thumbnail for PDF ${data.fileId}`,
             );

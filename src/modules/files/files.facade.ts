@@ -1,25 +1,39 @@
 import {
-  BadRequestException,
+  ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   Optional,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { Readable } from 'node:stream';
-import { MAX_PDF_THUMBNAIL_BYTES } from './files.constant';
-import { ContentHash, StorageBlob } from './domain/blob.domain';
 import {
+  DEFAULT_STORAGE_QUOTA_BYTES,
+  FILES_JOB_GENERATE_THUMBNAIL,
+  FILES_MEDIA_QUEUE,
+  STORAGE_ADAPTER,
+} from './files.constant';
+import { ByteRange, StorageKey } from './domain/storage-vo';
+import {
+  classifyObjectKey,
+  cleanUuid,
   inferMimeType,
-  isBlockedExtension,
   isValidUuid,
-  resolveTargetSpaceId,
   sanitizeFilename,
   streamToBuffer,
-  validateMagicBytes,
 } from './domain/files.policy';
-import { StorageQuota } from './domain/quota.domain';
-import { StorageLifecycleConfiguration } from './types/adapter.type';
+import { BlobRepository } from './repositories/blob.repository';
+import { QuotaRepository } from './repositories/quota.repository';
+import { IStorageAdapter } from './types/adapter.type';
 import {
+  AttachBlobRefInput,
+  AuthorizedBlobContentResult,
+  AuthorizedObjectStreamResult,
+  BlobRefRecord,
+  BlobStatus,
   CompleteFileMultipartInput,
   CompleteFileMultipartOutput,
   CompletePresignedFileInput,
@@ -34,297 +48,72 @@ import {
   IFilesPort,
   InitiateFileMultipartInput,
   InitiateFileMultipartOutput,
+  MultipartPartUrlItem,
   PresignFileUploadInput,
   PresignFileUploadOutput,
+  QuotaSummaryOutput,
   ReadFilesInput,
   ReadFilesOutput,
   RegisterUploadedObjectInput,
+  RequestThumbnailInput,
+  StorageBlobRecord,
+  StorageQuotaRecord,
   StoreBufferCasResult,
   StreamBlobTarget,
   StreamKeyOutput,
   UploadFilesInput,
   UploadFilesOutput,
 } from './types/files.type';
+import { FileAccessService } from './services/access.service';
 import { BlobService } from './services/blob.service';
-import { QuotaService } from './services/quota.service';
-import { PresignService } from './services/presign.service';
-import { FileStreamService } from './services/stream.service';
 import { ThumbnailService } from './services/thumbnail.service';
+import { FilesUploadService } from './services/upload.service';
 
 @Injectable()
 export class FilesFacade implements IFilesPort {
   private readonly logger = new Logger(FilesFacade.name);
 
   constructor(
+    @Inject(STORAGE_ADAPTER) private readonly driver: IStorageAdapter,
     private readonly blobService: BlobService,
-    private readonly quotaService: QuotaService,
-    private readonly presignService: PresignService,
-    private readonly streamService: FileStreamService,
+    private readonly blobRepo: BlobRepository,
+    private readonly quotaRepo: QuotaRepository,
+    private readonly uploadService: FilesUploadService,
     @Optional() private readonly thumbnailService?: ThumbnailService,
+    @Optional() private readonly accessService?: FileAccessService,
+    @Optional()
+    @InjectQueue(FILES_MEDIA_QUEUE)
+    private readonly mediaQueue?: Queue,
   ) {}
 
-  async uploadFile(input: UploadFilesInput): Promise<UploadFilesOutput> {
-    if (!input.buffer || input.buffer.length === 0) {
-      throw new BadRequestException('File buffer cannot be empty');
-    }
-    const cleanFilename = sanitizeFilename(input.filename);
-    if (isBlockedExtension(cleanFilename)) {
-      throw new BadRequestException(
-        'File extension is prohibited for security reasons',
-      );
-    }
-
-    const mimeType =
-      input.mimeType && input.mimeType !== 'application/octet-stream'
-        ? input.mimeType
-        : inferMimeType({ filename: cleanFilename, headerBytes: input.buffer });
-
-    validateMagicBytes(input.buffer, mimeType, cleanFilename);
-
-    const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
-    await this.assertQuotaAvailable(targetSpaceId, BigInt(input.buffer.length));
-
-    const { blob, isDeduplicated } = await this.storeBuffer(
-      input.buffer,
-      mimeType,
-    );
-
-    try {
-      await this.reserveQuota(targetSpaceId, blob.sizeBytes);
-    } catch (err) {
-      await this.releaseBlob(blob.id).catch(() => {});
-      throw err;
-    }
-
-    return {
-      fileId: blob.id,
-      blobId: blob.id,
-      url: getFileContentPath(blob.id),
-      path: blob.s3Key.value(),
-      filename: cleanFilename,
-      size: Number(blob.sizeBytes),
-      mimeType,
-      isDeduplicated,
-    };
+  uploadFile(input: UploadFilesInput): Promise<UploadFilesOutput> {
+    return this.uploadService.uploadFile(input);
   }
 
-  async uploadBuffer(
-    key: string,
-    buffer: Buffer,
-    contentType = 'application/octet-stream',
-  ): Promise<{ path: string; url: string }> {
-    await this.blobService.put(key, buffer, {
-      mimeType: contentType,
-      size: buffer.length,
-    });
-    return {
-      path: key,
-      url: getFileObjectPath(key),
-    };
-  }
-
-  async readOwnedFile(input: ReadFilesInput): Promise<ReadFilesOutput> {
-    const { blob, stream } = await this.blobService.openStream(input.fileId);
-    const buffer = await streamToBuffer(stream as AsyncIterable<Buffer>);
-    const mimeType = inferMimeType({ headerBytes: buffer.subarray(0, 32) });
-
-    return {
-      fileId: blob.id,
-      filename: blob.id,
-      mimeType,
-      size: Number(blob.sizeBytes),
-      storageKey: blob.s3Key.value(),
-      contentUrl: getFileContentPath(blob.id),
-      buffer,
-    };
-  }
-
-  async getOwnedFileStream(
-    input: ReadFilesInput & { range?: { start: number; end?: number } },
-  ): Promise<{
-    stream: NodeJS.ReadableStream;
-    mimeType: string;
-    size: number;
+  uploadPublicImage(input: {
+    buffer: Buffer;
     filename: string;
-    contentRange?: string;
-  }> {
-    const blob = await this.blobService.findBlobById(input.fileId);
-    if (!blob) {
-      throw new NotFoundException('Physical storage blob not found');
-    }
-
-    const totalSize = Number(blob.sizeBytes);
-    const normalizedRange = input.range
-      ? {
-          start: input.range.start,
-          end:
-            input.range.end !== undefined
-              ? input.range.end
-              : Math.max(0, totalSize - 1),
-        }
-      : undefined;
-
-    const { stream, contentLength, contentRange } =
-      await this.blobService.openStream(input.fileId, normalizedRange);
-
-    return {
-      stream,
-      mimeType: 'application/octet-stream',
-      size: contentLength,
-      filename: blob.id,
-      contentRange,
-    };
-  }
-
-  async deleteFile(fileId: string, target?: DeleteFileTarget): Promise<void> {
-    const targetSpaceId = target?.spaceId?.trim() || null;
-    if (targetSpaceId) {
-      const blob = await this.blobService.findBlobById(fileId);
-      if (blob) {
-        await this.releaseQuota(targetSpaceId, blob.sizeBytes).catch(() => {});
-      }
-    }
-    await this.blobService.releaseBlob(fileId);
-  }
-
-  async deleteObject(key: string): Promise<void> {
-    await this.blobService.delete(key);
-  }
-
-  async ensurePdfThumbnail(input: {
-    fileId: string;
-    userId?: string;
-    spaceId?: string | null;
-  }): Promise<Buffer | null> {
-    const thumbKey = `thumbnails/${input.fileId}.webp`;
-    try {
-      const exists = await this.blobService.exists(thumbKey);
-      if (exists) {
-        const { stream } = await this.blobService.getStream(thumbKey);
-        return streamToBuffer(stream);
-      }
-    } catch {
-      // Fall through to generate thumbnail from PDF binary
-    }
-
-    if (!this.thumbnailService) {
-      return null;
-    }
-
-    const blob =
-      typeof this.blobService.findBlobById === 'function'
-        ? await this.blobService.findBlobById(input.fileId)
-        : null;
-    if (blob && blob.sizeBytes > MAX_PDF_THUMBNAIL_BYTES) {
-      this.logger.warn(
-        `Skipping PDF thumbnail generation for ${input.fileId} (${blob.sizeBytes} bytes > ${MAX_PDF_THUMBNAIL_BYTES} bytes limit)`,
-      );
-      return null;
-    }
-
-    const { stream } = await this.blobService.openStream(input.fileId);
-    const pdfBuffer = await streamToBuffer(stream as AsyncIterable<Buffer>);
-    const thumbBuffer =
-      await this.thumbnailService.generateThumbnail(pdfBuffer);
-    if (!thumbBuffer) {
-      return null;
-    }
-
-    try {
-      await this.blobService.put(thumbKey, thumbBuffer, {
-        mimeType: 'image/webp',
-        size: thumbBuffer.length,
-      });
-    } catch {
-      // Non-fatal if caching generated thumbnail fails
-    }
-
-    return thumbBuffer;
-  }
-
-  storeBuffer(
-    buffer: Buffer,
-    mimeType: string,
-    onBeforeNewUpload?: (sizeBytes: bigint) => Promise<void>,
-  ): Promise<StoreBufferCasResult> {
-    return this.blobService.storeBuffer(buffer, mimeType, onBeforeNewUpload);
-  }
-
-  registerUploadedObject(
-    input: RegisterUploadedObjectInput,
-  ): Promise<StoreBufferCasResult> {
-    return this.blobService.registerUploadedObject(input);
+    mimeType?: string;
+  }) {
+    return this.uploadService.uploadPublicImage(input);
   }
 
   presignUpload(
     input: PresignFileUploadInput,
   ): Promise<PresignFileUploadOutput> {
-    return this.presignService.presignUpload(input);
-  }
-
-  async getPresignedUploadUrl(
-    input: PresignFileUploadInput & { scope?: string },
-  ) {
-    const res = await this.presignUpload(input);
-    return {
-      uploadUrl: res.uploadUrl || '',
-      storageKey: res.storageKey,
-      fileUuid: res.fileUuid || res.blob?.id || '',
-      expiresIn: res.expiresIn,
-      deduplicated: res.deduplicated,
-      ...(res.blob
-        ? {
-            fileId: res.blob.id,
-            url: getFileContentPath(res.blob.id),
-            filename: res.cleanFilename,
-            size: Number(res.blob.sizeBytes),
-            mimeType: input.mimeType,
-          }
-        : {}),
-    };
+    return this.uploadService.presignUpload(input);
   }
 
   completePresignedUpload(
     input: CompletePresignedFileInput,
   ): Promise<CompletePresignedFileOutput> {
-    return this.presignService.completePresignedUpload(input);
+    return this.uploadService.completePresignedUpload(input);
   }
 
   initiateMultipart(
     input: InitiateFileMultipartInput,
   ): Promise<InitiateFileMultipartOutput> {
-    return this.presignService.initiateMultipart(input);
-  }
-
-  async initiateMultipartUpload(input: InitiateFileMultipartInput) {
-    const res = await this.initiateMultipart(input);
-    return {
-      sessionId: res.sessionId,
-      uploadId: res.uploadId,
-      partSize: res.partSize,
-      totalParts: res.totalParts,
-      deduplicated: res.deduplicated,
-      ...(res.blob
-        ? {
-            fileId: res.blob.id,
-            url: getFileContentPath(res.blob.id),
-            filename: res.cleanFilename,
-            size: Number(res.blob.sizeBytes),
-          }
-        : {}),
-    };
-  }
-
-  presignMultipartPart(
-    sessionId: string,
-    partNumber: number,
-    actor?: FileActorContext,
-  ): Promise<{ url: string; partNumber: number }> {
-    return this.presignService.presignMultipartPart(
-      sessionId,
-      partNumber,
-      actor,
-    );
+    return this.uploadService.initiateMultipart(input);
   }
 
   async getMultipartPartUrl(
@@ -332,48 +121,352 @@ export class FilesFacade implements IFilesPort {
     partNumber: number,
     actor?: FileActorContext,
   ): Promise<string> {
-    const res = await this.presignMultipartPart(sessionId, partNumber, actor);
-    return res.url;
+    const [item] = await this.uploadService.presignMultipartParts(
+      sessionId,
+      [partNumber],
+      actor,
+    );
+    return item.uploadUrl;
   }
 
-  completeMultipart(
-    input: CompleteFileMultipartInput,
-  ): Promise<CompleteFileMultipartOutput> {
-    return this.presignService.completeMultipart(input);
+  presignMultipartParts(
+    sessionId: string,
+    partNumbers: number[],
+    actor?: FileActorContext,
+  ): Promise<MultipartPartUrlItem[]> {
+    return this.uploadService.presignMultipartParts(sessionId, partNumbers, actor);
   }
 
-  async completeMultipartUpload(input: CompleteFileMultipartInput) {
-    const res = await this.completeMultipart(input);
-    return {
-      fileId: res.blob.id,
-      blobId: res.blob.id,
-      url: getFileContentPath(res.blob.id),
-      filename: res.session.filename,
-      size: Number(res.blob.sizeBytes),
-      mimeType: res.session.mimeType,
-    };
+  completeMultipart(input: CompleteFileMultipartInput): Promise<CompleteFileMultipartOutput> {
+    return this.uploadService.completeMultipart(input);
   }
 
   abortMultipart(sessionId: string, actor?: FileActorContext): Promise<void> {
-    return this.presignService.abortMultipart(sessionId, actor);
+    return this.uploadService.abortMultipart(sessionId, actor);
   }
 
-  abortMultipartUpload(
-    sessionId: string,
-    actor?: FileActorContext,
-  ): Promise<void> {
-    return this.abortMultipart(sessionId, actor);
+  registerUploadedObject(input: RegisterUploadedObjectInput): Promise<StoreBufferCasResult> {
+    return this.blobService.registerUploadedObject(input);
   }
 
-  streamBlob(
+  private async resolveBlobMime(blob: StorageBlobRecord, headerBytes?: Buffer): Promise<string> {
+    if (blob.mimeType && blob.mimeType !== 'application/octet-stream') return blob.mimeType;
+    if (headerBytes) return inferMimeType({ headerBytes });
+    if (blob.sizeBytes <= 0n) return 'application/octet-stream';
+    try {
+      const end = Math.min(31, Number(blob.sizeBytes) - 1);
+      const { stream } = await this.driver.getStream(blob.s3Key, { start: 0, end });
+      return inferMimeType({ headerBytes: await streamToBuffer(stream as AsyncIterable<Buffer>) });
+    } catch {
+      return 'application/octet-stream';
+    }
+  }
+
+  async readOwnedFile(input: ReadFilesInput): Promise<ReadFilesOutput> {
+    const { blob, stream } = await this.blobService.openStream(input.fileId);
+    const buffer = await streamToBuffer(stream as AsyncIterable<Buffer>);
+    return {
+      fileId: blob.id,
+      filename: blob.id,
+      mimeType: await this.resolveBlobMime(blob, buffer.subarray(0, 32)),
+      size: Number(blob.sizeBytes),
+      storageKey: blob.s3Key,
+      contentUrl: getFileContentPath(blob.id),
+      buffer,
+    };
+  }
+
+  async getOwnedFileStream(
+    input: ReadFilesInput & { range?: { start: number; end?: number } },
+  ) {
+    const blob = await this.blobRepo.findById(input.fileId);
+    if (!blob) throw new NotFoundException('Physical storage blob not found');
+
+    const totalSize = Number(blob.sizeBytes);
+    const range = input.range
+      ? { start: input.range.start, end: input.range.end ?? Math.max(0, totalSize - 1) }
+      : undefined;
+    const { stream, contentLength, contentRange } = await this.driver.getStream(blob.s3Key, range);
+
+    return {
+      stream,
+      mimeType: blob.mimeType || 'application/octet-stream',
+      size: contentLength,
+      filename: blob.id,
+      contentRange,
+    };
+  }
+
+  async deleteFile(fileId: string, target?: DeleteFileTarget): Promise<void> {
+    if (target?.ownerType && target?.ownerId) {
+      const detached = await this.detachBlobRef(
+        target.ownerType,
+        target.ownerId,
+      );
+      if (detached) return;
+    }
+
+    const targetSpaceId = target?.spaceId?.trim() || null;
+    if (targetSpaceId) {
+      const blob = await this.blobRepo.findById(fileId);
+      if (blob) {
+        await this.quotaRepo
+          .decrementUsage(targetSpaceId, blob.sizeBytes)
+          .catch(() => {});
+      }
+    }
+    await this.blobRepo.decrementRefCount(fileId);
+  }
+
+  async attachBlobRef(
+    input: AttachBlobRefInput,
+  ): Promise<{ created: boolean; ref: BlobRefRecord | null }> {
+    const fallbackBytes = input.sizeBytes ?? 0n;
+    const { created, ref } = await this.blobRepo.attachRef(input);
+    if (!created) return { created: false, ref };
+
+    const effectiveBytes = ref.sizeBytes ?? fallbackBytes;
+    try {
+      await this.quotaRepo.incrementUsage(input.spaceId, effectiveBytes);
+      await this.blobRepo.incrementRefCount(input.blobId);
+      return { created: true, ref };
+    } catch (err) {
+      await this.blobRepo
+        .detachRef(input.ownerType, input.ownerId)
+        .catch(() => undefined);
+      throw err;
+    }
+  }
+
+  async detachBlobRef(ownerType: string, ownerId: string): Promise<boolean> {
+    const deleted = await this.blobRepo.detachRef(ownerType, ownerId);
+    if (!deleted) return false;
+    await this.quotaRepo
+      .decrementUsage(deleted.spaceId, deleted.sizeBytes)
+      .catch(() => {});
+    await this.blobRepo.decrementRefCount(deleted.blobId).catch(() => {});
+    return true;
+  }
+
+  async assertSpaceAccess(
+    userId: string,
+    spaceId?: string | null,
+  ): Promise<string | undefined> {
+    const resolvedSpaceId = cleanUuid(spaceId) ?? undefined;
+    await this.accessService?.assertSpaceAccess(userId, resolvedSpaceId);
+    return resolvedSpaceId;
+  }
+
+  async getQuotaSummary(
+    userId: string,
+    rawSpaceId?: string,
+  ): Promise<QuotaSummaryOutput> {
+    const explicitSpaceId = cleanUuid(rawSpaceId) ?? null;
+    await this.accessService?.assertSpaceAccess(userId, explicitSpaceId);
+    const targetSpaceId = explicitSpaceId ?? userId;
+    const isProject = Boolean(explicitSpaceId && explicitSpaceId !== userId);
+    const quota = await this.quotaRepo.findBySpaceId(targetSpaceId);
+    const usedBytes = Number(quota?.usedBytes ?? 0n);
+    const maxBytes = Number(quota?.maxBytes ?? DEFAULT_STORAGE_QUOTA_BYTES);
+    const remainingBytes = Math.max(0, maxBytes - usedBytes);
+    const usagePercent =
+      maxBytes > 0 ? Number(((usedBytes / maxBytes) * 100).toFixed(2)) : 0;
+
+    return {
+      usedBytes,
+      maxBytes,
+      remainingBytes,
+      usagePercent,
+      scope: isProject ? 'project' : 'personal',
+      spaceId: targetSpaceId,
+    };
+  }
+
+  async getAuthorizedDownloadUrl(
+    userId: string,
+    blobId: string,
+    filename?: string,
+  ): Promise<{ url: string; expiresIn: number }> {
+    if (!isValidUuid(blobId)) {
+      throw new NotFoundException('File blob not found');
+    }
+    if (this.accessService) {
+      const allowed = await this.accessService.canAccessBlob(userId, blobId);
+      if (!allowed) {
+        throw new ForbiddenException('You do not have access to this file');
+      }
+    }
+    const cleanName = filename ? sanitizeFilename(filename) : undefined;
+    const expiresIn = 300;
+    const url = await this.getPresignedDownloadUrl(blobId, {
+      expiresInSeconds: expiresIn,
+      filename: cleanName,
+    });
+    return { url, expiresIn };
+  }
+
+  async resolveAuthorizedBlobContent(input: {
+    blobId: string;
+    userId?: string;
+    exp?: string;
+    sig?: string;
+    filename?: string;
+    isDownload: boolean;
+    redirect?: boolean;
+    ifNoneMatch?: string;
+    rangeHeader?: string;
+  }): Promise<AuthorizedBlobContentResult> {
+    if (!isValidUuid(input.blobId)) {
+      throw new NotFoundException('File blob not found');
+    }
+    if (this.accessService) {
+      await this.accessService.assertBlobReadAccess(input.blobId, input);
+    } else if (!input.userId) {
+      throw new UnauthorizedException(
+        'Authentication or signed access token is required',
+      );
+    }
+
+    const blob = await this.blobRepo.findById(input.blobId);
+    if (!blob || blob.status !== BlobStatus.READY) {
+      throw new NotFoundException('File blob not found');
+    }
+
+    const safeFilename = input.filename
+      ? sanitizeFilename(input.filename)
+      : blob.id;
+
+    if (input.redirect) {
+      const location = await this.getPresignedDownloadUrl(blob.id, {
+        expiresInSeconds: 300,
+        filename: safeFilename,
+      });
+      return { kind: 'redirect', location };
+    }
+
+    const etag = `"${blob.contentHashHex}"`;
+    if (input.ifNoneMatch && input.ifNoneMatch === etag && !input.rangeHeader) {
+      return { kind: 'not-modified', etag };
+    }
+
+    const resolvedMime = await this.resolveBlobMime(blob);
+    const streamRes = await this.streamBlob(blob, {
+      rangeHeader: input.rangeHeader,
+      mimeType: resolvedMime,
+      filename: safeFilename,
+    });
+
+    return {
+      kind: 'stream',
+      statusCode: streamRes.statusCode,
+      stream: streamRes.stream,
+      mimeType: streamRes.mimeType,
+      filename: streamRes.filename,
+      contentLength: streamRes.contentLength,
+      contentRange: streamRes.contentRange,
+      etag: streamRes.etag || etag,
+      isDownload: input.isDownload,
+    };
+  }
+
+  async resolveAuthorizedObjectStream(input: {
+    rawKey: string;
+    userId?: string;
+    exp?: string;
+    sig?: string;
+    rangeHeader?: string;
+  }): Promise<AuthorizedObjectStreamResult> {
+    let key: string;
+    let isPublicAsset: boolean;
+
+    if (this.accessService) {
+      ({ key, isPublicAsset } = this.accessService.resolveObjectAccess(input.rawKey, input));
+    } else {
+      const classified = classifyObjectKey(input.rawKey);
+      if (classified.isDerivative && !input.userId) {
+        throw new UnauthorizedException('Authentication or signed access token is required');
+      }
+      ({ key, isPublicAsset } = classified);
+    }
+
+    const output = await this.streamByKey(key, input.rangeHeader);
+    return {
+      statusCode: output.contentRange ? 206 : 200,
+      stream: output.stream,
+      mimeType: inferMimeType({ filename: key }),
+      filename: key.split('/').pop() || 'file',
+      contentLength: output.contentLength,
+      contentRange: output.contentRange,
+      cacheControl: isPublicAsset ? 'public, max-age=86400' : 'private, max-age=3600',
+    };
+  }
+
+  async streamBlob(
     blob: StreamBlobTarget,
     options?: FilesStreamOptions,
   ): Promise<FilesStreamOutput> {
-    return this.streamService.streamBlob(blob, options);
+    const mimeType = options?.mimeType || 'application/octet-stream';
+    const filename = options?.filename || 'download';
+    const totalSize = Number(blob.sizeBytes);
+    const etag = blob.contentHashHex ? `"${blob.contentHashHex}"` : undefined;
+
+    if (etag && options?.ifNoneMatch === etag && !options.rangeHeader) {
+      return { stream: null, statusCode: 304, mimeType, contentLength: 0, filename, etag };
+    }
+
+    const byteRange = ByteRange.parse(options?.rangeHeader, totalSize);
+    const { stream } = await this.driver.getStream(
+      blob.s3Key,
+      byteRange ? { start: byteRange.start, end: byteRange.end } : undefined,
+    );
+
+    return {
+      stream,
+      statusCode: byteRange ? 206 : 200,
+      mimeType,
+      contentLength: byteRange ? byteRange.length : totalSize,
+      ...(byteRange ? { contentRange: byteRange.getContentRangeHeader() } : {}),
+      filename,
+      etag,
+    };
   }
 
-  streamByKey(key: string, rangeHeader?: string): Promise<StreamKeyOutput> {
-    return this.streamService.streamByKey(key, rangeHeader);
+  async streamByKey(
+    key: string,
+    rangeHeader?: string,
+  ): Promise<StreamKeyOutput> {
+    let range: { start: number; end: number } | undefined;
+    if (rangeHeader) {
+      const stat = await this.driver.stat(key);
+      const parsed = ByteRange.parse(rangeHeader, stat.size);
+      if (parsed) range = { start: parsed.start, end: parsed.end };
+    }
+    const res = await this.driver.getStream(key, range);
+    return {
+      stream: res.stream,
+      contentType: 'application/octet-stream',
+      contentLength: res.contentLength,
+      contentRange: res.contentRange,
+    };
+  }
+
+  createSignedContentUrl(
+    blobId: string,
+    options?: {
+      expiresInSeconds?: number;
+      filename?: string;
+      download?: boolean;
+    },
+  ): string {
+    return this.accessService
+      ? this.accessService.signBlobUrl(blobId, options)
+      : getFileContentPath(blobId);
+  }
+
+  createSignedObjectUrl(key: string, expiresInSeconds = 3600): string {
+    return this.accessService
+      ? this.accessService.signObjectUrl(key, expiresInSeconds)
+      : getFileObjectPath(key);
   }
 
   async getPresignedDownloadUrl(
@@ -388,17 +481,14 @@ export class FilesFacade implements IFilesPort {
         : (optionsOrExpires ?? {});
 
     if (isValidUuid(fileIdOrKey)) {
-      const blob = await this.blobService.findBlobById(fileIdOrKey);
+      const blob = await this.blobRepo.findById(fileIdOrKey);
       if (!blob) {
         throw new NotFoundException('Physical storage blob not found');
       }
-      return this.streamService.getPresignedDownloadUrl(
-        blob.s3Key.value(),
-        options,
-      );
+      return this.driver.getPresignedDownloadUrl(blob.s3Key, options);
     }
 
-    return this.streamService.getPresignedDownloadUrl(fileIdOrKey, options);
+    return this.driver.getPresignedDownloadUrl(fileIdOrKey, options);
   }
 
   openBlobStream(blobId: string, range?: { start: number; end: number }) {
@@ -406,66 +496,23 @@ export class FilesFacade implements IFilesPort {
   }
 
   statObject(key: string) {
-    return this.blobService.stat(key);
+    return this.driver.stat(key);
   }
 
-  findBlobById(blobId: string): Promise<StorageBlob | null> {
-    return this.blobService.findBlobById(blobId);
+  findBlobById(blobId: string): Promise<StorageBlobRecord | null> {
+    return this.blobRepo.findById(blobId);
   }
 
-  findBlobByHash(contentHashHex: string): Promise<StorageBlob | null> {
-    return this.blobService.findBlobByHash(ContentHash.fromHex(contentHashHex));
+  findBlobByHash(contentHashHex: string): Promise<StorageBlobRecord | null> {
+    return this.blobRepo.findByHash(contentHashHex);
   }
 
-  acquireBlob(blobId: string): Promise<StorageBlob | null> {
-    return this.blobService.acquireBlob(blobId);
+  acquireBlob(blobId: string): Promise<StorageBlobRecord | null> {
+    return this.blobRepo.incrementRefCount(blobId);
   }
 
-  releaseBlob(blobId: string): Promise<void> {
-    return this.blobService.releaseBlob(blobId);
-  }
-
-  getThumbnailUrl(blobId: string): string {
-    return getFileObjectPath(`thumbnails/${blobId}.webp`);
-  }
-
-  async ensureImageThumbnail(input: {
-    fileId: string;
-    width?: number;
-    height?: number;
-    quality?: number;
-  }): Promise<EnsureImageThumbnailOutput | null> {
-    if (!this.thumbnailService) {
-      return null;
-    }
-
-    const { stream } = await this.blobService.openStream(input.fileId);
-    const buffer = await streamToBuffer(stream as AsyncIterable<Buffer>);
-    const result = await this.thumbnailService.generateImageThumbnail(buffer, {
-      width: input.width,
-      height: input.height,
-      quality: input.quality,
-    });
-    if (!result) {
-      return null;
-    }
-
-    const thumbKey = `thumbnails/${input.fileId}.webp`;
-    try {
-      await this.blobService.put(thumbKey, result.buffer, {
-        mimeType: result.mimeType,
-        size: result.buffer.length,
-      });
-    } catch {
-      // Non-fatal if caching generated thumbnail fails
-    }
-
-    return {
-      thumbnailUrl: this.getThumbnailUrl(input.fileId),
-      width: result.width,
-      height: result.height,
-      format: result.format,
-    };
+  async releaseBlob(blobId: string): Promise<void> {
+    await this.blobRepo.decrementRefCount(blobId);
   }
 
   putObject(
@@ -473,7 +520,7 @@ export class FilesFacade implements IFilesPort {
     data: Buffer | Readable,
     options?: { mimeType?: string; size?: number },
   ): Promise<void> {
-    return this.blobService.put(key, data, options);
+    return this.driver.put(key, data, options);
   }
 
   getObjectStream(
@@ -484,55 +531,78 @@ export class FilesFacade implements IFilesPort {
     contentLength: number;
     contentRange?: string;
   }> {
-    return this.blobService.getStream(key, range);
+    return this.driver.getStream(key, range);
   }
 
-  objectExists(key: string): Promise<boolean> {
-    return this.blobService.exists(key);
+  deleteObject(key: string): Promise<void> {
+    return this.driver.delete(key);
   }
 
-  copyObject(sourceKey: string, destinationKey: string): Promise<void> {
-    return this.blobService.copy(sourceKey, destinationKey);
-  }
-
-  deleteObjects(keys: string[]): Promise<void> {
-    return this.blobService.deleteMany(keys);
-  }
-
-  reclaimOrphanBlobs(limit = 100): Promise<number> {
-    return this.blobService.reclaimOrphanBlobs(limit);
-  }
-
-  cleanupExpiredSessions(limit = 50): Promise<number> {
-    return this.presignService.cleanupExpiredSessions(limit);
-  }
-
-  applyLifecycleRules(config?: StorageLifecycleConfiguration): Promise<void> {
-    return this.blobService.applyLifecycleRules(config);
-  }
-
-  getQuota(spaceId?: string | null): Promise<StorageQuota | null> {
-    return this.quotaService.getQuota(spaceId);
-  }
-
-  assertQuotaAvailable(
-    spaceId: string | null | undefined,
-    requiredBytes: bigint,
-  ): Promise<void> {
-    return this.quotaService.assertAvailable(spaceId, requiredBytes);
+  getQuota(spaceId?: string | null): Promise<StorageQuotaRecord | null> {
+    return this.quotaRepo.findBySpaceId(spaceId);
   }
 
   reserveQuota(
     spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    return this.quotaService.reserve(spaceId, bytes);
+    return this.quotaRepo.incrementUsage(spaceId, bytes);
   }
 
   releaseQuota(
     spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint> {
-    return this.quotaService.release(spaceId, bytes);
+    return this.quotaRepo.decrementUsage(spaceId, bytes);
+  }
+
+  async requestThumbnail(input: RequestThumbnailInput): Promise<boolean> {
+    if (!input.fileId || !this.mediaQueue) return false;
+    try {
+      await this.mediaQueue.add(FILES_JOB_GENERATE_THUMBNAIL, input, {
+        jobId: `${input.kind}:${input.fileId}`,
+        removeOnComplete: true,
+        removeOnFail: 100,
+      });
+      return true;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed enqueueing media thumbnail job for ${input.fileId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
+  }
+
+  ensurePdfThumbnail(input: {
+    fileId: string;
+    userId?: string;
+    spaceId?: string | null;
+  }): Promise<Buffer | null> {
+    return this.thumbnailService
+      ? this.thumbnailService.ensurePdfThumbnail(input)
+      : Promise.resolve(null);
+  }
+
+  ensureImageThumbnail(input: {
+    fileId: string;
+    width?: number;
+    height?: number;
+    quality?: number;
+  }): Promise<EnsureImageThumbnailOutput | null> {
+    return this.thumbnailService
+      ? this.thumbnailService.ensureImageThumbnail(input)
+      : Promise.resolve(null);
+  }
+
+  getThumbnailUrl(blobId: string, contentHashHex?: string): string {
+    if (this.thumbnailService) {
+      return this.thumbnailService.getThumbnailUrl(blobId, contentHashHex);
+    }
+    if (contentHashHex && /^[a-f0-9]{64}$/i.test(contentHashHex)) {
+      return getFileObjectPath(
+        StorageKey.forDerivative(contentHashHex, 'thumb').value(),
+      );
+    }
+    return getFileObjectPath(`thumbnails/${blobId}.webp`);
   }
 }

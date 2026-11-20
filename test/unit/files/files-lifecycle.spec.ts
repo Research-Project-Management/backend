@@ -2,32 +2,31 @@ import { Readable } from 'node:stream';
 import type { Job, Queue } from 'bullmq';
 import { PutBucketLifecycleConfigurationCommand } from '@aws-sdk/client-s3';
 import {
-  BlobService,
   BlobStatus,
-  ContentHash,
   DEFAULT_STORAGE_QUOTA_BYTES,
-  FilesController,
-  FilesFacade,
-  FilesLifecycleService,
-  FilesMaintenanceProcessor,
-  FileStreamService,
-  FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
-  FILES_JOB_RECLAIM_ORPHAN_BLOBS,
-  IBlobRepository,
-  IQuotaRepository,
-  ISessionRepository,
-  IStorageAdapter,
   MAX_PDF_THUMBNAIL_BYTES,
-  PresignService,
-  QuotaService,
-  S3StorageAdapter,
-  StorageBlob,
-  StorageKey,
-  StorageQuota,
-  ThumbnailService,
-  UploadSession,
+  StorageBlobRecord,
+  StorageQuotaRecord,
+  UploadSessionRecord,
   UploadSessionStatus,
 } from '@/modules/files';
+import {
+  FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
+  FILES_JOB_RECLAIM_ORPHAN_BLOBS,
+  FILES_JOB_RECONCILE_QUOTAS,
+} from '@/modules/files/files.constant';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { FilesFacade } from '@/modules/files/files.facade';
+import { FilesController } from '@/modules/files/controllers/files.controller';
+import { S3StorageAdapter } from '@/modules/files/adapters/s3.adapter';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
+import { ThumbnailService } from '@/modules/files/services/thumbnail.service';
+import { FilesMaintenanceProcessor } from '@/modules/files/processors/files-maintenance.processor';
+import type { IStorageAdapter } from '@/modules/files/types/adapter.type';
 
 function createMockAdapter(): jest.Mocked<IStorageAdapter> {
   return {
@@ -56,22 +55,88 @@ function createMockAdapter(): jest.Mocked<IStorageAdapter> {
   };
 }
 
-function createMockBlobRepo(): jest.Mocked<IBlobRepository> {
+function makeBlobRecord(
+  overrides: Partial<StorageBlobRecord> & {
+    id: string;
+    contentHashHex: string;
+  },
+): StorageBlobRecord {
   return {
-    findById: jest.fn().mockResolvedValue(null),
-    findByHash: jest.fn().mockResolvedValue(null),
-    create: jest.fn().mockImplementation(async (blob) => blob),
-    delete: jest.fn().mockResolvedValue(undefined),
-    findTombstonedBlobs: jest.fn().mockResolvedValue([]),
-    incrementRefCount: jest.fn().mockResolvedValue(null),
-    decrementRefCount: jest.fn().mockResolvedValue(null),
-    claimBlobForPurge: jest.fn().mockResolvedValue(true),
-    restoreClaimedBlob: jest.fn().mockResolvedValue(undefined),
+    hashAlgorithm: 'SHA256',
+    sizeBytes: 128n,
+    mimeType: 'application/octet-stream',
+    checksumVerified: true,
+    s3Key: StorageKey.forBlob(overrides.contentHashHex).value(),
+    s3Bucket: 'flux',
+    storageClass: 'STANDARD',
+    refCount: 1,
+    status: BlobStatus.READY,
+    createdAt: new Date(),
+    tombstoneAt: null,
+    claimedAt: null,
+    ...overrides,
   };
 }
 
+function createMockBlobRepo(): jest.Mocked<BlobRepository> {
+  return {
+    findById: jest.fn().mockResolvedValue(null),
+    findByHash: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockImplementation(async (input) =>
+      makeBlobRecord({
+        id: input.id,
+        contentHashHex: input.contentHashHex,
+        sizeBytes: input.sizeBytes,
+        mimeType: input.mimeType,
+        checksumVerified: input.checksumVerified,
+        s3Key: input.s3Key,
+        s3Bucket: input.s3Bucket,
+        status: input.status ?? BlobStatus.READY,
+        refCount: input.refCount ?? 1,
+      }),
+    ),
+    delete: jest.fn().mockResolvedValue(undefined),
+    deleteMany: jest.fn().mockResolvedValue(undefined),
+    incrementRefCount: jest.fn().mockResolvedValue(null),
+    decrementRefCount: jest.fn().mockResolvedValue(null),
+    reclaimStuckClaims: jest.fn().mockResolvedValue(0),
+    claimOrphanBlobsBatch: jest.fn().mockResolvedValue([]),
+    restoreClaimedBlob: jest.fn().mockResolvedValue(undefined),
+    hasSpaceAccessToBlob: jest.fn().mockResolvedValue(true),
+    attachRef: jest.fn(),
+    detachRef: jest.fn(),
+    existsInSpace: jest.fn().mockResolvedValue(false),
+  } as unknown as jest.Mocked<BlobRepository>;
+}
+
+function createMockQuotaRepo(
+  findImpl: (spaceId?: string | null) => Promise<StorageQuotaRecord | null> = async () =>
+    null,
+): jest.Mocked<QuotaRepository> {
+  return {
+    findBySpaceId: jest.fn(findImpl),
+    assertAvailable: jest.fn().mockResolvedValue(undefined),
+    incrementUsage: jest.fn().mockResolvedValue(0n),
+    decrementUsage: jest.fn().mockResolvedValue(0n),
+    reconcileSpaceQuotas: jest.fn().mockResolvedValue(0),
+  } as unknown as jest.Mocked<QuotaRepository>;
+}
+
+function createMockSessionRepo(): jest.Mocked<SessionRepository> {
+  return {
+    findById: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockImplementation(async (s) => s),
+    markStatus: jest.fn().mockImplementation(async (id, status) => ({
+      id,
+      status,
+    })),
+    markUploadingIfInitialized: jest.fn().mockResolvedValue(true),
+    findExpiredSessions: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<SessionRepository>;
+}
+
 describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
-  describe('FilesLifecycleService', () => {
+  describe('FilesMaintenanceProcessor (Lifecycle & Job Dispatch)', () => {
     const originalBootstrapEnv = process.env.FILES_BOOTSTRAP_LIFECYCLE;
 
     afterEach(() => {
@@ -86,20 +151,31 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
       const adapter = createMockAdapter();
       const blobRepo = createMockBlobRepo();
       const blobService = new BlobService(adapter, blobRepo);
+      const quotaRepo = createMockQuotaRepo();
+      const uploadService = new FilesUploadService(
+        adapter,
+        blobService,
+        blobRepo,
+        quotaRepo,
+        createMockSessionRepo(),
+      );
       const mockQueue = {
         on: jest.fn(),
         upsertJobScheduler: jest.fn().mockResolvedValue({}),
       };
 
-      const lifecycle = new FilesLifecycleService(
+      const processor = new FilesMaintenanceProcessor(
+        adapter,
         blobService,
+        uploadService,
+        quotaRepo,
         mockQueue as unknown as Queue,
       );
 
-      await lifecycle.onApplicationBootstrap();
+      await processor.onApplicationBootstrap();
 
       expect(adapter.applyLifecycleRules).toHaveBeenCalledTimes(1);
-      expect(mockQueue.upsertJobScheduler).toHaveBeenCalledTimes(2);
+      expect(mockQueue.upsertJobScheduler).toHaveBeenCalledTimes(3);
       expect(mockQueue.upsertJobScheduler).toHaveBeenNthCalledWith(
         1,
         'files-repeat-multipart-cleanup',
@@ -112,9 +188,18 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
       expect(mockQueue.upsertJobScheduler).toHaveBeenNthCalledWith(
         2,
         'files-repeat-orphan-blob-gc',
-        { pattern: '0 4 * * *' },
+        { pattern: '0 */2 * * *' },
         {
           name: FILES_JOB_RECLAIM_ORPHAN_BLOBS,
+          opts: { removeOnComplete: 100, removeOnFail: 200 },
+        },
+      );
+      expect(mockQueue.upsertJobScheduler).toHaveBeenNthCalledWith(
+        3,
+        'files-repeat-quota-reconcile',
+        { pattern: '30 3 * * *' },
+        {
+          name: FILES_JOB_RECONCILE_QUOTAS,
           opts: { removeOnComplete: 100, removeOnFail: 200 },
         },
       );
@@ -125,35 +210,50 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
       const adapter = createMockAdapter();
       const blobRepo = createMockBlobRepo();
       const blobService = new BlobService(adapter, blobRepo);
+      const quotaRepo = createMockQuotaRepo();
+      const uploadService = new FilesUploadService(
+        adapter,
+        blobService,
+        blobRepo,
+        quotaRepo,
+        createMockSessionRepo(),
+      );
       const mockQueue = {
         on: jest.fn(),
         upsertJobScheduler: jest.fn().mockResolvedValue({}),
       };
 
-      const lifecycle = new FilesLifecycleService(
+      const processor = new FilesMaintenanceProcessor(
+        adapter,
         blobService,
+        uploadService,
+        quotaRepo,
         mockQueue as unknown as Queue,
       );
 
-      await lifecycle.onApplicationBootstrap();
+      await processor.onApplicationBootstrap();
 
       expect(adapter.applyLifecycleRules).not.toHaveBeenCalled();
       expect(mockQueue.upsertJobScheduler).not.toHaveBeenCalled();
     });
-  });
 
-  describe('FilesMaintenanceProcessor', () => {
-    it('dispatches cleanup-expired-sessions and reclaim-orphan-blobs cleanly', async () => {
+    it('dispatches cleanup-expired-sessions, reclaim-orphan-blobs batches, and quota reconciliation', async () => {
+      const adapter = createMockAdapter();
       const mockBlobService = {
         reclaimOrphanBlobs: jest.fn().mockResolvedValue(4),
       } as unknown as BlobService;
-      const mockPresignService = {
+      const mockUploadService = {
         cleanupExpiredSessions: jest.fn().mockResolvedValue(3),
-      } as unknown as PresignService;
+      } as unknown as FilesUploadService;
+      const mockQuotaRepo = {
+        reconcileSpaceQuotas: jest.fn().mockResolvedValue(2),
+      } as unknown as QuotaRepository;
 
       const processor = new FilesMaintenanceProcessor(
+        adapter,
         mockBlobService,
-        mockPresignService,
+        mockUploadService,
+        mockQuotaRepo,
       );
 
       const sessionResult = await processor.process({
@@ -161,7 +261,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         name: FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
         data: {},
       } as Job<unknown>);
-      expect(mockPresignService.cleanupExpiredSessions).toHaveBeenCalledWith(
+      expect(mockUploadService.cleanupExpiredSessions).toHaveBeenCalledWith(
         100,
       );
       expect(sessionResult).toBe(3);
@@ -171,8 +271,19 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         name: FILES_JOB_RECLAIM_ORPHAN_BLOBS,
         data: {},
       } as Job<unknown>);
-      expect(mockBlobService.reclaimOrphanBlobs).toHaveBeenCalledWith(100);
+      expect(mockBlobService.reclaimOrphanBlobs).toHaveBeenCalledWith(200, {
+        maxBatches: 5,
+        timeBudgetMs: 45_000,
+      });
       expect(orphanResult).toBe(4);
+
+      const quotaResult = await processor.process({
+        id: 'job-quota-1',
+        name: FILES_JOB_RECONCILE_QUOTAS,
+        data: {},
+      } as Job<unknown>);
+      expect(mockQuotaRepo.reconcileSpaceQuotas).toHaveBeenCalledWith(200);
+      expect(quotaResult).toBe(2);
 
       const unknownResult = await processor.process({
         id: 'job-unknown',
@@ -183,19 +294,16 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
     });
   });
 
-  describe('PresignService.cleanupExpiredSessions', () => {
+  describe('FilesUploadService.cleanupExpiredSessions', () => {
     it('aborts expired multipart sessions in storage adapter and marks ABORTED in DB', async () => {
       const adapter = createMockAdapter();
       const blobRepo = createMockBlobRepo();
       const blobService = new BlobService(adapter, blobRepo);
-      const quotaService = new QuotaService({
-        findBySpaceId: jest.fn(),
-        incrementUsage: jest.fn(),
-        decrementUsage: jest.fn(),
-      });
+      const quotaRepo = createMockQuotaRepo();
 
-      const expiredSession = new UploadSession({
+      const expiredSession: UploadSessionRecord = {
         id: 'session-expired-1',
+        spaceId: 'user-1',
         userId: 'user-1',
         s3UploadId: 'r2-upload-id-99',
         s3Key: 'uploads/staging/multipart/session-expired-1/payload.bin',
@@ -204,31 +312,36 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         totalSize: 25_000_000n,
         partSize: 5_242_880,
         totalParts: 5,
+        expectedHashHex: null,
+        parentId: null,
+        status: UploadSessionStatus.INITIALIZED,
         expiresAt: new Date(Date.now() - 3600_000),
-      });
-
-      const sessionRepo: jest.Mocked<ISessionRepository> = {
-        create: jest.fn(),
-        findById: jest.fn(),
-        update: jest.fn().mockImplementation(async (s) => s),
-        findExpiredSessions: jest.fn().mockResolvedValue([expiredSession]),
+        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
-      const presignService = new PresignService(
+      const sessionRepo = createMockSessionRepo();
+      sessionRepo.findExpiredSessions.mockResolvedValue([expiredSession]);
+
+      const uploadService = new FilesUploadService(
+        adapter,
         blobService,
-        quotaService,
+        blobRepo,
+        quotaRepo,
         sessionRepo,
       );
 
-      const cleaned = await presignService.cleanupExpiredSessions(50);
+      const cleaned = await uploadService.cleanupExpiredSessions(50);
 
       expect(cleaned).toBe(1);
       expect(adapter.abortMultipartUpload).toHaveBeenCalledWith(
         'uploads/staging/multipart/session-expired-1/payload.bin',
         'r2-upload-id-99',
       );
-      expect(expiredSession.status).toBe(UploadSessionStatus.ABORTED);
-      expect(sessionRepo.update).toHaveBeenCalledWith(expiredSession);
+      expect(sessionRepo.markStatus).toHaveBeenCalledWith(
+        'session-expired-1',
+        UploadSessionStatus.ABORTED,
+      );
     });
   });
 
@@ -239,37 +352,33 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
       const blobService = new BlobService(adapter, blobRepo);
       const projectUuid = '11111111-1111-4111-8111-111111111111';
 
-      const quotaRepo: jest.Mocked<IQuotaRepository> = {
-        findBySpaceId: jest.fn(async (spaceId) => {
-          if (spaceId === projectUuid) {
-            return new StorageQuota({
-              id: 'q-proj',
-              spaceId: projectUuid,
-              usedBytes: 250n * 1024n * 1024n,
-              maxBytes: 1000n * 1024n * 1024n,
-            });
-          }
-          return null;
-        }),
-        incrementUsage: jest.fn(),
-        decrementUsage: jest.fn(),
-      };
-
-      const quotaService = new QuotaService(quotaRepo);
-      const presignService = new PresignService(blobService, quotaService, {
-        create: jest.fn(),
-        findById: jest.fn(),
-        update: jest.fn(),
-        findExpiredSessions: jest.fn(),
+      const quotaRepo = createMockQuotaRepo(async (spaceId) => {
+        if (spaceId === projectUuid) {
+          return {
+            spaceId: projectUuid,
+            usedBytes: 250n * 1024n * 1024n,
+            maxBytes: 1000n * 1024n * 1024n,
+            updatedAt: new Date(),
+          };
+        }
+        return null;
       });
-      const streamService = new FileStreamService(blobService);
-      const facade = new FilesFacade(
+
+      const uploadService = new FilesUploadService(
+        adapter,
         blobService,
-        quotaService,
-        presignService,
-        streamService,
+        blobRepo,
+        quotaRepo,
+        createMockSessionRepo(),
       );
-      const controller = new FilesController(facade, blobService);
+      const facade = new FilesFacade(
+        adapter,
+        blobService,
+        blobRepo,
+        quotaRepo,
+        uploadService,
+      );
+      const controller = new FilesController(facade);
 
       const personalRes = await controller.getQuota('user-1');
       expect(personalRes).toEqual({
@@ -293,28 +402,22 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
     });
   });
 
-  describe('FilesFacade.ensurePdfThumbnail RAM Guard', () => {
+  describe('FilesFacade & ThumbnailService.ensurePdfThumbnail RAM Guard', () => {
     it('skips streaming and returns null for PDFs exceeding 25 MB, while rendering smaller PDFs', async () => {
       const adapter = createMockAdapter();
       const blobRepo = createMockBlobRepo();
-      const hashSmall = ContentHash.fromBuffer(Buffer.from('small-pdf'));
-      const hashBig = ContentHash.fromBuffer(Buffer.from('big-pdf'));
+      const hashSmall = ContentHash.fromBuffer(Buffer.from('small-pdf')).toHex();
+      const hashBig = ContentHash.fromBuffer(Buffer.from('big-pdf')).toHex();
 
-      const smallBlob = new StorageBlob({
+      const smallBlob = makeBlobRecord({
         id: 'blob-small-pdf',
-        contentHash: hashSmall,
+        contentHashHex: hashSmall,
         sizeBytes: 1024n,
-        s3Key: StorageKey.forBlob(hashSmall.toHex()),
-        s3Bucket: 'flux',
-        status: BlobStatus.READY,
       });
-      const bigBlob = new StorageBlob({
+      const bigBlob = makeBlobRecord({
         id: 'blob-huge-pdf',
-        contentHash: hashBig,
+        contentHashHex: hashBig,
         sizeBytes: MAX_PDF_THUMBNAIL_BYTES + 1n,
-        s3Key: StorageKey.forBlob(hashBig.toHex()),
-        s3Bucket: 'flux',
-        status: BlobStatus.READY,
       });
 
       blobRepo.findById.mockImplementation(async (id) => {
@@ -329,49 +432,154 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         contentLength: pdfPayload.length,
       });
 
-      const renderedWebp = Buffer.from('webp-thumb-bytes');
-      const mockThumbnailService = {
-        generateThumbnail: jest.fn().mockResolvedValue(renderedWebp),
-      } as unknown as ThumbnailService;
-
       const blobService = new BlobService(adapter, blobRepo);
-      const quotaService = new QuotaService({
-        findBySpaceId: jest.fn(),
-        incrementUsage: jest.fn(),
-        decrementUsage: jest.fn(),
-      });
-      const presignService = new PresignService(blobService, quotaService, {
-        create: jest.fn(),
-        findById: jest.fn(),
-        update: jest.fn(),
-        findExpiredSessions: jest.fn(),
-      });
-      const streamService = new FileStreamService(blobService);
-      const facade = new FilesFacade(
+      const thumbnailService = new ThumbnailService(
+        adapter,
+        blobRepo,
         blobService,
-        quotaService,
-        presignService,
-        streamService,
-        mockThumbnailService,
+      );
+      const renderedWebp = Buffer.from('webp-thumb-bytes');
+      const genSpy = jest
+        .spyOn(thumbnailService, 'generateThumbnail')
+        .mockResolvedValue(renderedWebp);
+
+      const quotaRepo = createMockQuotaRepo();
+      const uploadService = new FilesUploadService(
+        adapter,
+        blobService,
+        blobRepo,
+        quotaRepo,
+        createMockSessionRepo(),
+      );
+      const facade = new FilesFacade(
+        adapter,
+        blobService,
+        blobRepo,
+        quotaRepo,
+        uploadService,
+        thumbnailService,
       );
 
       const skipped = await facade.ensurePdfThumbnail({ fileId: bigBlob.id });
       expect(skipped).toBeNull();
       expect(adapter.getStream).not.toHaveBeenCalled();
-      expect(mockThumbnailService.generateThumbnail).not.toHaveBeenCalled();
+      expect(genSpy).not.toHaveBeenCalled();
 
       const generated = await facade.ensurePdfThumbnail({
         fileId: smallBlob.id,
       });
       expect(generated).toEqual(renderedWebp);
-      expect(mockThumbnailService.generateThumbnail).toHaveBeenCalledWith(
-        pdfPayload,
-      );
+      expect(genSpy).toHaveBeenCalledWith(pdfPayload);
       expect(adapter.put).toHaveBeenCalledWith(
-        `thumbnails/${smallBlob.id}.webp`,
+        StorageKey.forDerivative(hashSmall, 'thumb').value(),
         renderedWebp,
         { mimeType: 'image/webp', size: renderedWebp.length },
       );
+    });
+
+    it('coalesces concurrent ensurePdfThumbnail requests for the same blob via singleflight lock', async () => {
+      const adapter = createMockAdapter();
+      const blobRepo = createMockBlobRepo();
+      const hashHex = ContentHash.fromBuffer(
+        Buffer.from('concurrent-pdf'),
+      ).toHex();
+      const blob = makeBlobRecord({
+        id: 'blob-singleflight',
+        contentHashHex: hashHex,
+        sizeBytes: 1024n,
+      });
+      blobRepo.findById.mockResolvedValue(blob);
+
+      const pdfPayload = Buffer.from('%PDF-1.7 concurrent');
+      adapter.getStream.mockImplementation(async () => ({
+        stream: Readable.from([pdfPayload]),
+        contentLength: pdfPayload.length,
+      }));
+
+      const blobService = new BlobService(adapter, blobRepo);
+      const thumbService = new ThumbnailService(adapter, blobRepo, blobService);
+      const renderedWebp = Buffer.from('singleflight-webp');
+      const genSpy = jest
+        .spyOn(thumbService, 'generateThumbnail')
+        .mockImplementation(async () => {
+          await new Promise((r) => setTimeout(r, 15));
+          return renderedWebp;
+        });
+
+      const quotaRepo = createMockQuotaRepo();
+      const uploadService = new FilesUploadService(
+        adapter,
+        blobService,
+        blobRepo,
+        quotaRepo,
+        createMockSessionRepo(),
+      );
+      const facade = new FilesFacade(
+        adapter,
+        blobService,
+        blobRepo,
+        quotaRepo,
+        uploadService,
+        thumbService,
+      );
+
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          facade.ensurePdfThumbnail({ fileId: blob.id }),
+        ),
+      );
+
+      expect(results).toEqual(Array.from({ length: 5 }, () => renderedWebp));
+      expect(genSpy).toHaveBeenCalledTimes(1);
+      expect(adapter.put).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('BlobService batch SKIP LOCKED GC & derivative purge', () => {
+    it('reclaims stuck leases, drains batches, and deletes both blobs and derivative thumbnails', async () => {
+      const adapter = createMockAdapter();
+      const hash1 = ContentHash.fromBuffer(Buffer.from('gc-batch-1')).toHex();
+      const hash2 = ContentHash.fromBuffer(Buffer.from('gc-batch-2')).toHex();
+      const blob1 = makeBlobRecord({
+        id: 'gc-1',
+        contentHashHex: hash1,
+        sizeBytes: 100n,
+        status: BlobStatus.DELETED,
+        refCount: 0,
+      });
+      const blob2 = makeBlobRecord({
+        id: 'gc-2',
+        contentHashHex: hash2,
+        sizeBytes: 200n,
+        status: BlobStatus.DELETED,
+        refCount: 0,
+      });
+
+      const blobRepo = createMockBlobRepo();
+      blobRepo.reclaimStuckClaims.mockResolvedValue(1);
+      blobRepo.claimOrphanBlobsBatch
+        .mockResolvedValueOnce([blob1, blob2])
+        .mockResolvedValueOnce([]);
+
+      const blobService = new BlobService(adapter, blobRepo);
+      const deleted = await blobService.reclaimOrphanBlobs(2, {
+        maxBatches: 3,
+      });
+
+      expect(deleted).toBe(2);
+      expect(blobRepo.reclaimStuckClaims).toHaveBeenCalledTimes(1);
+      expect(blobRepo.claimOrphanBlobsBatch).toHaveBeenCalledTimes(2);
+      expect(adapter.deleteMany).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          blob1.s3Key,
+          StorageKey.forDerivative(hash1, 'thumb').value(),
+          'thumbnails/gc-1.webp',
+          blob2.s3Key,
+          StorageKey.forDerivative(hash2, 'thumb').value(),
+          'thumbnails/gc-2.webp',
+        ]),
+      );
+      expect(blobRepo.deleteMany).toHaveBeenCalledWith(['gc-1', 'gc-2']);
     });
   });
 

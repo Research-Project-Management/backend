@@ -66,6 +66,25 @@ export class StorageKey {
     return new StorageKey(`blobs/${p1}/${p2}/${cleanHex}`);
   }
 
+  public static forUnhashedBlob(blobId: string): StorageKey {
+    const cleanId = blobId.trim().replace(/[^a-zA-Z0-9-]/g, '');
+    const p1 = cleanId.slice(0, 2) || '00';
+    return new StorageKey(`blobs/raw/${p1}/${cleanId}`);
+  }
+
+  public static forDerivative(
+    sha256Hex: string,
+    variant = 'thumb',
+  ): StorageKey {
+    const cleanHex = sha256Hex.trim().toLowerCase();
+    const p1 = cleanHex.slice(0, 2);
+    const p2 = cleanHex.slice(2, 4);
+    const safeVariant = variant.replace(/[^a-zA-Z0-9_-]/g, '') || 'thumb';
+    return new StorageKey(
+      `derivatives/${p1}/${p2}/${cleanHex}/${safeVariant}.webp`,
+    );
+  }
+
   public static forStaging(
     userId: string,
     fileUuid: string,
@@ -105,73 +124,66 @@ export enum BlobStatus {
   DELETED = 'DELETED',
 }
 
-export interface StorageBlobProps {
-  id: string;
-  contentHash: ContentHash;
-  hashAlgorithm?: string;
-  sizeBytes: bigint;
-  s3Key: StorageKey;
-  s3Bucket: string;
-  storageClass?: string;
-  refCount?: number;
-  status?: BlobStatus;
-  createdAt?: Date;
-  tombstoneAt?: Date | null;
-}
-
 /**
- * Immutable physical binary payload stored on S3/R2/Local with CAS reference counting.
+ * RFC 7233 HTTP Byte Range ("bytes=0-1023", "bytes=500-", "bytes=-500").
  */
-export class StorageBlob {
-  public readonly id: string;
-  public readonly contentHash: ContentHash;
-  public readonly hashAlgorithm: string;
-  public readonly sizeBytes: bigint;
-  public readonly s3Key: StorageKey;
-  public readonly s3Bucket: string;
-  public readonly storageClass: string;
-  public readonly createdAt: Date;
+export class ByteRange {
+  public readonly start: number;
+  public readonly end: number;
+  public readonly length: number;
+  public readonly totalSize: number;
 
-  private _refCount: number;
-  private _status: BlobStatus;
-  private _tombstoneAt: Date | null;
-
-  constructor(props: StorageBlobProps) {
-    this.id = props.id;
-    this.contentHash = props.contentHash;
-    this.hashAlgorithm = props.hashAlgorithm ?? 'SHA256';
-    this.sizeBytes = props.sizeBytes;
-    this.s3Key = props.s3Key;
-    this.s3Bucket = props.s3Bucket;
-    this.storageClass = props.storageClass ?? 'STANDARD';
-    this.createdAt = props.createdAt ?? new Date();
-
-    this._refCount = props.refCount ?? 1;
-    this._status = props.status ?? BlobStatus.PENDING;
-    this._tombstoneAt = props.tombstoneAt ?? null;
+  private constructor(start: number, end: number, totalSize: number) {
+    this.start = start;
+    this.end = end;
+    this.length = end - start + 1;
+    this.totalSize = totalSize;
   }
 
-  get refCount(): number {
-    return this._refCount;
-  }
-
-  get status(): BlobStatus {
-    return this._status;
-  }
-
-  get tombstoneAt(): Date | null {
-    return this._tombstoneAt;
-  }
-
-  public isReady(): boolean {
-    return this._status === BlobStatus.READY;
-  }
-
-  public incrementRef(): void {
-    this._refCount += 1;
-    if (this._status === BlobStatus.DELETED) {
-      this._status = BlobStatus.READY;
-      this._tombstoneAt = null;
+  public static parse(
+    rangeHeader: string | undefined,
+    totalSize: number,
+  ): ByteRange | null {
+    if (!rangeHeader || totalSize <= 0) {
+      return null;
     }
+
+    const match = rangeHeader.trim().match(/^bytes=(\d*)-(\d*)$/);
+    if (!match) {
+      return null;
+    }
+
+    const [, startStr, endStr] = match;
+    let start: number | undefined = startStr
+      ? parseInt(startStr, 10)
+      : undefined;
+    let end: number | undefined = endStr ? parseInt(endStr, 10) : undefined;
+
+    if (start === undefined && end !== undefined) {
+      start = Math.max(0, totalSize - end);
+      end = totalSize - 1;
+    } else if (start !== undefined && end === undefined) {
+      end = totalSize - 1;
+    } else if (start === undefined && end === undefined) {
+      start = 0;
+      end = totalSize - 1;
+    }
+
+    if (
+      start === undefined ||
+      end === undefined ||
+      start < 0 ||
+      start >= totalSize ||
+      end < start ||
+      end >= totalSize
+    ) {
+      return null;
+    }
+
+    return new ByteRange(start, end, totalSize);
+  }
+
+  public getContentRangeHeader(): string {
+    return `bytes ${this.start}-${this.end}/${this.totalSize}`;
   }
 }

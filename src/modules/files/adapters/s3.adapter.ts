@@ -110,6 +110,7 @@ export class S3StorageAdapter implements IStorageAdapter {
       new HeadObjectCommand({
         Bucket: this.bucket,
         Key: key,
+        ChecksumMode: 'ENABLED',
       }),
     );
 
@@ -118,6 +119,7 @@ export class S3StorageAdapter implements IStorageAdapter {
       size: res.ContentLength ?? 0,
       mimeType: res.ContentType ?? 'application/octet-stream',
       eTag: res.ETag,
+      checksumSha256: res.ChecksumSHA256,
       lastModified: res.LastModified ?? new Date(),
     };
   }
@@ -178,6 +180,7 @@ export class S3StorageAdapter implements IStorageAdapter {
       mimeType: string;
       expiresInSeconds?: number;
       sizeBytes?: number;
+      checksumSha256Base64?: string;
     },
   ): Promise<string> {
     const command = new PutObjectCommand({
@@ -185,6 +188,9 @@ export class S3StorageAdapter implements IStorageAdapter {
       Key: key,
       ContentType: options.mimeType,
       ContentLength: options.sizeBytes,
+      ...(options.checksumSha256Base64
+        ? { ChecksumSHA256: options.checksumSha256Base64 }
+        : {}),
     });
     return getSignedUrl(this.client, command, {
       expiresIn: options.expiresInSeconds ?? 3600,

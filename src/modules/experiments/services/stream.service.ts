@@ -11,9 +11,8 @@ import {
   type IFilesPort,
   type StreamBlobTarget,
 } from '@/modules/files';
-import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
 import { StreamBinaryOutput } from '../experiments.type';
-import { INodeRepository } from '../repositories/node.repository';
+import { NodeRepository } from '../repositories/node.repository';
 import { ExperimentNode } from '../domain/node.domain';
 import { ExperimentsAccessPolicy } from '../domain/access.policy';
 import { ZipPackager } from '../domain/archive.domain';
@@ -39,8 +38,7 @@ export class StreamService {
   constructor(
     @Inject(FILES_PORT)
     private readonly filesPort: IFilesPort,
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
+    private readonly nodeRepo: NodeRepository,
     private readonly cache: ExperimentsCacheService,
     private readonly accessPolicy: ExperimentsAccessPolicy,
   ) {}
@@ -116,36 +114,15 @@ export class StreamService {
 
     const serializedNode =
       typeof node.toJSON === 'function' ? node.toJSON() : node;
-    const rawBlob = blob as unknown as {
-      id: string;
-      s3Key?: { value?: () => string } | string;
-      s3Bucket?: string;
-      sizeBytes?: bigint | number | string;
-      contentHash?: { toHex?: () => string };
-    };
-    const s3Key =
-      typeof rawBlob.s3Key === 'object' &&
-      rawBlob.s3Key !== null &&
-      typeof rawBlob.s3Key.value === 'function'
-        ? rawBlob.s3Key.value()
-        : String(rawBlob.s3Key ?? '');
-    const contentHashHex =
-      typeof rawBlob.contentHash?.toHex === 'function'
-        ? rawBlob.contentHash.toHex()
-        : undefined;
-    const sizeBytesStr =
-      rawBlob.sizeBytes !== undefined && rawBlob.sizeBytes !== null
-        ? rawBlob.sizeBytes.toString()
-        : '0';
 
     const payload: CachedStreamNodeMeta = {
       node: serializedNode,
       blob: {
-        id: rawBlob.id,
-        s3Key,
-        s3Bucket: rawBlob.s3Bucket || 'local-storage',
-        sizeBytes: sizeBytesStr,
-        contentHashHex,
+        id: blob.id,
+        s3Key: blob.s3Key,
+        s3Bucket: blob.s3Bucket || 'local-storage',
+        sizeBytes: blob.sizeBytes.toString(),
+        contentHashHex: blob.contentHashHex,
       },
     };
     Promise.resolve(this.cache?.setStreamNodeMeta?.(nodeId, payload, 60)).catch(
@@ -179,8 +156,7 @@ export class StreamService {
       await this.verifyReadAccess(fileId, userId);
     }
     const { node, blob } = await this.resolveNodeAndBlob(fileId);
-    const s3Key =
-      typeof blob.s3Key === 'string' ? blob.s3Key : blob.s3Key.value();
+    const s3Key = blob.s3Key;
 
     const cacheKey = `${node.id}:${node.name}`;
     const cachedUrl = await this.cache.getPresignedUrl(cacheKey);

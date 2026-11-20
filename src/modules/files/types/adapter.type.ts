@@ -5,6 +5,7 @@ export interface StorageObjectMetadata {
   size: number;
   mimeType: string;
   eTag?: string;
+  checksumSha256?: string;
   lastModified: Date;
 }
 
@@ -58,12 +59,15 @@ export interface IStorageAdapter {
       mimeType: string;
       expiresInSeconds?: number;
       sizeBytes?: number;
+      checksumSha256Base64?: string;
     },
   ): Promise<string>;
   getPresignedDownloadUrl(
     key: string,
     options: { expiresInSeconds?: number; filename?: string },
   ): Promise<string>;
+
+  getBucketName?(): string;
 
   initiateMultipartUpload(
     key: string,

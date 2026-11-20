@@ -8,12 +8,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'stream';
 import * as crypto from 'crypto';
 import { FILES_PORT, sanitizeFilename, type IFilesPort } from '@/modules/files';
-import {
-  EXPERIMENT_NODE_REPOSITORY,
-  EXPERIMENT_VERSION_REPOSITORY,
-} from '../experiments.constant';
-import { INodeRepository } from '../repositories/node.repository';
-import { IVersionRepository } from '../repositories/version.repository';
+import { NodeRepository } from '../repositories/node.repository';
+import { VersionRepository } from '../repositories/version.repository';
 import { ExperimentsAccessPolicy } from '../domain/access.policy';
 import { ExperimentNode } from '../domain/node.domain';
 import { ExperimentVersion } from '../domain/version.domain';
@@ -83,10 +79,8 @@ export class VersionService {
   constructor(
     @Inject(FILES_PORT)
     private readonly filesPort: IFilesPort,
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
-    @Inject(EXPERIMENT_VERSION_REPOSITORY)
-    private readonly versionRepo: IVersionRepository,
+    private readonly nodeRepo: NodeRepository,
+    private readonly versionRepo: VersionRepository,
     private readonly accessPolicy: ExperimentsAccessPolicy,
     private readonly cache: ExperimentsCacheService,
     private readonly eventEmitter: EventEmitter2,
@@ -374,7 +368,7 @@ export class VersionService {
         node.name,
         node.mimeType,
         targetSize,
-        blob.s3Key.value(),
+        blob.s3Key,
         node.projectId,
       ),
     );

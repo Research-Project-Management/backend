@@ -1,52 +1,50 @@
-import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Inject,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import { Readable } from 'node:stream';
-import { STORAGE_ADAPTER, STORAGE_BLOB_REPOSITORY } from '../files.constant';
+import { GC_CLAIM_LEASE_MINUTES, STORAGE_ADAPTER } from '../files.constant';
+import { ContentHash, StorageKey } from '../domain/storage-vo';
+import { BlobRepository } from '../repositories/blob.repository';
+import { IStorageAdapter } from '../types/adapter.type';
 import {
   BlobStatus,
-  ContentHash,
-  StorageBlob,
-  StorageKey,
-} from '../domain/blob.domain';
-import { IBlobRepository } from '../repositories/blob.repository';
-import {
-  CompletedPart,
-  IStorageAdapter,
-  StorageLifecycleConfiguration,
-  StorageObjectMetadata,
-} from '../types/adapter.type';
-import {
   RegisterUploadedObjectInput,
+  StorageBlobRecord,
   StoreBufferCasResult,
 } from '../types/files.type';
 
-export type { RegisterUploadedObjectInput, StoreBufferCasResult };
+const MAX_SYNC_STREAM_HASH_BYTES = 100n * 1024n * 1024n;
 
 /**
- * Core binary CAS service managing physical object reads/writes,
- * SHA-256 deduplication, reference counting, and atomic orphan reclamation.
+ * Core binary CAS engine managing physical object deduplication,
+ * stream opening, and atomic orphan reclamation.
  */
 @Injectable()
 export class BlobService {
   private readonly logger = new Logger(BlobService.name);
-  private readonly defaultBucket = process.env.R2_BUCKET_NAME || 'flux';
 
   constructor(
     @Inject(STORAGE_ADAPTER) private readonly driver: IStorageAdapter,
-    @Inject(STORAGE_BLOB_REPOSITORY)
-    private readonly blobRepo: IBlobRepository,
+    private readonly blobRepo: BlobRepository,
   ) {}
 
-  private async incrementExistingBlob(blob: StorageBlob): Promise<StorageBlob> {
-    const prevCount = blob.refCount;
-    const updated = await this.blobRepo.incrementRefCount(blob.id);
+  private getBucketName(): string {
+    return this.driver.getBucketName?.() || 'flux';
+  }
+
+  private async incrementExistingBlob(
+    blobId: string,
+  ): Promise<StorageBlobRecord> {
+    const updated = await this.blobRepo.incrementRefCount(blobId);
     if (!updated) {
       throw new NotFoundException(
         'Physical blob is currently being purged or no longer available',
       );
-    }
-    if (blob.refCount === prevCount) {
-      blob.incrementRef();
     }
     return updated;
   }
@@ -57,16 +55,15 @@ export class BlobService {
     onBeforeNewUpload?: (sizeBytes: bigint) => Promise<void>,
   ): Promise<StoreBufferCasResult> {
     const sizeBytes = BigInt(buffer.length);
-    const contentHash = ContentHash.fromBuffer(buffer);
-    const hashHex = contentHash.toHex();
+    const contentHashHex = ContentHash.fromBuffer(buffer).toHex();
 
-    const existingBlob = await this.blobRepo.findByHash(contentHash);
-    if (existingBlob && existingBlob.isReady()) {
+    const existingBlob = await this.blobRepo.findByHash(contentHashHex);
+    if (existingBlob && existingBlob.status === BlobStatus.READY) {
       if (onBeforeNewUpload) {
         await onBeforeNewUpload(sizeBytes);
       }
       try {
-        const updated = await this.incrementExistingBlob(existingBlob);
+        const updated = await this.incrementExistingBlob(existingBlob.id);
         return { blob: updated, isDeduplicated: true };
       } catch (err) {
         if (!(err instanceof NotFoundException)) throw err;
@@ -77,29 +74,30 @@ export class BlobService {
       await onBeforeNewUpload(sizeBytes);
     }
 
-    const s3Key = StorageKey.forBlob(hashHex);
-    await this.driver.put(s3Key.value(), buffer, {
+    const s3Key = StorageKey.forBlob(contentHashHex).value();
+    await this.driver.put(s3Key, buffer, {
       mimeType,
       size: buffer.length,
     });
 
-    const newBlob = new StorageBlob({
-      id: crypto.randomUUID(),
-      contentHash,
-      sizeBytes,
-      s3Key,
-      s3Bucket: this.defaultBucket,
-      status: BlobStatus.READY,
-      refCount: 1,
-    });
     try {
-      await this.blobRepo.create(newBlob);
-      return { blob: newBlob, isDeduplicated: false };
+      const created = await this.blobRepo.create({
+        id: crypto.randomUUID(),
+        contentHashHex,
+        sizeBytes,
+        mimeType: mimeType || 'application/octet-stream',
+        checksumVerified: true,
+        s3Key,
+        s3Bucket: this.getBucketName(),
+        status: BlobStatus.READY,
+        refCount: 1,
+      });
+      return { blob: created, isDeduplicated: false };
     } catch (err: unknown) {
       if ((err as { code?: string })?.code === 'P2002') {
-        const concurrentBlob = await this.blobRepo.findByHash(contentHash);
+        const concurrentBlob = await this.blobRepo.findByHash(contentHashHex);
         if (concurrentBlob) {
-          const updated = await this.incrementExistingBlob(concurrentBlob);
+          const updated = await this.incrementExistingBlob(concurrentBlob.id);
           return { blob: updated, isDeduplicated: true };
         }
       }
@@ -126,101 +124,126 @@ export class BlobService {
   async registerUploadedObject(
     input: RegisterUploadedObjectInput,
   ): Promise<StoreBufferCasResult> {
-    let resolvedHex =
-      input.contentHashHex && /^[a-f0-9]{64}$/i.test(input.contentHashHex)
-        ? input.contentHashHex.toLowerCase()
-        : null;
-
-    if (!resolvedHex && input.sizeBytes <= 100n * 1024n * 1024n) {
-      resolvedHex = await this.computeStreamSha256Hex(input.storageKey);
-    }
-
-    const hashHex =
-      resolvedHex ||
-      crypto
-        .createHash('sha256')
-        .update(`${input.storageKey}:${input.sizeBytes}`)
-        .digest('hex');
-    const contentHash = ContentHash.fromHex(hashHex);
-
-    const cleanupRedundantUpload = (canonicalKey: string) => {
-      if (
-        input.storageKey !== canonicalKey &&
-        typeof this.driver?.delete === 'function'
-      ) {
-        Promise.resolve(this.driver.delete(input.storageKey)).catch(
+    const cleanupUploadedObject = (keyToDelete: string) => {
+      if (typeof this.driver?.delete === 'function') {
+        Promise.resolve(this.driver.delete(keyToDelete)).catch(
           (delErr: unknown) => {
             this.logger.warn(
-              `Failed to clean up redundant object ${input.storageKey}: ${delErr instanceof Error ? delErr.message : String(delErr)}`,
+              `Failed to clean up redundant object ${keyToDelete}: ${delErr instanceof Error ? delErr.message : String(delErr)}`,
             );
           },
         );
       }
     };
 
-    const existingBlob = await this.blobRepo.findByHash(contentHash);
-    if (existingBlob) {
-      if (
-        !existingBlob.isReady() &&
-        input.storageKey !== existingBlob.s3Key.value()
-      ) {
-        const physicalExists = await this.driver
-          .stat(existingBlob.s3Key.value())
-          .then(() => true)
-          .catch(() => false);
-        if (!physicalExists) {
-          const { stream, contentLength } = await this.driver.getStream(
-            input.storageKey,
-          );
-          const readable =
-            stream instanceof Readable
-              ? stream
-              : Readable.from(stream as AsyncIterable<Uint8Array>);
-          await this.driver.put(existingBlob.s3Key.value(), readable, {
-            size: contentLength,
-          });
+    const cleanupRedundantUpload = (canonicalKey: string) => {
+      if (input.storageKey !== canonicalKey) {
+        cleanupUploadedObject(input.storageKey);
+      }
+    };
+
+    const declaredHex =
+      input.contentHashHex && /^[a-f0-9]{64}$/i.test(input.contentHashHex)
+        ? input.contentHashHex.toLowerCase()
+        : null;
+
+    let resolvedHex: string | null = null;
+    let checksumVerified = Boolean(input.checksumVerified);
+
+    if (checksumVerified && declaredHex) {
+      resolvedHex = declaredHex;
+    } else if (input.sizeBytes <= MAX_SYNC_STREAM_HASH_BYTES) {
+      const computedHex = await this.computeStreamSha256Hex(input.storageKey);
+      if (declaredHex && computedHex && declaredHex !== computedHex) {
+        cleanupUploadedObject(input.storageKey);
+        throw new BadRequestException(
+          'Content hash mismatch: uploaded file does not match declared SHA-256',
+        );
+      }
+      if (computedHex) {
+        resolvedHex = computedHex;
+        checksumVerified = true;
+      } else if (declaredHex) {
+        resolvedHex = declaredHex;
+        checksumVerified = false;
+      }
+    }
+
+    const blobId = crypto.randomUUID();
+    const isUnhashedLargeUpload = !resolvedHex;
+    const hashHex =
+      resolvedHex ||
+      crypto.createHash('sha256').update(`unhashed:${blobId}`).digest('hex');
+
+    if (!isUnhashedLargeUpload) {
+      const existingBlob = await this.blobRepo.findByHash(hashHex);
+      if (existingBlob) {
+        if (
+          existingBlob.status !== BlobStatus.READY &&
+          input.storageKey !== existingBlob.s3Key
+        ) {
+          const physicalExists = await this.driver
+            .stat(existingBlob.s3Key)
+            .then(() => true)
+            .catch(() => false);
+          if (!physicalExists) {
+            const { stream, contentLength } = await this.driver.getStream(
+              input.storageKey,
+            );
+            const readable =
+              stream instanceof Readable
+                ? stream
+                : Readable.from(stream as AsyncIterable<Uint8Array>);
+            await this.driver.put(existingBlob.s3Key, readable, {
+              size: contentLength,
+            });
+          }
+        }
+        try {
+          const updated = await this.incrementExistingBlob(existingBlob.id);
+          cleanupRedundantUpload(existingBlob.s3Key);
+          return { blob: updated, isDeduplicated: true };
+        } catch (err) {
+          if (!(err instanceof NotFoundException)) throw err;
         }
       }
-      try {
-        const updated = await this.incrementExistingBlob(existingBlob);
-        cleanupRedundantUpload(existingBlob.s3Key.value());
-        return { blob: updated, isDeduplicated: true };
-      } catch (err) {
-        if (!(err instanceof NotFoundException)) throw err;
-      }
     }
 
-    let finalS3Key = StorageKey.fromString(input.storageKey);
-    if (resolvedHex) {
-      const canonicalKey = StorageKey.forBlob(resolvedHex).value();
-      if (
-        input.storageKey !== canonicalKey &&
-        typeof this.driver?.copy === 'function'
-      ) {
-        await this.driver.copy(input.storageKey, canonicalKey);
-        finalS3Key = StorageKey.forBlob(resolvedHex);
-        cleanupRedundantUpload(canonicalKey);
-      }
+    let finalS3Key = StorageKey.fromString(input.storageKey).value();
+    const targetKey = (
+      resolvedHex
+        ? StorageKey.forBlob(resolvedHex)
+        : StorageKey.forUnhashedBlob(blobId)
+    ).value();
+
+    if (
+      input.storageKey !== targetKey &&
+      typeof this.driver?.copy === 'function'
+    ) {
+      await this.driver.copy(input.storageKey, targetKey);
+      finalS3Key = targetKey;
+      cleanupRedundantUpload(targetKey);
     }
 
-    const blob = new StorageBlob({
-      id: crypto.randomUUID(),
-      contentHash,
-      sizeBytes: input.sizeBytes,
-      s3Key: finalS3Key,
-      s3Bucket: this.defaultBucket,
-      status: BlobStatus.READY,
-      refCount: 1,
-    });
     try {
-      await this.blobRepo.create(blob);
-      return { blob, isDeduplicated: false };
+      const created = await this.blobRepo.create({
+        id: blobId,
+        contentHashHex: hashHex,
+        sizeBytes: input.sizeBytes,
+        mimeType: input.mimeType || 'application/octet-stream',
+        checksumVerified,
+        s3Key: finalS3Key,
+        s3Bucket: this.getBucketName(),
+        status: BlobStatus.READY,
+        refCount: 1,
+      });
+      return { blob: created, isDeduplicated: false };
     } catch (err: unknown) {
       if ((err as { code?: string })?.code === 'P2002') {
-        const concurrentBlob = await this.blobRepo.findByHash(contentHash);
+        const concurrentBlob = await this.blobRepo.findByHash(hashHex);
         if (concurrentBlob) {
-          const updated = await this.incrementExistingBlob(concurrentBlob);
-          cleanupRedundantUpload(concurrentBlob.s3Key.value());
+          const updated = await this.incrementExistingBlob(concurrentBlob.id);
+          cleanupRedundantUpload(concurrentBlob.s3Key);
           return { blob: updated, isDeduplicated: true };
         }
       }
@@ -228,19 +251,11 @@ export class BlobService {
     }
   }
 
-  async acquireBlob(blobId: string): Promise<StorageBlob | null> {
-    return this.blobRepo.incrementRefCount(blobId);
-  }
-
-  async releaseBlob(blobId: string): Promise<void> {
-    await this.blobRepo.decrementRefCount(blobId);
-  }
-
   async openStream(
     blobId: string,
     range?: { start: number; end: number },
   ): Promise<{
-    blob: StorageBlob;
+    blob: StorageBlobRecord;
     stream: NodeJS.ReadableStream;
     contentLength: number;
     contentRange?: string;
@@ -250,161 +265,65 @@ export class BlobService {
       throw new NotFoundException('Physical storage blob not found');
     }
     const { stream, contentLength, contentRange } = range
-      ? await this.driver.getStream(blob.s3Key.value(), range)
-      : await this.driver.getStream(blob.s3Key.value());
+      ? await this.driver.getStream(blob.s3Key, range)
+      : await this.driver.getStream(blob.s3Key);
     return { blob, stream, contentLength, contentRange };
   }
 
-  async put(
-    key: string,
-    data: Buffer | Readable,
-    options?: { mimeType?: string; size?: number },
-  ): Promise<void> {
-    return this.driver.put(key, data, options);
-  }
-
-  async getStream(key: string, range?: { start: number; end: number }) {
-    return this.driver.getStream(key, range);
-  }
-
-  async stat(key: string): Promise<StorageObjectMetadata> {
-    return this.driver.stat(key);
-  }
-
-  async delete(key: string): Promise<void> {
-    return this.driver.delete(key);
-  }
-
-  async deleteMany(keys: string[]): Promise<void> {
-    return this.driver.deleteMany(keys);
-  }
-
-  async exists(key: string): Promise<boolean> {
-    return this.driver.exists(key);
-  }
-
-  async copy(sourceKey: string, destinationKey: string): Promise<void> {
-    return this.driver.copy(sourceKey, destinationKey);
-  }
-
-  async getPresignedUploadUrl(
-    key: string,
-    options: {
-      mimeType: string;
-      expiresInSeconds?: number;
-      sizeBytes?: number;
-    },
-  ): Promise<string> {
-    return this.driver.getPresignedUploadUrl(key, options);
-  }
-
-  async getPresignedDownloadUrl(
-    key: string,
-    options: { expiresInSeconds?: number; filename?: string },
-  ): Promise<string> {
-    return this.driver.getPresignedDownloadUrl(key, options);
-  }
-
-  async initiateMultipartUpload(
-    key: string,
-    options: { mimeType: string },
-  ): Promise<{ uploadId: string }> {
-    return this.driver.initiateMultipartUpload(key, options);
-  }
-
-  async getPresignedPartUploadUrl(
-    key: string,
-    uploadId: string,
-    partNumber: number,
-    expiresInSeconds?: number,
-  ): Promise<string> {
-    return this.driver.getPresignedPartUploadUrl(
-      key,
-      uploadId,
-      partNumber,
-      expiresInSeconds,
+  async reclaimOrphanBlobs(
+    limit = 100,
+    options?: { maxBatches?: number; timeBudgetMs?: number },
+  ): Promise<number> {
+    const staleThreshold = new Date(
+      Date.now() - GC_CLAIM_LEASE_MINUTES * 60_000,
     );
-  }
+    await this.blobRepo.reclaimStuckClaims(staleThreshold).catch(() => 0);
 
-  async completeMultipartUpload(
-    key: string,
-    uploadId: string,
-    parts: CompletedPart[],
-  ): Promise<{ location?: string; eTag?: string }> {
-    return this.driver.completeMultipartUpload(key, uploadId, parts);
-  }
+    const maxBatches = Math.max(1, options?.maxBatches ?? 1);
+    const timeBudgetMs = options?.timeBudgetMs ?? 45_000;
+    const deadline = Date.now() + timeBudgetMs;
+    let totalDeleted = 0;
 
-  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
-    return this.driver.abortMultipartUpload(key, uploadId);
-  }
+    for (let batchIdx = 0; batchIdx < maxBatches; batchIdx++) {
+      if (Date.now() > deadline) break;
 
-  async applyLifecycleRules(
-    config?: StorageLifecycleConfiguration,
-  ): Promise<void> {
-    await this.driver.applyLifecycleRules(config);
-  }
+      const claimedBlobs = await this.blobRepo.claimOrphanBlobsBatch(
+        new Date(),
+        limit,
+      );
+      if (claimedBlobs.length === 0) break;
 
-  async getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
-    return this.driver.getLifecycleRules();
-  }
-
-  async findBlobById(id: string): Promise<StorageBlob | null> {
-    return this.blobRepo.findById(id);
-  }
-
-  async incrementBlobRef(blobId: string): Promise<StorageBlob> {
-    const updated = await this.blobRepo.incrementRefCount(blobId);
-    if (!updated) {
-      throw new NotFoundException('Physical data blob not found in storage');
-    }
-    return updated;
-  }
-
-  async findBlobByHash(hash: ContentHash): Promise<StorageBlob | null> {
-    return this.blobRepo.findByHash(hash);
-  }
-
-  async reclaimOrphanBlobs(limit = 100): Promise<number> {
-    const now = new Date();
-    const deadBlobs = await this.blobRepo.findTombstonedBlobs(now, limit);
-    if (deadBlobs.length === 0) return 0;
-
-    let claimedBlobs: StorageBlob[] = [];
-    const usesAtomicClaim =
-      typeof this.blobRepo.claimBlobForPurge === 'function';
-
-    if (usesAtomicClaim) {
-      for (const candidate of deadBlobs) {
-        const claimed = await this.blobRepo.claimBlobForPurge!(
-          candidate.id,
-          now,
-        );
-        if (claimed) {
-          claimedBlobs.push(candidate);
-        }
-      }
-    } else {
-      claimedBlobs = deadBlobs;
+      totalDeleted += await this.purgeClaimedBatch(claimedBlobs);
+      if (claimedBlobs.length < limit) break;
     }
 
-    if (claimedBlobs.length === 0) return 0;
+    return totalDeleted;
+  }
 
+  private collectDerivativeKeys(blob: StorageBlobRecord): string[] {
+    return [
+      StorageKey.forDerivative(blob.contentHashHex, 'thumb').value(),
+      `thumbnails/${blob.id}.webp`,
+    ];
+  }
+
+  private async purgeClaimedBatch(
+    claimedBlobs: StorageBlobRecord[],
+  ): Promise<number> {
     let deletedCount = 0;
     const BATCH_SIZE = 500;
+
     for (let i = 0; i < claimedBlobs.length; i += BATCH_SIZE) {
       const batch = claimedBlobs.slice(i, i + BATCH_SIZE);
-      const keys = batch.map((b) => b.s3Key.value());
       if (typeof this.driver?.deleteMany === 'function' && batch.length > 1) {
+        const allKeys = batch.flatMap((b) => [
+          b.s3Key,
+          ...this.collectDerivativeKeys(b),
+        ]);
         try {
-          await this.driver.deleteMany(keys);
-          for (const b of batch) {
-            await this.blobRepo.delete(b.id).catch((delErr: unknown) => {
-              this.logger.warn(
-                `Failed to delete orphan blob record ${b.id}: ${delErr instanceof Error ? delErr.message : String(delErr)}`,
-              );
-            });
-            deletedCount++;
-          }
+          await this.driver.deleteMany(allKeys);
+          await this.blobRepo.deleteMany(batch.map((b) => b.id));
+          deletedCount += batch.length;
           continue;
         } catch (batchErr: unknown) {
           this.logger.warn(
@@ -412,20 +331,21 @@ export class BlobService {
           );
         }
       }
+
       for (const b of batch) {
         try {
-          await this.driver.delete(b.s3Key.value());
+          await this.driver.delete(b.s3Key);
           await this.blobRepo.delete(b.id);
+          if (typeof this.driver?.deleteMany === 'function') {
+            this.driver
+              .deleteMany(this.collectDerivativeKeys(b))
+              .catch(() => undefined);
+          }
           deletedCount++;
         } catch (itemErr: unknown) {
-          if (
-            usesAtomicClaim &&
-            typeof this.blobRepo.restoreClaimedBlob === 'function'
-          ) {
-            await this.blobRepo.restoreClaimedBlob(b.id).catch(() => undefined);
-          }
+          await this.blobRepo.restoreClaimedBlob(b.id).catch(() => undefined);
           this.logger.warn(
-            `Failed to reclaim individual orphan blob ${b.id} (${b.s3Key.value()}): ${(itemErr as Error)?.message}`,
+            `Failed to reclaim individual orphan blob ${b.id} (${b.s3Key}): ${(itemErr as Error)?.message}`,
           );
         }
       }

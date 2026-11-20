@@ -1,14 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { BlobStatus, StorageBlobRecord } from '@/modules/files';
 import {
   ContentHash,
   ByteRange,
   StorageKey,
-  StorageBlob,
-  BlobStatus,
-  StorageQuota,
-} from '@/modules/files';
-import { ExperimentNode, FileScope } from '@/modules/experiments';
+} from '@/modules/files/domain/storage-vo';
+import {
+  ExperimentNode,
+  FileScope,
+} from '@/modules/experiments/domain/node.domain';
 describe('Storage Clean Architecture & DDD Domain Suite', () => {
   describe('ContentHash Value Object', () => {
     it('should compute consistent SHA-256 hash from buffer', () => {
@@ -74,22 +75,28 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
     });
   });
 
-  describe('StorageBlob Entity (CAS Reference Counting)', () => {
-    it('should track reference counts and readiness status', () => {
+  describe('StorageBlobRecord Plain Shape (CAS Readiness)', () => {
+    it('tracks reference counts and readiness status without anemic class wrappers', () => {
       const hash = ContentHash.fromBuffer(Buffer.from('binary-data'));
-      const blob = new StorageBlob({
+      const blob: StorageBlobRecord = {
         id: 'blob-uuid-1',
-        contentHash: hash,
+        contentHashHex: hash.toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 1024n,
-        s3Key: StorageKey.forBlob(hash.toHex()),
+        mimeType: 'application/octet-stream',
+        checksumVerified: true,
+        s3Key: StorageKey.forBlob(hash.toHex()).value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
         status: BlobStatus.READY,
         refCount: 2,
-      });
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
 
       expect(blob.refCount).toBe(2);
       expect(blob.status).toBe(BlobStatus.READY);
-      expect(blob.isReady()).toBe(true);
     });
   });
 
@@ -132,21 +139,6 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
     });
   });
 
-  describe('StorageQuota Entity', () => {
-    it('should expose spaceId, usedBytes, and maxBytes for scope', () => {
-      const quota = new StorageQuota({
-        id: 'quota-1',
-        spaceId: 'user-1',
-        usedBytes: 1000n,
-        maxBytes: 2000n,
-      });
-
-      expect(quota.spaceId).toBe('user-1');
-      expect(quota.usedBytes).toBe(1000n);
-      expect(quota.maxBytes).toBe(2000n);
-    });
-  });
-
   describe('Module Boundary & Zero Technical Debt Guardrails', () => {
     const collectTsFiles = (dir: string): string[] => {
       const results: string[] = [];
@@ -182,7 +174,7 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
 
     it('modules/files enforces strict boundaries (only controllers may import auth)', () => {
       const forbiddenDomainImport =
-        /@\/modules\/(experiments|pages|library|project|ai|chat|activity|notifications|integrations|realtime)/;
+        /@\/modules\/(experiments|pages|library|project|ai|chat|activity|integrations|realtime)/;
       const controllersDir = path.join(filesDir, 'controllers');
 
       for (const filePath of collectTsFiles(filesDir)) {
@@ -215,12 +207,7 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
       for (const filePath of collectTsFiles(experimentsDir)) {
         const content = fs.readFileSync(filePath, 'utf8');
         expect(content).not.toMatch(legacySymbolRegex);
-
-        const withoutMigrationSql = content.replace(
-          /export const LEGACY_URL_BACKFILL_SQL = `[\s\S]*?`;/,
-          '',
-        );
-        expect(withoutMigrationSql).not.toContain('/api/v1/storage/files');
+        expect(content).not.toContain('/api/v1/storage/files');
       }
     });
 
@@ -228,7 +215,7 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
       const foreignDomainRegex =
         /\b(FileScope\.(?:Page|Library|Paper)|resolvePageSpaceId|streamR2File|pageId)\b|prisma\.page|pages\/:pageId|\/api\/v1\/experiments\/files\/r2|\bimport\s+sharp\b|from\s+['"]sharp['"]/;
       const filesInternalsRegex =
-        /\b(BlobService|QuotaService|PresignService|FileStreamService|ThumbnailService|STORAGE_ADAPTER|STORAGE_BLOB_REPOSITORY|STORAGE_QUOTA_REPOSITORY|UPLOAD_SESSION_REPOSITORY|validateMagicBytes|isBlockedExtension|ByteRange|StorageKey|StorageBlob|ContentHash|UploadSession|UploadSessionStatus)\b/;
+        /\b(BlobService|FilesUploadService|PresignService|ThumbnailService|FileAccessService|BlobRepository|QuotaRepository|SessionRepository|QuotaService|FileStreamService|FilesLifecycleService|STORAGE_ADAPTER|STORAGE_BLOB_REPOSITORY|STORAGE_QUOTA_REPOSITORY|UPLOAD_SESSION_REPOSITORY|validateMagicBytes|isBlockedExtension|ByteRange|StorageKey|ContentHash)\b/;
 
       for (const filePath of collectTsFiles(experimentsDir)) {
         const content = fs.readFileSync(filePath, 'utf8');
@@ -237,11 +224,11 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
       }
     });
 
-    it('no module outside modules/files uses scattered FilesModule internals or raw storage_blobs/storage_quotas access', () => {
+    it('no module outside modules/files uses scattered FilesModule internals or raw file_blobs/space_quotas access', () => {
       const scatteredInternalsRegex =
-        /\b(BlobService|QuotaService|PresignService|FileStreamService|ThumbnailService|FilesLifecycleService|STORAGE_ADAPTER|STORAGE_BLOB_REPOSITORY|STORAGE_QUOTA_REPOSITORY|UPLOAD_SESSION_REPOSITORY|validateMagicBytes|isBlockedExtension)\b/;
+        /\b(BlobService|FilesUploadService|PresignService|ThumbnailService|FileAccessService|BlobRepository|QuotaRepository|SessionRepository|FilesMaintenanceProcessor|QuotaService|FileStreamService|FilesLifecycleService|STORAGE_ADAPTER|STORAGE_BLOB_REPOSITORY|STORAGE_QUOTA_REPOSITORY|UPLOAD_SESSION_REPOSITORY|validateMagicBytes|isBlockedExtension)\b/;
       const rawStorageDbAccessRegex =
-        /storage_blobs|storage_quotas|\.storageBlob\b|\.storageQuota\b/;
+        /file_blobs|file_blob_refs|file_uploads|space_quotas|storage_blobs|storage_quotas|\.fileBlob\b|\.fileBlobRef\b|\.fileUpload\b|\.spaceQuota\b|\.storageBlob\b|\.storageQuota\b/;
 
       for (const filePath of collectTsFiles(srcRoot)) {
         if (filePath.startsWith(filesDir + path.sep)) continue;
@@ -255,6 +242,51 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
       expect(filesModuleContent).toContain(
         'exports: [FilesFacade, FILES_PORT]',
       );
+
+      const filesIndexContent = fs.readFileSync(
+        path.join(filesDir, 'index.ts'),
+        'utf8',
+      );
+      expect(filesIndexContent).not.toMatch(
+        /\.\/(services|repositories|adapters|processors|controllers)\//,
+      );
+      expect(filesIndexContent).not.toMatch(/\bSTORAGE_ADAPTER\b/);
+    });
+
+    it('modules/files has zero eliminated middlemen, Prisma-in-service leaks, or controller bypasses', () => {
+      const deletedMiddlemenRegex =
+        /\b(PresignService|QuotaService|FileStreamService|FilesLifecycleService|FilesSpaceAccessService|FileSigningService|BlobMapper|QuotaMapper|SessionMapper|STORAGE_BLOB_REPOSITORY|STORAGE_QUOTA_REPOSITORY|STORAGE_BLOB_REF_REPOSITORY|UPLOAD_SESSION_REPOSITORY)\b/;
+
+      const repoDir = path.join(filesDir, 'repositories');
+      for (const filePath of collectTsFiles(filesDir)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).not.toMatch(deletedMiddlemenRegex);
+        if (!filePath.startsWith(repoDir + path.sep)) {
+          expect(content).not.toMatch(/\bPrismaService\b/);
+        }
+      }
+
+      const controllerSrc = fs.readFileSync(
+        path.join(filesDir, 'controllers', 'files.controller.ts'),
+        'utf8',
+      );
+      expect(controllerSrc).not.toMatch(
+        /\b(FileAccessService|BlobService|FilesUploadService|BlobRepository|QuotaRepository|SessionRepository|STORAGE_ADAPTER)\b/,
+      );
+
+      const blobServiceSrc = fs.readFileSync(
+        path.join(filesDir, 'services', 'blob.service.ts'),
+        'utf8',
+      );
+      expect(blobServiceSrc).not.toMatch(
+        /\b(findBlobById|findBlobByHash|acquireBlob|releaseBlob|hasSpaceAccessToBlob|incrementBlobRef)\s*\(/,
+      );
+
+      const sessionRepoSrc = fs.readFileSync(
+        path.join(filesDir, 'repositories', 'session.repository.ts'),
+        'utf8',
+      );
+      expect(sessionRepoSrc).not.toMatch(/Personal|Project/);
     });
 
     it('modules/files enforces pure spaceId-only internal and HTTP edge contract (0 legacy quota shims or projectId)', () => {
@@ -266,6 +298,61 @@ describe('Storage Clean Architecture & DDD Domain Suite', () => {
         expect(content).not.toMatch(legacyQuotaShimRegex);
         expect(content).not.toMatch(/\bprojectId\b/);
       }
+    });
+
+    it('FilesModule keeps deep facade encapsulation (no BlobService in FilesController, zero process.env in BlobService, zero duplicate IFilesPort aliases)', () => {
+      const filesControllerPath = path.join(
+        filesDir,
+        'controllers',
+        'files.controller.ts',
+      );
+      const controllerSrc = fs.readFileSync(filesControllerPath, 'utf8');
+      expect(controllerSrc).not.toMatch(/\bBlobService\b/);
+
+      const blobServicePath = path.join(
+        filesDir,
+        'services',
+        'blob.service.ts',
+      );
+      const blobServiceSrc = fs.readFileSync(blobServicePath, 'utf8');
+      expect(blobServiceSrc).not.toMatch(/process\.env\./);
+
+      const filesTypePath = path.join(filesDir, 'types', 'files.type.ts');
+      const filesTypeSrc = fs.readFileSync(filesTypePath, 'utf8');
+      expect(filesTypeSrc).not.toMatch(
+        /\b(getPresignedUploadUrl|initiateMultipartUpload|completeMultipartUpload|abortMultipartUpload|presignMultipartPart|uploadBuffer)\b/,
+      );
+    });
+
+    it('modules/experiments enforces zero PrismaService outside repositories, zero @Global, strict exports, and zero eliminated wrappers', () => {
+      const repoDir = path.join(experimentsDir, 'repositories');
+      const eliminatedRegex =
+        /\b(EXPERIMENT_NODE_REPOSITORY|EXPERIMENT_VERSION_REPOSITORY|LEGACY_URL_BACKFILL_SQL|ExperimentsLifecycleService|TrashRetentionJob|MultipartService)\b/;
+
+      for (const filePath of collectTsFiles(experimentsDir)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).not.toMatch(eliminatedRegex);
+        if (!filePath.startsWith(repoDir + path.sep)) {
+          expect(content).not.toMatch(/\bPrismaService\b/);
+        }
+      }
+
+      const expModuleSrc = fs.readFileSync(
+        path.join(experimentsDir, 'experiments.module.ts'),
+        'utf8',
+      );
+      expect(expModuleSrc).not.toMatch(/@Global\s*\(/);
+      expect(expModuleSrc).toContain(
+        'exports: [ExperimentsFacade, EXPERIMENTS_PORT]',
+      );
+
+      const expIndexSrc = fs.readFileSync(
+        path.join(experimentsDir, 'index.ts'),
+        'utf8',
+      );
+      expect(expIndexSrc).not.toMatch(
+        /\.\/(services|repositories|processors|controllers|dto)\//,
+      );
     });
   });
 });

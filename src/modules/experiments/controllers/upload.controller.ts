@@ -16,16 +16,14 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
 import { CurrentUser, JwtAuthGuard } from '@/modules/identity/auth';
-import { cleanUuid } from '@/modules/files';
+import { cleanUuid, FilesBatchPartUrlsDto } from '@/modules/files';
 import { getFileContentPath } from '../experiments.type';
-import { FileScope } from '../domain/node.domain';
 import {
   ExperimentsAccessPolicy,
   normalizeExperimentProjectId,
 } from '../domain/access.policy';
 import { ExperimentsService } from '../services/experiments.service';
 import { UploadService } from '../services/upload.service';
-import { MultipartService } from '../services/multipart.service';
 import {
   CompleteMultipartDto,
   CompletePresignedDto,
@@ -57,7 +55,6 @@ const UNVERIFIED_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 export class UploadController {
   constructor(
     private readonly uploadService: UploadService,
-    private readonly multipartService: MultipartService,
     private readonly experimentsService: ExperimentsService,
     private readonly accessPolicy: ExperimentsAccessPolicy,
   ) {}
@@ -158,7 +155,6 @@ export class UploadController {
       sizeBytes: requestedSize,
       projectId: normalizedProjectId,
       parentId: dto.parentId,
-      scope: dto.scope as FileScope | undefined,
       contentHash: dto.contentHash,
       metaData: dto.metaData,
     });
@@ -197,7 +193,6 @@ export class UploadController {
       mimeType: dto.mimeType,
       projectId: normalizedProjectId,
       parentId: dto.parentId,
-      scope: dto.scope as FileScope | undefined,
       contentHash: dto.contentHash,
       metaData: dto.metaData,
     });
@@ -324,14 +319,13 @@ export class UploadController {
       projectId: normalizedProjectId || null,
       parentId: dto.parentId || null,
     });
-    return this.multipartService.initiate({
+    return this.uploadService.initiateMultipart({
       userId,
       filename: dto.filename,
       mimeType: dto.mimeType || 'application/octet-stream',
       totalSize,
       projectId: normalizedProjectId,
       parentId: dto.parentId,
-      scope: dto.scope as FileScope | undefined,
       expectedHash: dto.expectedHash,
     });
   }
@@ -347,12 +341,31 @@ export class UploadController {
     if (!Number.isInteger(parsedPartNumber) || parsedPartNumber < 1) {
       throw new BadRequestException('Invalid partNumber query parameter');
     }
-    const url = await this.multipartService.getPartUrl(
+    const url = await this.uploadService.getMultipartPartUrl(
       sessionId,
       parsedPartNumber,
       { userId },
     );
     return { partNumber: parsedPartNumber, uploadUrl: url };
+  }
+
+  @Post('multipart/:sessionId/part-urls')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Batch generate presigned part upload URLs' })
+  async getPartUrls(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: FilesBatchPartUrlsDto,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
+    }
+    const parts = await this.uploadService.getMultipartPartUrls(
+      sessionId,
+      dto.partNumbers,
+      { userId },
+    );
+    return { parts };
   }
 
   @Post('multipart/complete')
@@ -362,7 +375,7 @@ export class UploadController {
     @CurrentUser('id') userId: string,
     @Body() dto: CompleteMultipartDto,
   ) {
-    return this.multipartService.complete({
+    return this.uploadService.completeMultipart({
       sessionId: dto.sessionId,
       parts: dto.parts,
       actor: { userId },
@@ -376,7 +389,7 @@ export class UploadController {
     @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
   ) {
-    await this.multipartService.abort(sessionId, { userId });
+    await this.uploadService.abortMultipart(sessionId, { userId });
     return { success: true };
   }
 }

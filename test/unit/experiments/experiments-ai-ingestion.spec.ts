@@ -30,7 +30,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
     space: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
     project: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
     aiChat: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
-    storageFile: {
+    fileNode: {
       findUnique: jest.Mock<Promise<unknown>, [unknown?]>;
       update: jest.Mock<Promise<unknown>, [StorageFileUpdateArgs]>;
     };
@@ -58,7 +58,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       aiChat: {
         findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },
-      storageFile: {
+      fileNode: {
         findUnique: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
         update: jest.fn<Promise<unknown>, [StorageFileUpdateArgs]>(
           async () => ({}),
@@ -154,7 +154,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       'project-physics',
     );
 
-    mockPrisma.storageFile.findUnique.mockResolvedValue({
+    mockPrisma.fileNode.findUnique.mockResolvedValue({
       id: fileId,
       spaceId: 'space-physics-uuid',
       deletedAt: null,
@@ -206,7 +206,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       }),
     );
 
-    const updateCalls = mockPrisma.storageFile.update.mock.calls;
+    const updateCalls = mockPrisma.fileNode.update.mock.calls;
     const lastUpdate = updateCalls[updateCalls.length - 1]?.[0];
     expect(lastUpdate?.where).toEqual({ id: fileId });
     expect(lastUpdate?.data.metadata).toEqual(
@@ -265,7 +265,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       'blobs/exist.pdf',
     );
 
-    mockPrisma.storageFile.findUnique.mockResolvedValue({
+    mockPrisma.fileNode.findUnique.mockResolvedValue({
       id: fileId,
       deletedAt: null,
       metadata: {
@@ -281,7 +281,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
   });
 
   it('removes indexed knowledge vectors when a file is trashed', async () => {
-    mockPrisma.storageFile.findUnique.mockResolvedValue({
+    mockPrisma.fileNode.findUnique.mockResolvedValue({
       id: 'file-trashed-1',
       spaceId: 'space-1',
       metadata: { ragDocId: 'vec-trashed-1' },
@@ -310,7 +310,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       'blobs/offline.pdf',
     );
 
-    mockPrisma.storageFile.findUnique.mockResolvedValue({
+    mockPrisma.fileNode.findUnique.mockResolvedValue({
       id: fileId,
       spaceId: 'user-1',
       deletedAt: null,
@@ -344,7 +344,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
 
     await listener.handleFileUploaded(event);
 
-    const updateCalls = mockPrisma.storageFile.update.mock.calls;
+    const updateCalls = mockPrisma.fileNode.update.mock.calls;
     const lastUpdate = updateCalls[updateCalls.length - 1]?.[0];
     expect(lastUpdate?.where).toEqual({ id: fileId });
     expect(lastUpdate?.data.metadata).toEqual(

@@ -1,5 +1,13 @@
 import * as path from 'path';
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  PUBLIC_OBJECT_ALLOWLIST_PREFIXES,
+  SIGNED_OBJECT_PREFIXES,
+} from '../files.constant';
 
 export const BLOCKED_EXTENSIONS = new Set([
   '.exe',
@@ -330,4 +338,38 @@ export function resolveTargetSpaceId(
   if (explicit) return explicit;
   const fallback = fallbackUserId?.trim();
   return fallback || null;
+}
+
+export function classifyObjectKey(rawKey: string): {
+  key: string;
+  normalizedKey: string;
+  isPublicAsset: boolean;
+  isDerivative: boolean;
+} {
+  if (!rawKey) {
+    throw new NotFoundException('Object key is required');
+  }
+
+  const key = decodeURIComponent(rawKey);
+  const normalizedKey = key.replace(/\\/g, '/');
+  if (normalizedKey.includes('..') || normalizedKey.startsWith('/')) {
+    throw new ForbiddenException(
+      'Access to restricted storage path is forbidden',
+    );
+  }
+
+  const isPublicAsset = PUBLIC_OBJECT_ALLOWLIST_PREFIXES.some((p) =>
+    normalizedKey.startsWith(p),
+  );
+  const isDerivative = SIGNED_OBJECT_PREFIXES.some((p) =>
+    normalizedKey.startsWith(p),
+  );
+
+  if (!isPublicAsset && !isDerivative) {
+    throw new ForbiddenException(
+      'Access to restricted storage path is forbidden',
+    );
+  }
+
+  return { key, normalizedKey, isPublicAsset, isDerivative };
 }

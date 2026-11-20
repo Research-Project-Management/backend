@@ -18,7 +18,7 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
     projectMember: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
     aiChat: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
     libraryItem: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
-    storageFile: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
+    fileNode: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
     attachment: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
   };
   let mockReply: FastifyReply;
@@ -69,7 +69,7 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
       libraryItem: {
         findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },
-      storageFile: {
+      fileNode: {
         findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },
       attachment: {
@@ -94,7 +94,7 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
   it('streams Q&A for an uploaded StorageFile with rag_agent intent and paper context', async () => {
     const fileId = 'file-storage-pdf-001';
     const userId = 'user-researcher-1';
-    mockPrisma.storageFile.findFirst.mockResolvedValue({
+    mockPrisma.fileNode.findFirst.mockResolvedValue({
       id: fileId,
       filename: 'quantum_computing.pdf',
       createdById: userId,
@@ -138,7 +138,7 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
   });
 
   it('rejects Q&A access when user has no permission on StorageFile', async () => {
-    mockPrisma.storageFile.findFirst.mockResolvedValue({
+    mockPrisma.fileNode.findFirst.mockResolvedValue({
       id: 'file-private-123',
       filename: 'confidential_research.pdf',
       createdById: 'other-user',
@@ -160,7 +160,7 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
   });
 
   it('executes synchronous Q&A for an uploaded StorageFile', async () => {
-    mockPrisma.storageFile.findFirst.mockResolvedValue({
+    mockPrisma.fileNode.findFirst.mockResolvedValue({
       id: 'file-sync-456',
       filename: 'benchmark_results.pdf',
       createdById: 'user-researcher-1',

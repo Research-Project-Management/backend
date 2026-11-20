@@ -1,6 +1,12 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  Optional,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { shouldRunWorkerConsumers } from '@/core';
 import {
   EXPERIMENTS_PROCESSING_QUEUE,
   EXPERIMENTS_JOB_MAINTENANCE_TRASH,
@@ -9,7 +15,7 @@ import {
 import { ExperimentsProcessingJobData } from '../experiments.type';
 
 @Injectable()
-export class ExperimentsQueueProducer {
+export class ExperimentsQueueProducer implements OnApplicationBootstrap {
   private readonly logger = new Logger(ExperimentsQueueProducer.name);
 
   constructor(
@@ -24,6 +30,16 @@ export class ExperimentsQueueProducer {
         );
       });
     }
+  }
+
+  async onApplicationBootstrap(): Promise<void> {
+    if (
+      process.env.EXPERIMENTS_BOOTSTRAP_LIFECYCLE === 'false' ||
+      (process.env.NODE_ENV === 'production' && !shouldRunWorkerConsumers())
+    ) {
+      return;
+    }
+    await this.scheduleMaintenanceJobs();
   }
 
   async queueFileProcessing(data: ExperimentsProcessingJobData): Promise<void> {

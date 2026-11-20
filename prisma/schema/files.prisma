@@ -1,0 +1,214 @@
+// -- 3. Files & Storage Bounded Context (Unified Space File Platform) ----------
+
+enum FilePermission {
+  view
+  edit
+}
+
+enum BlobStatus {
+  PENDING
+  READY
+  DELETED
+}
+
+enum UploadSessionStatus {
+  INITIALIZED
+  UPLOADING
+  COMPLETED
+  ABORTED
+  EXPIRED
+}
+
+// -------------------------
+// Logical File Node (Space-Scoped: Personal Space vs Project Space)
+// -------------------------
+
+model FileNode {
+  id          String @id @default(uuid(7)) @db.Uuid
+  spaceId     String @map("space_id") @db.Uuid
+  space       Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_nodes_space_id")
+  createdById String @map("created_by_id") @db.Uuid
+  createdBy   User   @relation("UserFileNodes", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_file_nodes_created_by_id")
+
+  filename String     @db.VarChar(255)
+  size     BigInt     @default(0)
+  mimeType String     @default("application/octet-stream") @map("mime_type") @db.VarChar(127)
+  isFolder Boolean    @default(false) @map("is_folder")
+  metadata Json?      @default("{}") @map("metadata") @db.JsonB
+  parentId String?    @map("parent_id") @db.Uuid
+  parent   FileNode?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_file_nodes_parent_id")
+  children FileNode[] @relation("FolderHierarchy")
+
+  // Optional Entity Link (e.g. 'page' | 'library' | 'paper' | 'experiment')
+  linkedToType String? @map("linked_to_type") @db.VarChar(64)
+  linkedToId   String? @map("linked_to_id") @db.VarChar(128)
+
+  // CAS Physical Blob Link
+  blobId String?   @map("blob_id") @db.Uuid
+  blob   FileBlob? @relation(fields: [blobId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_file_nodes_blob_id")
+
+  stars      FileStar[]
+  sharedWith FileShare[]
+  versions   FileVersion[]
+  uploads    FileUpload[]  @relation("FileUploadParent")
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([id, spaceId], map: "uq_file_nodes_id_space")
+  @@index([spaceId, parentId, deletedAt, isFolder(sort: Desc), filename], map: "idx_file_nodes_space_tree")
+  @@index([spaceId, deletedAt, updatedAt(sort: Desc)], map: "idx_file_nodes_space_updated")
+  @@index([createdById], map: "idx_file_nodes_created_by")
+  @@index([parentId, deletedAt], map: "idx_file_nodes_parent_deleted")
+  @@index([linkedToType, linkedToId, parentId, deletedAt, isFolder(sort: Desc), filename], map: "idx_file_nodes_linked_tree")
+  @@index([deletedAt], map: "idx_file_nodes_deleted_at")
+  @@index([blobId], map: "idx_file_nodes_blob_id")
+  @@map("file_nodes")
+}
+
+model FileStar {
+  fileId    String   @map("file_id") @db.Uuid
+  file      FileNode @relation(fields: [fileId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_stars_file_id")
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation("UserStarredFiles", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_stars_user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([fileId, userId], map: "pk_file_stars")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_file_stars_user_created")
+  @@map("file_stars")
+}
+
+model FileShare {
+  fileId     String         @map("file_id") @db.Uuid
+  file       FileNode       @relation(fields: [fileId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_shares_file_id")
+  userId     String         @map("user_id") @db.Uuid
+  user       User           @relation("UserSharedFiles", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_shares_user_id")
+  permission FilePermission @default(view)
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([fileId, userId])
+  @@index([userId, createdAt(sort: Desc)], map: "idx_file_shares_user_created")
+  @@map("file_shares")
+}
+
+// -------------------------
+// Physical File Blob (CAS - Content-Addressable Storage)
+// -------------------------
+
+model FileBlob {
+  id               String     @id @default(uuid(7)) @db.Uuid
+  contentHash      Bytes      @map("content_hash")
+  hashAlgorithm    String     @default("SHA256") @map("hash_algorithm") @db.VarChar(16)
+  sizeBytes        BigInt     @map("size_bytes")
+  mimeType         String     @default("application/octet-stream") @map("mime_type") @db.VarChar(127)
+  checksumVerified Boolean    @default(false) @map("checksum_verified")
+  storageKey       String     @map("storage_key") @db.VarChar(512)
+  bucket           String     @map("bucket") @db.VarChar(63)
+  storageClass     String     @default("STANDARD") @map("storage_class") @db.VarChar(32)
+  refCount         Int        @default(1) @map("ref_count")
+  status           BlobStatus @default(PENDING)
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  tombstoneAt      DateTime?  @map("tombstone_at") @db.Timestamptz(6)
+  claimedAt        DateTime?  @map("claimed_at") @db.Timestamptz(6)
+
+  files     FileNode[]
+  versions  FileVersion[]
+  pageFiles PageFile[]
+  refs      FileBlobRef[]
+
+  @@unique([contentHash], map: "uq_file_blobs_content_hash")
+  @@unique([bucket, storageKey], map: "uq_file_blobs_bucket_key")
+  @@index([refCount, tombstoneAt], map: "idx_file_blobs_orphan_gc")
+  @@index([refCount, claimedAt], map: "idx_file_blobs_gc_claim_lease")
+  @@index([status], map: "idx_file_blobs_status")
+  @@map("file_blobs")
+}
+
+// -------------------------
+// Polymorphic Blob Reference Ledger (Decoupled Ownership & Exact Quota Reconciliation)
+// -------------------------
+
+model FileBlobRef {
+  ownerType String   @map("owner_type") @db.VarChar(64)
+  ownerId   String   @map("owner_id") @db.VarChar(128)
+  blobId    String   @map("blob_id") @db.Uuid
+  blob      FileBlob @relation(fields: [blobId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_file_blob_refs_blob_id")
+  spaceId   String   @map("space_id") @db.Uuid
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_blob_refs_space_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ownerType, ownerId])
+  @@index([blobId, spaceId], map: "idx_file_blob_refs_blob_space")
+  @@index([spaceId], map: "idx_file_blob_refs_space")
+  @@map("file_blob_refs")
+}
+
+// -------------------------
+// File Revisions / Versioning (Scientific Reproducibility)
+// -------------------------
+
+model FileVersion {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  fileId        String   @map("file_id") @db.Uuid
+  blobId        String   @map("blob_id") @db.Uuid
+  versionNumber Int      @map("version_number")
+  changeComment String?  @map("change_comment") @db.VarChar(500)
+  createdById   String   @map("created_by_id") @db.Uuid
+  createdBy     User     @relation("UserFileVersions", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_file_versions_created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  file FileNode @relation(fields: [fileId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_versions_file_id")
+  blob FileBlob @relation(fields: [blobId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_file_versions_blob_id")
+
+  @@unique([fileId, versionNumber], map: "uq_file_versions_file_version")
+  @@index([blobId], map: "idx_file_versions_blob_id")
+  @@index([createdById], map: "idx_file_versions_created_by")
+  @@map("file_versions")
+}
+
+// -------------------------
+// Multipart Upload Sessions
+// -------------------------
+
+model FileUpload {
+  id           String              @id @default(uuid(7)) @db.Uuid
+  spaceId      String              @map("space_id") @db.Uuid
+  space        Space               @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_file_uploads_space_id")
+  createdById  String              @map("created_by_id") @db.Uuid
+  createdBy    User                @relation("UserFileUploads", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_file_uploads_created_by_id")
+  uploadId     String              @map("upload_id") @db.VarChar(1024)
+  storageKey   String              @map("storage_key") @db.VarChar(512)
+  filename     String              @db.VarChar(255)
+  mimeType     String              @default("application/octet-stream") @map("mime_type") @db.VarChar(127)
+  totalSize    BigInt              @map("total_size")
+  partSize     Int                 @map("part_size")
+  expectedHash Bytes?              @map("expected_hash")
+  parentId     String?             @map("parent_id") @db.Uuid
+  parent       FileNode?           @relation("FileUploadParent", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_file_uploads_parent_id")
+  status       UploadSessionStatus @default(INITIALIZED)
+  expiresAt    DateTime            @map("expires_at") @db.Timestamptz(6)
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([storageKey, uploadId], map: "uq_file_uploads_key_upload")
+  @@index([status, expiresAt], map: "idx_file_uploads_cleanup")
+  @@index([spaceId], map: "idx_file_uploads_space")
+  @@index([createdById], map: "idx_file_uploads_creator")
+  @@index([parentId], map: "idx_file_uploads_parent")
+  @@map("file_uploads")
+}
+
+// -------------------------
+// Space Quota Ledger (1 Quota per Space)
+// -------------------------
+
+model SpaceQuota {
+  spaceId   String   @id @map("space_id") @db.Uuid
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_space_quotas_space_id")
+  usedBytes BigInt   @default(0) @map("used_bytes")
+  maxBytes  BigInt   @map("max_bytes")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("space_quotas")
+}

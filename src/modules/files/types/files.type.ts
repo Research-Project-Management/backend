@@ -1,12 +1,76 @@
 import { Readable } from 'node:stream';
-import { StorageBlob } from '../domain/blob.domain';
-import { StorageQuota } from '../domain/quota.domain';
-import { UploadSession } from '../domain/session.domain';
-import {
-  CompletedPart,
-  StorageLifecycleConfiguration,
-  StorageObjectMetadata,
-} from './adapter.type';
+import { BlobStatus } from '../domain/storage-vo';
+import { CompletedPart, StorageObjectMetadata } from './adapter.type';
+
+export { BlobStatus };
+
+export enum UploadSessionStatus {
+  INITIALIZED = 'INITIALIZED',
+  UPLOADING = 'UPLOADING',
+  COMPLETED = 'COMPLETED',
+  ABORTED = 'ABORTED',
+  EXPIRED = 'EXPIRED',
+}
+
+export interface StorageBlobRecord {
+  readonly id: string;
+  readonly contentHashHex: string;
+  readonly hashAlgorithm: string;
+  readonly sizeBytes: bigint;
+  readonly mimeType: string;
+  readonly checksumVerified: boolean;
+  readonly s3Key: string;
+  readonly s3Bucket: string;
+  readonly storageClass: string;
+  readonly refCount: number;
+  readonly status: BlobStatus;
+  readonly createdAt: Date;
+  readonly tombstoneAt: Date | null;
+  readonly claimedAt: Date | null;
+}
+
+export interface StorageQuotaRecord {
+  readonly spaceId: string;
+  readonly usedBytes: bigint;
+  readonly maxBytes: bigint;
+  readonly updatedAt: Date;
+}
+
+export interface UploadSessionRecord {
+  readonly id: string;
+  readonly spaceId: string;
+  readonly userId: string;
+  readonly s3UploadId: string;
+  readonly s3Key: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly totalSize: bigint;
+  readonly partSize: number;
+  readonly totalParts: number;
+  readonly expectedHashHex: string | null;
+  readonly parentId: string | null;
+  readonly status: UploadSessionStatus;
+  readonly expiresAt: Date;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export interface BlobRefRecord {
+  blobId: string;
+  spaceId: string;
+  ownerType: string;
+  ownerId: string;
+  sizeBytes: bigint;
+  createdAt: Date;
+}
+
+export interface AttachBlobRefInput {
+  blobId: string;
+  spaceId: string;
+  ownerType: string;
+  ownerId: string;
+  sizeBytes?: bigint;
+}
 
 export function getFileContentPath(blobId: string): string {
   return `/api/v1/files/${encodeURIComponent(blobId)}/content`;
@@ -23,8 +87,16 @@ export interface EnsureImageThumbnailOutput {
   format?: string;
 }
 
+export interface RequestThumbnailInput {
+  fileId: string;
+  kind: 'pdf' | 'image';
+  width?: number;
+  height?: number;
+  quality?: number;
+}
+
 export interface StoreBufferCasResult {
-  blob: StorageBlob;
+  blob: StorageBlobRecord;
   isDeduplicated: boolean;
 }
 
@@ -32,6 +104,8 @@ export interface RegisterUploadedObjectInput {
   storageKey: string;
   sizeBytes: bigint;
   contentHashHex?: string;
+  mimeType?: string;
+  checksumVerified?: boolean;
 }
 
 export interface FileActorContext {
@@ -41,6 +115,8 @@ export interface FileActorContext {
 
 export interface DeleteFileTarget {
   spaceId: string;
+  ownerType?: string;
+  ownerId?: string;
 }
 
 export interface PresignFileUploadInput {
@@ -59,7 +135,12 @@ export interface PresignFileUploadOutput {
   expiresIn: number;
   uploadUrl?: string;
   fileUuid?: string;
-  blob?: StorageBlob;
+  blob?: StorageBlobRecord;
+  fileId?: string;
+  url?: string;
+  filename?: string;
+  size?: number;
+  mimeType?: string;
 }
 
 export interface CompletePresignedFileInput {
@@ -73,7 +154,7 @@ export interface CompletePresignedFileInput {
 }
 
 export interface CompletePresignedFileOutput {
-  blob: StorageBlob;
+  blob: StorageBlobRecord;
   fileId: string;
   blobId: string;
   url: string;
@@ -89,7 +170,6 @@ export interface InitiateFileMultipartInput {
   userId: string;
   spaceId?: string | null;
   parentId?: string | null;
-  scope?: string;
   filename: string;
   mimeType: string;
   totalSize: number;
@@ -104,7 +184,16 @@ export interface InitiateFileMultipartOutput {
   partSize: number;
   totalParts: number;
   cleanFilename: string;
-  blob?: StorageBlob;
+  blob?: StorageBlobRecord;
+  fileId?: string;
+  url?: string;
+  filename?: string;
+  size?: number;
+}
+
+export interface MultipartPartUrlItem {
+  partNumber: number;
+  uploadUrl: string;
 }
 
 export interface CompleteFileMultipartInput {
@@ -114,9 +203,15 @@ export interface CompleteFileMultipartInput {
 }
 
 export interface CompleteFileMultipartOutput {
-  blob: StorageBlob;
-  session: UploadSession;
+  blob: StorageBlobRecord;
+  session: UploadSessionRecord;
   isDeduplicated: boolean;
+  fileId: string;
+  blobId: string;
+  url: string;
+  filename: string;
+  size: number;
+  mimeType: string;
 }
 
 export interface FilesStreamOptions {
@@ -127,9 +222,8 @@ export interface FilesStreamOptions {
 }
 
 export interface StreamBlobTarget {
-  s3Key: StorageBlob['s3Key'] | string;
+  s3Key: string;
   sizeBytes: bigint | number;
-  contentHash?: StorageBlob['contentHash'];
   contentHashHex?: string | null;
 }
 
@@ -156,7 +250,8 @@ export interface UploadFilesInput {
   buffer: Buffer;
   mimeType: string;
   spaceId?: string | null;
-  source?: string;
+  ownerType?: string;
+  ownerId?: string;
 }
 
 export interface UploadFilesOutput {
@@ -186,13 +281,89 @@ export interface ReadFilesOutput {
   buffer: Buffer;
 }
 
+export interface QuotaSummaryOutput {
+  usedBytes: number;
+  maxBytes: number;
+  remainingBytes: number;
+  usagePercent: number;
+  scope: 'personal' | 'project';
+  spaceId: string;
+}
+
+export type AuthorizedBlobContentResult =
+  | { kind: 'redirect'; location: string }
+  | { kind: 'not-modified'; etag: string }
+  | {
+      kind: 'stream';
+      statusCode: number;
+      stream: Readable | null;
+      mimeType: string;
+      filename: string;
+      contentLength: number;
+      contentRange?: string;
+      etag: string;
+      isDownload: boolean;
+    };
+
+export interface AuthorizedObjectStreamResult {
+  statusCode: number;
+  stream: NodeJS.ReadableStream;
+  mimeType: string;
+  filename: string;
+  contentLength: number;
+  contentRange?: string;
+  cacheControl: string;
+}
+
+/**
+ * Unified Deep-Module Port for FilesModule consumers.
+ */
 export interface IFilesPort {
+  // ── 1. Upload & Multipart Orchestration ──
   uploadFile(input: UploadFilesInput): Promise<UploadFilesOutput>;
-  uploadBuffer(
-    key: string,
-    buffer: Buffer,
-    contentType?: string,
-  ): Promise<{ path: string; url: string }>;
+  registerUploadedObject(
+    input: RegisterUploadedObjectInput,
+  ): Promise<StoreBufferCasResult>;
+  presignUpload(
+    input: PresignFileUploadInput,
+  ): Promise<PresignFileUploadOutput>;
+  completePresignedUpload(
+    input: CompletePresignedFileInput,
+  ): Promise<CompletePresignedFileOutput>;
+  initiateMultipart(
+    input: InitiateFileMultipartInput,
+  ): Promise<InitiateFileMultipartOutput>;
+  getMultipartPartUrl(
+    sessionId: string,
+    partNumber: number,
+    actor?: FileActorContext,
+  ): Promise<string>;
+  presignMultipartParts(
+    sessionId: string,
+    partNumbers: number[],
+    actor?: FileActorContext,
+  ): Promise<MultipartPartUrlItem[]>;
+  completeMultipart(
+    input: CompleteFileMultipartInput,
+  ): Promise<CompleteFileMultipartOutput>;
+  abortMultipart(sessionId: string, actor?: FileActorContext): Promise<void>;
+
+  // ── 2. Delivery & Internal Binary IO ──
+  getPresignedDownloadUrl(
+    fileIdOrKey: string,
+    optionsOrExpires?:
+      number | { expiresInSeconds?: number; filename?: string },
+    userId?: string,
+  ): Promise<string>;
+  createSignedContentUrl(
+    blobId: string,
+    options?: {
+      expiresInSeconds?: number;
+      filename?: string;
+      download?: boolean;
+    },
+  ): string;
+  createSignedObjectUrl(key: string, expiresInSeconds?: number): string;
   readOwnedFile(input: ReadFilesInput): Promise<ReadFilesOutput>;
   getOwnedFileStream(
     input: ReadFilesInput & { range?: { start: number; end?: number } },
@@ -203,113 +374,19 @@ export interface IFilesPort {
     filename: string;
     contentRange?: string;
   }>;
-  deleteFile(fileId: string, target?: DeleteFileTarget): Promise<void>;
-  deleteObject(key: string): Promise<void>;
-  ensurePdfThumbnail(input: {
-    fileId: string;
-    userId?: string;
-    spaceId?: string | null;
-  }): Promise<Buffer | null>;
-  storeBuffer(
-    buffer: Buffer,
-    mimeType: string,
-    onBeforeNewUpload?: (sizeBytes: bigint) => Promise<void>,
-  ): Promise<StoreBufferCasResult>;
-  registerUploadedObject(
-    input: RegisterUploadedObjectInput,
-  ): Promise<StoreBufferCasResult>;
-  presignUpload(
-    input: PresignFileUploadInput,
-  ): Promise<PresignFileUploadOutput>;
-  getPresignedUploadUrl(
-    input: PresignFileUploadInput & { scope?: string },
-  ): Promise<{
-    uploadUrl: string;
-    storageKey: string;
-    fileUuid: string;
-    expiresIn: number;
-    deduplicated: boolean;
-    fileId?: string;
-    url?: string;
-    filename?: string;
-    size?: number;
-    mimeType?: string;
-  }>;
-  completePresignedUpload(
-    input: CompletePresignedFileInput,
-  ): Promise<CompletePresignedFileOutput>;
-  initiateMultipart(
-    input: InitiateFileMultipartInput,
-  ): Promise<InitiateFileMultipartOutput>;
-  initiateMultipartUpload(input: InitiateFileMultipartInput): Promise<{
-    sessionId: string;
-    uploadId: string;
-    partSize: number;
-    totalParts: number;
-    deduplicated?: boolean;
-    fileId?: string;
-    url?: string;
-    filename?: string;
-    size?: number;
-  }>;
-  presignMultipartPart(
-    sessionId: string,
-    partNumber: number,
-    actor?: FileActorContext,
-  ): Promise<{ url: string; partNumber: number }>;
-  getMultipartPartUrl(
-    sessionId: string,
-    partNumber: number,
-    actor?: FileActorContext,
-  ): Promise<string>;
-  completeMultipart(
-    input: CompleteFileMultipartInput,
-  ): Promise<CompleteFileMultipartOutput>;
-  completeMultipartUpload(input: CompleteFileMultipartInput): Promise<{
-    fileId: string;
-    blobId: string;
-    url: string;
-    filename: string;
-    size: number;
-    mimeType: string;
-  }>;
-  abortMultipart(sessionId: string, actor?: FileActorContext): Promise<void>;
-  abortMultipartUpload(
-    sessionId: string,
-    actor?: FileActorContext,
-  ): Promise<void>;
   streamBlob(
     blob: StreamBlobTarget,
     options?: FilesStreamOptions,
   ): Promise<FilesStreamOutput>;
-  streamByKey(key: string, rangeHeader?: string): Promise<StreamKeyOutput>;
-  getPresignedDownloadUrl(
-    fileIdOrKey: string,
-    optionsOrExpires?:
-      number | { expiresInSeconds?: number; filename?: string },
-    userId?: string,
-  ): Promise<string>;
   openBlobStream(
     blobId: string,
     range?: { start: number; end: number },
   ): Promise<{
-    blob: StorageBlob;
+    blob: StorageBlobRecord;
     stream: NodeJS.ReadableStream;
     contentLength: number;
     contentRange?: string;
   }>;
-  statObject(key: string): Promise<StorageObjectMetadata>;
-  findBlobById(blobId: string): Promise<StorageBlob | null>;
-  findBlobByHash(contentHashHex: string): Promise<StorageBlob | null>;
-  acquireBlob(blobId: string): Promise<StorageBlob | null>;
-  releaseBlob(blobId: string): Promise<void>;
-  getThumbnailUrl(blobId: string): string;
-  ensureImageThumbnail(input: {
-    fileId: string;
-    width?: number;
-    height?: number;
-    quality?: number;
-  }): Promise<EnsureImageThumbnailOutput | null>;
   putObject(
     key: string,
     data: Buffer | Readable,
@@ -323,17 +400,20 @@ export interface IFilesPort {
     contentLength: number;
     contentRange?: string;
   }>;
-  objectExists(key: string): Promise<boolean>;
-  copyObject(sourceKey: string, destinationKey: string): Promise<void>;
-  deleteObjects(keys: string[]): Promise<void>;
-  reclaimOrphanBlobs(limit?: number): Promise<number>;
-  cleanupExpiredSessions(limit?: number): Promise<number>;
-  applyLifecycleRules(config?: StorageLifecycleConfiguration): Promise<void>;
-  getQuota(spaceId?: string | null): Promise<StorageQuota | null>;
-  assertQuotaAvailable(
-    spaceId: string | null | undefined,
-    requiredBytes: bigint,
-  ): Promise<void>;
+  statObject(key: string): Promise<StorageObjectMetadata>;
+  deleteObject(key: string): Promise<void>;
+
+  // ── 3. CAS Reference & Quota Ledger ──
+  findBlobById(blobId: string): Promise<StorageBlobRecord | null>;
+  findBlobByHash(contentHashHex: string): Promise<StorageBlobRecord | null>;
+  acquireBlob(blobId: string): Promise<StorageBlobRecord | null>;
+  releaseBlob(blobId: string): Promise<void>;
+  deleteFile(fileId: string, target?: DeleteFileTarget): Promise<void>;
+  attachBlobRef(
+    input: AttachBlobRefInput,
+  ): Promise<{ created: boolean; ref: BlobRefRecord | null }>;
+  detachBlobRef(ownerType: string, ownerId: string): Promise<boolean>;
+  getQuota(spaceId?: string | null): Promise<StorageQuotaRecord | null>;
   reserveQuota(
     spaceId: string | null | undefined,
     bytes: bigint,
@@ -342,4 +422,19 @@ export interface IFilesPort {
     spaceId: string | null | undefined,
     bytes: bigint,
   ): Promise<bigint>;
+
+  // ── 4. Async & Coalesced Derivatives ──
+  getThumbnailUrl(blobId: string, contentHashHex?: string): string;
+  requestThumbnail(input: RequestThumbnailInput): Promise<boolean>;
+  ensurePdfThumbnail(input: {
+    fileId: string;
+    userId?: string;
+    spaceId?: string | null;
+  }): Promise<Buffer | null>;
+  ensureImageThumbnail(input: {
+    fileId: string;
+    width?: number;
+    height?: number;
+    quality?: number;
+  }): Promise<EnsureImageThumbnailOutput | null>;
 }

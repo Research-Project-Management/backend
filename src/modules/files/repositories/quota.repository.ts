@@ -1,110 +1,152 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { DEFAULT_STORAGE_QUOTA_BYTES } from '../files.constant';
-import { StorageQuota } from '../domain/quota.domain';
 import { cleanUuid } from '../domain/files.policy';
-import { QuotaMapper } from '../domain/files.mapper';
-
-export interface IQuotaRepository {
-  findBySpaceId(spaceId: string): Promise<StorageQuota | null>;
-  incrementUsage(spaceId: string, bytes: bigint): Promise<bigint>;
-  decrementUsage(spaceId: string, bytes: bigint): Promise<bigint>;
-}
+import { StorageQuotaRecord } from '../types/files.type';
 
 @Injectable()
-export class QuotaRepository implements IQuotaRepository {
+export class QuotaRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findBySpaceId(spaceId: string): Promise<StorageQuota | null> {
+  async findBySpaceId(
+    spaceId?: string | null,
+  ): Promise<StorageQuotaRecord | null> {
     const validSpaceId = cleanUuid(spaceId);
     if (!validSpaceId) {
       return null;
     }
 
-    const record = await this.prisma.storageQuota.findUnique({
+    const record = await this.prisma.spaceQuota.findUnique({
       where: {
         spaceId: validSpaceId,
       },
     });
-    return record ? QuotaMapper.toDomain(record) : null;
+    if (!record) {
+      return null;
+    }
+    return {
+      spaceId: record.spaceId,
+      usedBytes: record.usedBytes,
+      maxBytes: record.maxBytes,
+      updatedAt: record.updatedAt,
+    };
   }
 
-  async incrementUsage(spaceId: string, bytes: bigint): Promise<bigint> {
-    if (bytes <= 0n) {
-      const current = await this.findBySpaceId(spaceId);
-      return current?.usedBytes ?? 0n;
+  async assertAvailable(
+    spaceId: string | null | undefined,
+    requiredBytes: bigint,
+  ): Promise<void> {
+    const quota = spaceId ? await this.findBySpaceId(spaceId) : null;
+    const maxBytes = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
+    const usedBytes = quota ? quota.usedBytes : 0n;
+    if (usedBytes + requiredBytes > maxBytes) {
+      throw new BadRequestException('Storage quota exceeded');
     }
+  }
 
+  async incrementUsage(
+    spaceId: string | null | undefined,
+    bytes: bigint,
+  ): Promise<bigint> {
     const validSpaceId = cleanUuid(spaceId);
     if (!validSpaceId) {
       return 0n;
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${validSpaceId}))`;
-
-      const existing = await tx.storageQuota.findUnique({
-        where: {
-          spaceId: validSpaceId,
-        },
-      });
-
-      if (existing) {
-        if (existing.usedBytes + bytes > existing.maxBytes) {
-          throw new BadRequestException('Storage quota exceeded');
-        }
-        const updated = await tx.storageQuota.update({
-          where: { id: existing.id },
-          data: { usedBytes: { increment: bytes } },
-        });
-        return updated.usedBytes;
-      }
-
-      if (bytes > DEFAULT_STORAGE_QUOTA_BYTES) {
-        throw new BadRequestException('Storage quota exceeded');
-      }
-
-      const created = await tx.storageQuota.create({
-        data: {
-          spaceId: validSpaceId,
-          usedBytes: bytes,
-          maxBytes: DEFAULT_STORAGE_QUOTA_BYTES,
-        },
-      });
-      return created.usedBytes;
-    });
-  }
-
-  async decrementUsage(spaceId: string, bytes: bigint): Promise<bigint> {
     if (bytes <= 0n) {
-      const current = await this.findBySpaceId(spaceId);
+      const current = await this.findBySpaceId(validSpaceId);
       return current?.usedBytes ?? 0n;
     }
 
+    const rows = await this.prisma.$queryRaw<Array<{ used_bytes: bigint }>>`
+      WITH effective AS (
+        SELECT COALESCE(
+          (SELECT max_bytes FROM space_quotas WHERE space_id = ${validSpaceId}::uuid),
+          ${DEFAULT_STORAGE_QUOTA_BYTES}::bigint
+        ) AS max_bytes
+      )
+      INSERT INTO space_quotas (space_id, used_bytes, max_bytes, updated_at)
+      SELECT ${validSpaceId}::uuid, ${bytes}::bigint, e.max_bytes, NOW()
+      FROM effective e
+      WHERE ${bytes}::bigint <= e.max_bytes
+      ON CONFLICT (space_id) DO UPDATE
+        SET used_bytes = space_quotas.used_bytes + EXCLUDED.used_bytes,
+            updated_at = NOW()
+      WHERE space_quotas.used_bytes + EXCLUDED.used_bytes <= space_quotas.max_bytes
+      RETURNING used_bytes
+    `;
+
+    if (rows.length === 0) {
+      throw new BadRequestException('Storage quota exceeded');
+    }
+    return BigInt(rows[0].used_bytes);
+  }
+
+  async decrementUsage(
+    spaceId: string | null | undefined,
+    bytes: bigint,
+  ): Promise<bigint> {
     const validSpaceId = cleanUuid(spaceId);
     if (!validSpaceId) {
       return 0n;
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${validSpaceId}))`;
+    if (bytes <= 0n) {
+      const current = await this.findBySpaceId(validSpaceId);
+      return current?.usedBytes ?? 0n;
+    }
 
-      const quota = await tx.storageQuota.findUnique({
-        where: {
-          spaceId: validSpaceId,
-        },
-      });
-      if (!quota) return 0n;
+    const rows = await this.prisma.$queryRaw<Array<{ used_bytes: bigint }>>`
+      UPDATE space_quotas
+      SET used_bytes = GREATEST(0, used_bytes - ${bytes}::bigint),
+          updated_at = NOW()
+      WHERE space_id = ${validSpaceId}::uuid
+      RETURNING used_bytes
+    `;
 
-      const decrementAmount =
-        bytes <= quota.usedBytes ? bytes : quota.usedBytes;
-      if (decrementAmount <= 0n) return quota.usedBytes;
+    return rows.length > 0 ? BigInt(rows[0].used_bytes) : 0n;
+  }
 
-      const updated = await tx.storageQuota.update({
-        where: { id: quota.id },
-        data: { usedBytes: { decrement: decrementAmount } },
-      });
-      return updated.usedBytes;
-    });
+  async reconcileSpaceQuotas(limit = 200): Promise<number> {
+    const affected = await this.prisma.$executeRaw`
+      WITH computed AS (
+        SELECT space_id, COALESCE(SUM(bytes), 0)::bigint AS actual_bytes
+        FROM (
+          SELECT space_id, size::bigint AS bytes
+          FROM file_nodes
+          WHERE is_folder = false AND blob_id IS NOT NULL
+          UNION ALL
+          SELECT space_id, size_bytes::bigint AS bytes
+          FROM page_files
+          WHERE deleted_at IS NULL AND blob_id IS NOT NULL
+          UNION ALL
+          SELECT li.space_id, att.size::bigint AS bytes
+          FROM attachments att
+          JOIN library_items li ON li.id = att.item_id
+          WHERE att.file_id IS NOT NULL
+            AND att.deleted_at IS NULL
+            AND li.deleted_at IS NULL
+          UNION ALL
+          SELECT r.space_id, b.size_bytes::bigint AS bytes
+          FROM file_blob_refs r
+          JOIN file_blobs b ON b.id = r.blob_id
+          WHERE r.owner_type NOT IN ('storage_file', 'page_file', 'attachment')
+        ) usage_rows
+        GROUP BY space_id
+      ),
+      targets AS (
+        SELECT sq.space_id, LEAST(sq.max_bytes, GREATEST(0, COALESCE(c.actual_bytes, 0)))::bigint AS target_bytes
+        FROM space_quotas sq
+        LEFT JOIN computed c ON c.space_id = sq.space_id
+        WHERE sq.used_bytes IS DISTINCT FROM LEAST(sq.max_bytes, GREATEST(0, COALESCE(c.actual_bytes, 0)))::bigint
+        LIMIT ${limit}
+      )
+      UPDATE space_quotas sq
+      SET used_bytes = t.target_bytes,
+          updated_at = NOW()
+      FROM targets t
+      WHERE sq.space_id = t.space_id
+    `;
+    return Number(affected);
   }
 }

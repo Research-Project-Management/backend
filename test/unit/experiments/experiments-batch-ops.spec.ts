@@ -1,18 +1,14 @@
-import {
-  BlobService,
-  FilesFacade,
-  FileStreamService,
-  PresignService,
-  QuotaService,
-} from '@/modules/files';
-import {
-  ZipPackager,
-  crc32,
-  ExperimentsController,
-  ExperimentNode,
-  StreamController,
-  StreamService,
-} from '@/modules/experiments';
+import { FilesFacade } from '@/modules/files';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
+import { ExperimentsController } from '@/modules/experiments/controllers/experiments.controller';
+import { StreamController } from '@/modules/experiments/controllers/stream.controller';
+import { ZipPackager, crc32 } from '@/modules/experiments/domain/archive.domain';
+import { ExperimentNode } from '@/modules/experiments/domain/node.domain';
+import { StreamService } from '@/modules/experiments/services/stream.service';
 import { Readable } from 'node:stream';
 import { HttpStatus } from '@nestjs/common';
 
@@ -145,7 +141,7 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
       mockBlobRepo = {
         findById: jest.fn().mockResolvedValue({
           id: 'blob-csv-1',
-          s3Key: { value: () => 'blobs/dataset.csv' },
+          s3Key: 'blobs/dataset.csv',
         }),
       };
       mockDriver = {
@@ -154,13 +150,23 @@ describe('Storage Batch Operations & ZIP Packager Suite', () => {
         }),
       };
 
-      const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaService = new QuotaService({} as any);
+      const blobService = new BlobService(
+        mockDriver,
+        mockBlobRepo as unknown as BlobRepository,
+      );
+      const quotaRepo = {} as QuotaRepository;
       const filesPort = new FilesFacade(
+        mockDriver,
         blobService,
-        quotaService,
-        new PresignService(blobService, quotaService, {} as any),
-        new FileStreamService(blobService),
+        mockBlobRepo as unknown as BlobRepository,
+        quotaRepo,
+        new FilesUploadService(
+          mockDriver,
+          blobService,
+          mockBlobRepo as unknown as BlobRepository,
+          quotaRepo,
+          {} as SessionRepository,
+        ),
       );
       const mockCache = {
         getPresignedUrl: jest.fn().mockResolvedValue(null),

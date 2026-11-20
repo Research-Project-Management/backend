@@ -1,4 +1,4 @@
-import { StorageFile as PrismaFile, Prisma } from '@prisma/client';
+import { FileNode as PrismaFile, Prisma } from '@prisma/client';
 import { getFileContentPath } from '../experiments.type';
 import { FileScope, normalizeFileScope, ExperimentNode } from './node.domain';
 import { ExperimentVersion, ExperimentVersionAuthor } from './version.domain';
@@ -28,7 +28,7 @@ export type PrismaFileWithAuthor = PrismaFile & {
 
 export function buildFileTypeCondition(
   rawType: string,
-): Prisma.StorageFileWhereInput | null {
+): Prisma.FileNodeWhereInput | null {
   const t = rawType.trim().toLowerCase();
   if (!t) return null;
   if (t === 'folder' || t === 'directory') {
@@ -112,13 +112,13 @@ export function buildFileTypeCondition(
 }
 
 export function applyFileTypeFilter(
-  where: Prisma.StorageFileWhereInput,
+  where: Prisma.FileNodeWhereInput,
   types?: string[],
 ): void {
   if (!types || types.length === 0) return;
   const typeConditions = types
     .map(buildFileTypeCondition)
-    .filter((c): c is Prisma.StorageFileWhereInput => c !== null);
+    .filter((c): c is Prisma.FileNodeWhereInput => c !== null);
 
   if (typeConditions.length === 1) {
     Object.assign(where, typeConditions[0]);
@@ -133,8 +133,8 @@ export function applyFileTypeFilter(
 export function parseFileOrderBy(
   sortBy?: string,
   sortOrder?: 'asc' | 'desc',
-): Prisma.StorageFileOrderByWithRelationInput[] {
-  const defaultOrder: Prisma.StorageFileOrderByWithRelationInput[] = [
+): Prisma.FileNodeOrderByWithRelationInput[] {
+  const defaultOrder: Prisma.FileNodeOrderByWithRelationInput[] = [
     { isFolder: 'desc' },
     { filename: 'asc' },
   ];
@@ -294,7 +294,7 @@ export class VersionMapper {
       changeComment: string | null;
       createdById: string;
       createdAt: Date;
-      blob?: { sizeBytes: bigint } | null;
+      blob?: { sizeBytes: bigint; mimeType?: string | null } | null;
     },
     author: ExperimentVersionAuthor | null,
   ): ExperimentVersion {
@@ -307,7 +307,7 @@ export class VersionMapper {
       createdById: record.createdById,
       createdAt: record.createdAt,
       sizeBytes: record.sizeBytes ?? record.blob?.sizeBytes ?? 0n,
-      mimeType: record.mimeType ?? undefined,
+      mimeType: record.mimeType ?? record.blob?.mimeType ?? undefined,
       author,
     });
   }

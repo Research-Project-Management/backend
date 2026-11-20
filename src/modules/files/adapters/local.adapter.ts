@@ -9,7 +9,7 @@ import {
   CompletedPart,
   StorageLifecycleConfiguration,
 } from '../types/adapter.type';
-import { inferMimeType } from '../domain/files.policy';
+import { inferMimeType, streamToBuffer } from '../domain/files.policy';
 
 @Injectable()
 export class LocalStorageAdapter implements IStorageAdapter {
@@ -22,6 +22,10 @@ export class LocalStorageAdapter implements IStorageAdapter {
       fs.mkdirSync(this.rootPath, { recursive: true });
     }
     this.logger.log(`LocalStorageAdapter initialized at: ${this.rootPath}`);
+  }
+
+  public getBucketName(): string {
+    return 'local';
   }
 
   private getSigningSecret(): string {
@@ -105,6 +109,35 @@ export class LocalStorageAdapter implements IStorageAdapter {
         data.pipe(writeStream);
       });
     }
+  }
+
+  async putVerified(
+    key: string,
+    data: Buffer | Readable,
+    expectedSha256Base64?: string,
+  ): Promise<void> {
+    if (!expectedSha256Base64) {
+      await this.put(key, data);
+      return;
+    }
+
+    const payloadBuf = Buffer.isBuffer(data)
+      ? data
+      : await streamToBuffer(data);
+    const actualBase64 = crypto
+      .createHash('sha256')
+      .update(payloadBuf)
+      .digest('base64');
+    const actualBuf = Buffer.from(actualBase64, 'utf8');
+    const expectedBuf = Buffer.from(expectedSha256Base64, 'utf8');
+    if (
+      actualBuf.length !== expectedBuf.length ||
+      !crypto.timingSafeEqual(actualBuf, expectedBuf)
+    ) {
+      throw new BadRequestException('Content hash mismatch');
+    }
+
+    await this.put(key, payloadBuf);
   }
 
   async putPart(
@@ -215,12 +248,16 @@ export class LocalStorageAdapter implements IStorageAdapter {
       mimeType?: string;
       expiresInSeconds?: number;
       sizeBytes?: number;
+      checksumSha256Base64?: string;
     },
   ): Promise<string> {
     const expiresAt = Date.now() + (options?.expiresInSeconds ?? 3600) * 1000;
-    const sig = this.signToken('put', key, expiresAt);
+    const sha = options?.checksumSha256Base64;
+    const resource = sha ? `${key}:sha256=${sha}` : key;
+    const sig = this.signToken('put', resource, expiresAt);
+    const shaParam = sha ? `&sha256=${encodeURIComponent(sha)}` : '';
     return Promise.resolve(
-      `/api/v1/files/local-upload?key=${encodeURIComponent(key)}&expires=${expiresAt}&sig=${sig}`,
+      `/api/v1/files/local-upload?key=${encodeURIComponent(key)}&expires=${expiresAt}&sig=${sig}${shaParam}`,
     );
   }
 

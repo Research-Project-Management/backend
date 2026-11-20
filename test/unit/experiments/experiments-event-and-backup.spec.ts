@@ -1,21 +1,18 @@
+import { BlobStatus, FilesFacade, StorageBlobRecord } from '@/modules/files';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
 import {
-  BlobService,
-  StorageBlob,
-  ContentHash,
-  StorageKey,
-  FilesFacade,
-  FileStreamService,
-  PresignService,
-  QuotaService,
-} from '@/modules/files';
-import {
-  ExperimentsEventListener,
-  ExperimentsBackupService,
-  FileUploadedEvent,
   FileDownloadedEvent,
   FileTrashedEvent,
-  ExperimentNode,
+  FileUploadedEvent,
 } from '@/modules/experiments';
+import { ExperimentNode } from '@/modules/experiments/domain/node.domain';
+import { ExperimentsEventListener } from '@/modules/experiments/processors/experiments.listener';
+import { ExperimentsBackupService } from '@/modules/experiments/services/backup.service';
 import { Readable } from 'stream';
 
 describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5)', () => {
@@ -128,12 +125,19 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
       };
 
       const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaService = new QuotaService({} as any);
+      const quotaRepo = {} as QuotaRepository;
       const filesPort = new FilesFacade(
+        mockDriver,
         blobService,
-        quotaService,
-        new PresignService(blobService, quotaService, {} as any),
-        new FileStreamService(blobService),
+        mockBlobRepo as BlobRepository,
+        quotaRepo,
+        new FilesUploadService(
+          mockDriver,
+          blobService,
+          mockBlobRepo as BlobRepository,
+          quotaRepo,
+          {} as SessionRepository,
+        ),
       );
       backupService = new ExperimentsBackupService(filesPort, mockNodeRepo);
     });
@@ -171,21 +175,39 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         projectId: 'proj-001',
       });
 
-      const blob1 = new StorageBlob({
+      const blob1: StorageBlobRecord = {
         id: 'blob-1',
-        contentHash: ContentHash.fromHex('1'.repeat(64)),
+        contentHashHex: ContentHash.fromHex('1'.repeat(64)).toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 25n,
-        s3Key: StorageKey.fromString('blobs/11/results.csv'),
+        mimeType: 'text/csv',
+        checksumVerified: true,
+        s3Key: StorageKey.fromString('blobs/11/results.csv').value(),
         s3Bucket: 'flux',
-      });
+        storageClass: 'STANDARD',
+        refCount: 1,
+        status: BlobStatus.READY,
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
 
-      const blob2 = new StorageBlob({
+      const blob2: StorageBlobRecord = {
         id: 'blob-2',
-        contentHash: ContentHash.fromHex('2'.repeat(64)),
+        contentHashHex: ContentHash.fromHex('2'.repeat(64)).toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 10n,
-        s3Key: StorageKey.fromString('blobs/22/notes.txt'),
+        mimeType: 'text/plain',
+        checksumVerified: true,
+        s3Key: StorageKey.fromString('blobs/22/notes.txt').value(),
         s3Bucket: 'flux',
-      });
+        storageClass: 'STANDARD',
+        refCount: 1,
+        status: BlobStatus.READY,
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
 
       mockNodeRepo.list
         .mockResolvedValueOnce({

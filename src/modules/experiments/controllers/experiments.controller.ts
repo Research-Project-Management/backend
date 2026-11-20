@@ -233,6 +233,13 @@ export class ExperimentsController {
     @Query('spaceId') spaceId?: string,
   ) {
     const normalizedProjectId = normalizeExperimentProjectId(spaceId, userId);
+    if (normalizedProjectId && userId) {
+      await this.accessPolicy.assertCanAccessProject(
+        userId,
+        normalizedProjectId,
+        'read',
+      );
+    }
     const targetSpaceId = normalizedProjectId ?? userId;
     const quota = this.filesPort
       ? await this.filesPort.getQuota(targetSpaceId)
@@ -277,7 +284,7 @@ export class ExperimentsController {
     if (userId) {
       await this.accessPolicy.assertCanAccess(userId, id, 'write');
     }
-    const updated = await this.experimentsService.toggleStar(id);
+    const updated = await this.experimentsService.toggleStar(id, userId);
     return { success: true, starred: updated.starred };
   }
 
@@ -304,6 +311,29 @@ export class ExperimentsController {
     };
   }
 
+  private async createFolderForSpace(
+    userId: string,
+    rawSpaceId: string | undefined,
+    dto: CreateFolderDto,
+  ) {
+    const normalizedProjectId = normalizeExperimentProjectId(rawSpaceId, userId);
+    if (userId) {
+      await this.accessPolicy.assertCanWriteScope(userId, {
+        projectId: normalizedProjectId || null,
+        parentId: dto.parentId || null,
+      });
+    }
+    const created = await this.experimentsService.createFolder({
+      userId,
+      name: dto.name || dto.filename || 'New Folder',
+      projectId: normalizedProjectId || null,
+      linkedToId: normalizedProjectId || null,
+      scope: normalizedProjectId ? FileScope.Project : FileScope.Personal,
+      parentId: dto.parentId || null,
+    });
+    return this.mapNodeToDto(created);
+  }
+
   @Post('folder')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new folder' })
@@ -311,25 +341,7 @@ export class ExperimentsController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateFolderDto,
   ) {
-    const normalizedProjectId = normalizeExperimentProjectId(
-      dto.spaceId,
-      userId,
-    );
-    if (userId) {
-      await this.accessPolicy.assertCanWriteScope(userId, {
-        projectId: normalizedProjectId || null,
-        parentId: dto.parentId || null,
-      });
-    }
-    const folderName = dto.name || dto.filename || 'New Folder';
-    const created = await this.experimentsService.createFolder({
-      userId,
-      name: folderName,
-      projectId: normalizedProjectId || null,
-      scope: normalizedProjectId ? FileScope.Project : FileScope.Personal,
-      parentId: dto.parentId || null,
-    });
-    return this.mapNodeToDto(created);
+    return this.createFolderForSpace(userId, dto.spaceId, dto);
   }
 
   @Post('spaces/:spaceId/folder')
@@ -340,27 +352,7 @@ export class ExperimentsController {
     @Body() dto: CreateFolderDto,
     @Param('spaceId') spaceId?: string,
   ) {
-    const normalizedProjectId = normalizeExperimentProjectId(
-      spaceId ?? dto.spaceId,
-      userId,
-    );
-    if (userId) {
-      await this.accessPolicy.assertCanWriteScope(userId, {
-        projectId: normalizedProjectId || null,
-        parentId: dto.parentId || null,
-      });
-    }
-    const folderName = dto.name || dto.filename || 'New Folder';
-    const scope = normalizedProjectId ? FileScope.Project : FileScope.Personal;
-    const created = await this.experimentsService.createFolder({
-      userId,
-      name: folderName,
-      projectId: normalizedProjectId || null,
-      linkedToId: normalizedProjectId || null,
-      scope,
-      parentId: dto.parentId || null,
-    });
-    return this.mapNodeToDto(created);
+    return this.createFolderForSpace(userId, spaceId ?? dto.spaceId, dto);
   }
 
   @Put(':id/move')
@@ -456,7 +448,7 @@ export class ExperimentsController {
     @CurrentUser('id') userId?: string,
   ) {
     await this.assertBatchAccess(userId, dto.ids, 'write');
-    await this.experimentsService.batchStar(dto.ids, dto.starred);
+    await this.experimentsService.batchStar(dto.ids, dto.starred, userId);
     return { success: true };
   }
 

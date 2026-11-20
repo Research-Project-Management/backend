@@ -1,4 +1,4 @@
-import { ThumbnailService } from '@/modules/files';
+import { ThumbnailService } from '@/modules/files/services/thumbnail.service';
 import sharp from 'sharp';
 
 jest.mock('unpdf', () => ({

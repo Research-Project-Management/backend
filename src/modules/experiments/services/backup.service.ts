@@ -7,8 +7,7 @@ import {
   streamToBuffer,
   type IFilesPort,
 } from '@/modules/files';
-import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
-import { INodeRepository } from '../repositories/node.repository';
+import { NodeRepository } from '../repositories/node.repository';
 import { ExperimentNode } from '../domain/node.domain';
 import { ZipPackager } from '../domain/archive.domain';
 
@@ -34,8 +33,7 @@ export class ExperimentsBackupService {
   constructor(
     @Inject(FILES_PORT)
     private readonly filesPort: IFilesPort,
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
+    private readonly nodeRepo: NodeRepository,
   ) {}
 
   async exportProjectArchive(projectId: string): Promise<ProjectBackupResult> {
@@ -107,7 +105,7 @@ export class ExperimentsBackupService {
         if (blob) {
           try {
             const { stream } = await this.filesPort.getObjectStream(
-              blob.s3Key.value(),
+              blob.s3Key,
             );
             const buf = await streamToBuffer(stream);
             const cleanFileName = sanitizeFilename(node.name);

@@ -5,7 +5,6 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { FILES_PORT, streamToBuffer, type IFilesPort } from '@/modules/files';
-import { EXPERIMENT_NODE_REPOSITORY } from './experiments.constant';
 import {
   getFileContentPath,
   IExperimentsPort,
@@ -15,13 +14,12 @@ import {
   UploadFileInput,
   UploadFileOutput,
 } from './experiments.type';
-import { INodeRepository } from './repositories/node.repository';
+import { NodeRepository } from './repositories/node.repository';
 import { FileScope } from './domain/node.domain';
 import { ExperimentsAccessPolicy } from './domain/access.policy';
 import { ExperimentsService } from './services/experiments.service';
 import { TrashService } from './services/trash.service';
 import { UploadService } from './services/upload.service';
-import { MultipartService } from './services/multipart.service';
 import { StreamService } from './services/stream.service';
 
 @Injectable()
@@ -29,10 +27,8 @@ export class ExperimentsFacade implements IExperimentsPort {
   constructor(
     @Inject(FILES_PORT)
     private readonly filesPort: IFilesPort,
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
+    private readonly nodeRepo: NodeRepository,
     private readonly uploadService: UploadService,
-    private readonly multipartService: MultipartService,
     private readonly trashService: TrashService,
     private readonly streamService: StreamService,
     private readonly experimentsService: ExperimentsService,
@@ -96,7 +92,7 @@ export class ExperimentsFacade implements IExperimentsPort {
       input.projectId,
     );
 
-    const { stream } = await this.filesPort.getObjectStream(blob.s3Key.value());
+    const { stream } = await this.filesPort.getObjectStream(blob.s3Key);
     const buffer = await streamToBuffer(stream);
 
     return {
@@ -104,7 +100,7 @@ export class ExperimentsFacade implements IExperimentsPort {
       filename: node.name,
       mimeType: node.mimeType,
       size: Number(blob.sizeBytes),
-      storageKey: blob.s3Key.value(),
+      storageKey: blob.s3Key,
       contentUrl: getFileContentPath(node.id),
       buffer,
     };
@@ -126,7 +122,7 @@ export class ExperimentsFacade implements IExperimentsPort {
     );
 
     const { stream, contentLength, contentRange } =
-      await this.filesPort.getObjectStream(blob.s3Key.value(), input.range);
+      await this.filesPort.getObjectStream(blob.s3Key, input.range);
 
     return {
       stream,
@@ -158,7 +154,10 @@ export class ExperimentsFacade implements IExperimentsPort {
     }
 
     try {
-      const thumbnailUrl = this.filesPort.getThumbnailUrl(blob.id);
+      const thumbnailUrl = this.filesPort.getThumbnailUrl(
+        blob.id,
+        blob.contentHashHex,
+      );
       if (node.metadata?.thumbnail !== thumbnailUrl) {
         node.updateMetadata({
           ...(node.metadata || {}),
@@ -190,7 +189,6 @@ export class ExperimentsFacade implements IExperimentsPort {
       projectId: input.projectId,
       parentId: input.parentId,
       scope: input.projectId ? FileScope.Project : FileScope.Personal,
-      source: input.source,
     });
 
     return {
@@ -277,7 +275,7 @@ export class ExperimentsFacade implements IExperimentsPort {
     scope?: FileScope | string;
     expectedHash?: string;
   }) {
-    return this.multipartService.initiate({
+    return this.uploadService.initiateMultipart({
       ...input,
       scope: input.scope as FileScope | undefined,
     });
@@ -288,7 +286,7 @@ export class ExperimentsFacade implements IExperimentsPort {
     partNumber: number,
     actor?: { userId: string; projectId?: string | null },
   ): Promise<string> {
-    return this.multipartService.getPartUrl(sessionId, partNumber, actor);
+    return this.uploadService.getMultipartPartUrl(sessionId, partNumber, actor);
   }
 
   async completeMultipartUpload(input: {
@@ -296,13 +294,13 @@ export class ExperimentsFacade implements IExperimentsPort {
     parts: { partNumber: number; eTag: string }[];
     actor?: { userId: string; projectId?: string | null };
   }) {
-    return this.multipartService.complete(input);
+    return this.uploadService.completeMultipart(input);
   }
 
   async abortMultipartUpload(
     sessionId: string,
     actor?: { userId: string; projectId?: string | null },
   ): Promise<void> {
-    await this.multipartService.abort(sessionId, actor);
+    await this.uploadService.abortMultipart(sessionId, actor);
   }
 }

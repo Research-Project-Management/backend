@@ -1,14 +1,12 @@
 import {
   Injectable,
-  Inject,
   Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
 import { ListExperimentsFilter } from '../experiments.type';
-import { INodeRepository } from '../repositories/node.repository';
+import { NodeRepository } from '../repositories/node.repository';
 import { FileScope, ExperimentNode } from '../domain/node.domain';
 import { ExperimentsCacheService } from './cache.service';
 
@@ -17,8 +15,7 @@ export class ExperimentsService {
   private readonly logger = new Logger(ExperimentsService.name);
 
   constructor(
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
+    private readonly nodeRepo: NodeRepository,
     private readonly cache: ExperimentsCacheService,
   ) {}
 
@@ -146,10 +143,10 @@ export class ExperimentsService {
     return updated;
   }
 
-  async toggleStar(nodeId: string): Promise<ExperimentNode> {
+  async toggleStar(nodeId: string, userId?: string): Promise<ExperimentNode> {
     const node = await this.getActiveNodeOrThrow(nodeId);
     node.toggleStar();
-    const updated = await this.nodeRepo.update(node);
+    const updated = await this.nodeRepo.update(node, userId);
     await this.invalidateNodeFolderCache(updated);
     return updated;
   }
@@ -157,12 +154,13 @@ export class ExperimentsService {
   async setStarred(
     nodeId: string,
     starred: boolean,
+    userId?: string,
   ): Promise<ExperimentNode | null> {
-    const node = await this.nodeRepo.findById(nodeId);
+    const node = await this.nodeRepo.findById(nodeId, userId);
     if (!node || node.isTrashed()) return null;
     if (node.starred !== starred) {
       node.toggleStar();
-      const updated = await this.nodeRepo.update(node);
+      const updated = await this.nodeRepo.update(node, userId);
       await this.invalidateNodeFolderCache(updated);
       return updated;
     }
@@ -302,11 +300,15 @@ export class ExperimentsService {
     return count;
   }
 
-  async batchStar(ids: string[], starred: boolean): Promise<number> {
+  async batchStar(
+    ids: string[],
+    starred: boolean,
+    userId?: string,
+  ): Promise<number> {
     let count = 0;
     for (const id of ids) {
       try {
-        const updated = await this.setStarred(id, starred);
+        const updated = await this.setStarred(id, starred, userId);
         if (updated) count++;
       } catch (err: unknown) {
         this.logger.debug(

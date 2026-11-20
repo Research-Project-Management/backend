@@ -1,25 +1,21 @@
 import {
-  BlobService,
-  IStorageAdapter,
-  IBlobRepository,
-  IQuotaRepository,
-  StorageBlob,
   BlobStatus,
-  ContentHash,
-  StorageKey,
+  DEFAULT_STORAGE_QUOTA_BYTES,
   FilesFacade,
-  FileStreamService,
-  PresignService,
-  QuotaService,
+  StorageBlobRecord,
 } from '@/modules/files';
-import {
-  ExperimentsFacade,
-  UploadService,
-  StreamService,
-  INodeRepository,
-  ExperimentsCacheService,
-  ExperimentNode,
-} from '@/modules/experiments';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
+import type { IStorageAdapter } from '@/modules/files/types/adapter.type';
+import { ExperimentsFacade } from '@/modules/experiments';
+import { ExperimentNode } from '@/modules/experiments/domain/node.domain';
+import { NodeRepository } from '@/modules/experiments/repositories/node.repository';
+import { ExperimentsCacheService } from '@/modules/experiments/services/cache.service';
+import { StreamService } from '@/modules/experiments/services/stream.service';
+import { UploadService } from '@/modules/experiments/services/upload.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { BadRequestException } from '@nestjs/common';
@@ -28,14 +24,14 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
   let facade: ExperimentsFacade;
   let uploadService: UploadService;
   let mockDriver: jest.Mocked<IStorageAdapter>;
-  let mockNodeRepo: jest.Mocked<INodeRepository>;
-  let mockBlobRepo: jest.Mocked<IBlobRepository>;
-  let mockQuotaRepo: jest.Mocked<IQuotaRepository>;
+  let mockNodeRepo: jest.Mocked<NodeRepository>;
+  let mockBlobRepo: jest.Mocked<BlobRepository>;
+  let mockQuotaRepo: jest.Mocked<QuotaRepository>;
   let mockCache: jest.Mocked<ExperimentsCacheService>;
   let mockEventEmitter: jest.Mocked<EventEmitter2>;
 
   const nodesInDb = new Map<string, ExperimentNode>();
-  const blobsInDb = new Map<string, StorageBlob>();
+  const blobsInDb = new Map<string, StorageBlobRecord>();
   const driverStorage = new Map<string, Buffer>();
 
   beforeEach(() => {
@@ -92,40 +88,51 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
       getFolderPath: jest.fn().mockResolvedValue([]),
       listSharedWithUser: jest.fn().mockResolvedValue({ items: [], total: 0 }),
       shareNode: jest.fn(),
-    };
+    } as unknown as jest.Mocked<NodeRepository>;
 
     mockBlobRepo = {
       findById: jest
         .fn()
         .mockImplementation(async (id: string) => blobsInDb.get(id) || null),
-      findByHash: jest.fn().mockImplementation(async (hash: ContentHash) => {
+      findByHash: jest.fn().mockImplementation(async (hashHex: string) => {
         for (const blob of blobsInDb.values()) {
-          if (blob.contentHash.equals(hash)) {
+          if (blob.contentHashHex === hashHex) {
             return blob;
           }
         }
         return null;
       }),
-      create: jest.fn().mockImplementation(async (blob: StorageBlob) => {
+      create: jest.fn().mockImplementation(async (input) => {
+        const blob: StorageBlobRecord = {
+          id: input.id,
+          contentHashHex: input.contentHashHex,
+          hashAlgorithm: 'SHA256',
+          sizeBytes: input.sizeBytes,
+          mimeType: input.mimeType,
+          checksumVerified: input.checksumVerified,
+          s3Key: input.s3Key,
+          s3Bucket: input.s3Bucket,
+          storageClass: 'STANDARD',
+          refCount: input.refCount ?? 1,
+          status: input.status ?? BlobStatus.READY,
+          createdAt: new Date(),
+          tombstoneAt: null,
+          claimedAt: null,
+        };
         blobsInDb.set(blob.id, blob);
         return blob;
       }),
       delete: jest.fn().mockImplementation(async (id: string) => {
         blobsInDb.delete(id);
       }),
-      findTombstonedBlobs: jest.fn(),
       incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
         const blob = blobsInDb.get(id);
         if (!blob) throw new Error('Blob not found');
-        const updated = new StorageBlob({
-          id: blob.id,
-          contentHash: blob.contentHash,
-          sizeBytes: blob.sizeBytes,
-          s3Key: blob.s3Key,
-          s3Bucket: blob.s3Bucket,
+        const updated: StorageBlobRecord = {
+          ...blob,
           status: BlobStatus.READY,
           refCount: blob.refCount + 1,
-        });
+        };
         blobsInDb.set(id, updated);
         return updated;
       }),
@@ -133,25 +140,26 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
         const blob = blobsInDb.get(id);
         if (!blob) throw new Error('Blob not found');
         const newCount = Math.max(0, blob.refCount - 1);
-        const updated = new StorageBlob({
-          id: blob.id,
-          contentHash: blob.contentHash,
-          sizeBytes: blob.sizeBytes,
-          s3Key: blob.s3Key,
-          s3Bucket: blob.s3Bucket,
+        const updated: StorageBlobRecord = {
+          ...blob,
           status: newCount === 0 ? BlobStatus.DELETED : BlobStatus.READY,
           refCount: newCount,
-        });
+        };
         blobsInDb.set(id, updated);
         return updated;
       }),
-    };
+    } as unknown as jest.Mocked<BlobRepository>;
 
     mockQuotaRepo = {
-      findBySpaceId: jest.fn(),
+      findBySpaceId: jest.fn().mockResolvedValue(null),
+      assertAvailable: jest.fn(async (_spaceId, requiredBytes: bigint) => {
+        if (requiredBytes > DEFAULT_STORAGE_QUOTA_BYTES) {
+          throw new BadRequestException('Storage quota exceeded');
+        }
+      }),
       incrementUsage: jest.fn().mockResolvedValue(1000n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
-    };
+    } as unknown as jest.Mocked<QuotaRepository>;
 
     mockCache = {
       getFolderListing: jest.fn().mockResolvedValue(null),
@@ -167,12 +175,18 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
     } as any;
 
     const blobService = new BlobService(mockDriver, mockBlobRepo);
-    const quotaService = new QuotaService(mockQuotaRepo);
     const filesFacade = new FilesFacade(
+      mockDriver,
       blobService,
-      quotaService,
-      new PresignService(blobService, quotaService, {} as any),
-      new FileStreamService(blobService),
+      mockBlobRepo,
+      mockQuotaRepo,
+      new FilesUploadService(
+        mockDriver,
+        blobService,
+        mockBlobRepo,
+        mockQuotaRepo,
+        {} as SessionRepository,
+      ),
     );
 
     uploadService = new UploadService(
@@ -191,7 +205,6 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
       mockNodeRepo,
       uploadService,
       {} as any,
-      {} as any,
       new StreamService(filesFacade, mockNodeRepo, mockCache, mockAccessPolicy),
       {} as any,
       mockAccessPolicy,
@@ -207,7 +220,6 @@ describe('ExperimentsFacade & UploadService Integration Suite', () => {
       filename: 'qml_paper.pdf',
       buffer: pdfContent,
       mimeType: 'application/pdf',
-      source: 'experiments',
     });
 
     expect(result.fileId).toBeDefined();

@@ -5,11 +5,10 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpException,
   HttpStatus,
   Logger,
-  NotFoundException,
   Param,
-  PayloadTooLargeException,
   Post,
   Query,
   Req,
@@ -21,41 +20,21 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { BypassEnvelope } from '@/core';
 import { CurrentUser, JwtAuthGuard, Public } from '@/modules/identity/auth';
-import { DEFAULT_STORAGE_QUOTA_BYTES } from '../files.constant';
+import { DEFAULT_PRESIGN_SIZE_BYTES } from '../files.constant';
 import {
-  cleanUuid,
-  inferMimeType,
-  isDangerousInlineMime,
-  isValidUuid,
-  sanitizeFilename,
-  streamToBuffer,
-} from '../domain/files.policy';
-import {
+  FilesBatchPartUrlsDto,
   FilesCompleteMultipartDto,
   FilesCompletePresignDto,
   FilesInitiateMultipartDto,
-  FilesMultipartPartUrlDto,
   FilesPresignDto,
 } from '../files.dto';
 import { FilesFacade } from '../files.facade';
-import { BlobService } from '../services/blob.service';
-
-const MAX_DIRECT_UPLOAD_BYTES = 100 * 1024 * 1024;
-
-interface MultipartStreamRequest extends Omit<
-  FastifyRequest,
-  'isMultipart' | 'parts'
-> {
-  isMultipart?: () => boolean;
-  parts: () => AsyncIterable<{
-    type: string;
-    fieldname: string;
-    filename?: string;
-    mimetype?: string;
-    value?: unknown;
-    file?: AsyncIterable<Buffer>;
-  }>;
-}
+import {
+  applyBinaryHeaders,
+  extractMultipartSingleFile,
+  MAX_DIRECT_UPLOAD_BYTES,
+  MAX_PUBLIC_UPLOAD_BYTES,
+} from './files-http.helper';
 
 @ApiTags('Files')
 @ApiBearerAuth('JWT-auth')
@@ -64,85 +43,13 @@ interface MultipartStreamRequest extends Omit<
 export class FilesController {
   private readonly logger = new Logger(FilesController.name);
 
-  constructor(
-    private readonly filesFacade: FilesFacade,
-    private readonly blobService: BlobService,
-  ) {}
+  constructor(private readonly filesFacade: FilesFacade) {}
 
-  private applyBinaryHeaders(
-    res: FastifyReply,
-    options: {
-      mimeType: string;
-      filename: string;
-      isDownload: boolean;
-      contentLength?: number;
-      contentRange?: string;
-      etag?: string;
-      cacheControl: string;
-      varyHeader: string;
-    },
-  ): void {
-    const cleanName = sanitizeFilename(options.filename);
-    const isDangerous = isDangerousInlineMime(options.mimeType);
-    const disposition =
-      isDangerous || options.isDownload ? 'attachment' : 'inline';
-
-    res.header('Content-Type', options.mimeType);
-    if (options.contentLength !== undefined) {
-      res.header('Content-Length', options.contentLength);
+  private requireUserId(userId?: string): string {
+    if (!userId) {
+      throw new UnauthorizedException('User is not authenticated');
     }
-    res.header('Accept-Ranges', 'bytes');
-    res.header('X-Content-Type-Options', 'nosniff');
-    res.header('X-Frame-Options', 'SAMEORIGIN');
-    res.header('Cache-Control', options.cacheControl);
-    res.header('Vary', options.varyHeader);
-    if (options.etag) {
-      res.header('ETag', options.etag);
-    }
-    if (options.contentRange) {
-      res.header('Content-Range', options.contentRange);
-    }
-    if (isDangerous) {
-      res.header('Content-Security-Policy', "default-src 'none'; sandbox");
-    }
-
-    const encoded = encodeURIComponent(cleanName);
-    res.header(
-      'Content-Disposition',
-      `${disposition}; filename="${cleanName.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encoded}`,
-    );
-  }
-
-  private async resolveBlobMimeType(
-    storageKey: string,
-    sizeBytes: bigint,
-  ): Promise<string> {
-    try {
-      const stat = await this.blobService.stat(storageKey);
-      if (stat?.mimeType && stat.mimeType !== 'application/octet-stream') {
-        return stat.mimeType;
-      }
-    } catch {
-      // Fallback to header sniffing below
-    }
-
-    if (sizeBytes > 0n) {
-      try {
-        const end = Math.min(31, Number(sizeBytes) - 1);
-        const { stream } = await this.blobService.getStream(storageKey, {
-          start: 0,
-          end,
-        });
-        const headerBytes = await streamToBuffer(
-          stream as AsyncIterable<Buffer>,
-        );
-        return inferMimeType({ headerBytes });
-      } catch {
-        // Fallback to octet-stream when header sniff fails
-      }
-    }
-
-    return 'application/octet-stream';
+    return userId;
   }
 
   @Post('upload')
@@ -154,59 +61,17 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
-    const multipartReq = req as unknown as MultipartStreamRequest;
-    if (
-      typeof multipartReq.isMultipart !== 'function' ||
-      !multipartReq.isMultipart()
-    ) {
-      throw new BadRequestException('Content-Type must be multipart/form-data');
-    }
-
-    let buffer: Buffer | undefined;
-    let filename = 'uploaded-file';
-    let mimeType = 'application/octet-stream';
-    const fields: Record<string, string> = {};
-
-    for await (const part of multipartReq.parts()) {
-      if (part.type === 'file') {
-        filename = part.filename || filename;
-        mimeType = part.mimetype || mimeType;
-        const chunks: Buffer[] = [];
-        let totalBytes = 0;
-        if (part.file) {
-          for await (const chunk of part.file) {
-            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            totalBytes += buf.length;
-            if (totalBytes > MAX_DIRECT_UPLOAD_BYTES) {
-              throw new PayloadTooLargeException(
-                'Direct upload exceeds 100MB limit',
-              );
-            }
-            chunks.push(buf);
-          }
-        }
-        buffer = Buffer.concat(chunks);
-      } else if (part.fieldname && part.value !== undefined) {
-        fields[part.fieldname] = String(part.value);
-      }
-    }
-
-    if (!buffer) {
-      throw new BadRequestException('No file uploaded');
-    }
-
-    const chosenName =
-      filename && filename !== 'blob'
-        ? filename
-        : fields.fileName || fields.filename || fields.name || 'uploaded-file';
-    const resolvedSpaceId = cleanUuid(fields.spaceId) ?? undefined;
+    const actorId = this.requireUserId(userId);
+    const { buffer, filename, mimeType, fields } =
+      await extractMultipartSingleFile(req, MAX_DIRECT_UPLOAD_BYTES);
+    const resolvedSpaceId = await this.filesFacade.assertSpaceAccess(
+      actorId,
+      fields.spaceId,
+    );
 
     const res = await this.filesFacade.uploadFile({
-      userId,
-      filename: chosenName,
+      userId: actorId,
+      filename,
       buffer,
       mimeType,
       spaceId: resolvedSpaceId,
@@ -220,13 +85,29 @@ export class FilesController {
       size: res.size,
       mimeType: res.mimeType,
       url: res.url,
-      file: {
-        id: res.fileId,
-        filename: res.filename,
-        size: res.size,
-        url: res.url,
-      },
     };
+  }
+
+  @Post('public/upload')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Upload a public image asset (avatar, cover, icon)',
+  })
+  async uploadPublicAsset(
+    @CurrentUser('id') userId: string,
+    @Req() req: FastifyRequest,
+  ) {
+    this.requireUserId(userId);
+    const { buffer, filename, mimeType } = await extractMultipartSingleFile(
+      req,
+      MAX_PUBLIC_UPLOAD_BYTES,
+    );
+
+    return this.filesFacade.uploadPublicImage({
+      buffer,
+      filename,
+      mimeType,
+    });
   }
 
   @Post('presign')
@@ -236,21 +117,37 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Body() dto: FilesPresignDto,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
+    const actorId = this.requireUserId(userId);
+    const resolvedSpaceId = await this.filesFacade.assertSpaceAccess(
+      actorId,
+      dto.spaceId,
+    );
 
-    const sizeBytes = dto.sizeBytes ?? dto.size ?? 10 * 1024 * 1024;
-    const resolvedSpaceId = cleanUuid(dto.spaceId) ?? undefined;
-
-    return this.filesFacade.getPresignedUploadUrl({
-      userId,
+    const res = await this.filesFacade.presignUpload({
+      userId: actorId,
       spaceId: resolvedSpaceId,
       filename: dto.filename,
-      mimeType: dto.mimeType || dto.contentType || 'application/octet-stream',
-      sizeBytes,
+      mimeType: dto.mimeType || 'application/octet-stream',
+      sizeBytes: dto.sizeBytes ?? DEFAULT_PRESIGN_SIZE_BYTES,
       contentHash: dto.contentHash,
     });
+
+    return {
+      uploadUrl: res.uploadUrl || '',
+      storageKey: res.storageKey,
+      fileUuid: res.fileUuid || res.blob?.id || '',
+      expiresIn: res.expiresIn,
+      deduplicated: res.deduplicated,
+      ...(res.blob
+        ? {
+            fileId: res.blob.id,
+            url: res.url,
+            filename: res.filename || res.cleanFilename,
+            size: res.size ?? Number(res.blob.sizeBytes),
+            mimeType: res.mimeType,
+          }
+        : {}),
+    };
   }
 
   @Post('presign/complete')
@@ -260,17 +157,18 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Body() dto: FilesCompletePresignDto,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
+    const actorId = this.requireUserId(userId);
+    const resolvedSpaceId = await this.filesFacade.assertSpaceAccess(
+      actorId,
+      dto.spaceId,
+    );
 
-    const resolvedSpaceId = cleanUuid(dto.spaceId) ?? undefined;
     const result = await this.filesFacade.completePresignedUpload({
-      userId,
+      userId: actorId,
       spaceId: resolvedSpaceId,
       storageKey: dto.storageKey,
       filename: dto.filename,
-      sizeBytes: dto.sizeBytes ?? dto.size,
+      sizeBytes: dto.sizeBytes,
       mimeType: dto.mimeType,
       contentHash: dto.contentHash,
     });
@@ -286,29 +184,6 @@ export class FilesController {
     };
   }
 
-  private async resolvePartUploadUrl(
-    userId: string,
-    sessionId: string,
-    rawPartNumber: number | string,
-  ): Promise<{ partNumber: number; uploadUrl: string }> {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
-    if (!sessionId || !sessionId.trim()) {
-      throw new BadRequestException('Session ID is required');
-    }
-    const parsedPartNumber = Number(rawPartNumber);
-    if (!Number.isInteger(parsedPartNumber) || parsedPartNumber < 1) {
-      throw new BadRequestException('Invalid partNumber parameter');
-    }
-    const uploadUrl = await this.filesFacade.getMultipartPartUrl(
-      sessionId,
-      parsedPartNumber,
-      { userId },
-    );
-    return { partNumber: parsedPartNumber, uploadUrl };
-  }
-
   @Post('multipart/initiate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -318,25 +193,42 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Body() dto: FilesInitiateMultipartDto,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
-    const totalSize = dto.totalSize ?? dto.sizeBytes ?? dto.size;
+    const actorId = this.requireUserId(userId);
+    const totalSize = dto.totalSize ?? dto.sizeBytes;
     if (!totalSize || totalSize <= 0) {
       throw new BadRequestException(
         'Total file size is required and must be greater than 0',
       );
     }
-    const resolvedSpaceId = cleanUuid(dto.spaceId) ?? undefined;
+    const resolvedSpaceId = await this.filesFacade.assertSpaceAccess(
+      actorId,
+      dto.spaceId,
+    );
 
-    return this.filesFacade.initiateMultipartUpload({
-      userId,
+    const res = await this.filesFacade.initiateMultipart({
+      userId: actorId,
       spaceId: resolvedSpaceId,
       filename: dto.filename,
       mimeType: dto.mimeType || 'application/octet-stream',
       totalSize,
       expectedHash: dto.expectedHash,
     });
+
+    return {
+      sessionId: res.sessionId,
+      uploadId: res.uploadId,
+      partSize: res.partSize,
+      totalParts: res.totalParts,
+      deduplicated: res.deduplicated,
+      ...(res.blob
+        ? {
+            fileId: res.fileId || res.blob.id,
+            url: res.url,
+            filename: res.filename || res.cleanFilename,
+            size: res.size ?? Number(res.blob.sizeBytes),
+          }
+        : {}),
+    };
   }
 
   @Get('multipart/:sessionId/part-url')
@@ -345,18 +237,40 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
     @Query('partNumber') partNumber: string,
-  ) {
-    return this.resolvePartUploadUrl(userId, sessionId, partNumber);
+  ): Promise<{ partNumber: number; uploadUrl: string }> {
+    const actorId = this.requireUserId(userId);
+    if (!sessionId || !sessionId.trim()) {
+      throw new BadRequestException('Session ID is required');
+    }
+    const parsedPartNumber = Number(partNumber);
+    if (!Number.isInteger(parsedPartNumber) || parsedPartNumber < 1) {
+      throw new BadRequestException('Invalid partNumber parameter');
+    }
+    const uploadUrl = await this.filesFacade.getMultipartPartUrl(
+      sessionId,
+      parsedPartNumber,
+      { userId: actorId },
+    );
+    return { partNumber: parsedPartNumber, uploadUrl };
   }
 
-  @Post('multipart/part-url')
+  @Post('multipart/:sessionId/part-urls')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Generate presigned part URL via request body' })
-  async postMultipartPartUrl(
+  @ApiOperation({
+    summary: 'Batch generate presigned upload URLs for multiple parts',
+  })
+  async batchMultipartPartUrls(
     @CurrentUser('id') userId: string,
-    @Body() dto: FilesMultipartPartUrlDto,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: FilesBatchPartUrlsDto,
   ) {
-    return this.resolvePartUploadUrl(userId, dto.sessionId, dto.partNumber);
+    const actorId = this.requireUserId(userId);
+    const parts = await this.filesFacade.presignMultipartParts(
+      sessionId,
+      dto.partNumbers,
+      { userId: actorId },
+    );
+    return { parts };
   }
 
   @Post('multipart/complete')
@@ -368,13 +282,11 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Body() dto: FilesCompleteMultipartDto,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
-    const res = await this.filesFacade.completeMultipartUpload({
+    const actorId = this.requireUserId(userId);
+    const res = await this.filesFacade.completeMultipart({
       sessionId: dto.sessionId,
       parts: dto.parts,
-      actor: { userId },
+      actor: { userId: actorId },
     });
     return {
       id: res.fileId,
@@ -394,10 +306,8 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Param('sessionId') sessionId: string,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
-    await this.filesFacade.abortMultipartUpload(sessionId, { userId });
+    const actorId = this.requireUserId(userId);
+    await this.filesFacade.abortMultipart(sessionId, { userId: actorId });
     return { aborted: true, success: true };
   }
 
@@ -409,33 +319,15 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Query('spaceId') spaceId?: string,
   ) {
-    if (!userId) {
-      throw new UnauthorizedException('User is not authenticated');
-    }
-    const explicitSpaceId = cleanUuid(spaceId) ?? null;
-    const targetSpaceId = explicitSpaceId ?? userId;
-    const isProject = Boolean(explicitSpaceId && explicitSpaceId !== userId);
-    const quota = await this.filesFacade.getQuota(targetSpaceId);
-    const usedBytes = Number(quota?.usedBytes ?? 0n);
-    const maxBytes = Number(quota?.maxBytes ?? DEFAULT_STORAGE_QUOTA_BYTES);
-    const remainingBytes = Math.max(0, maxBytes - usedBytes);
-    const usagePercent =
-      maxBytes > 0 ? Number(((usedBytes / maxBytes) * 100).toFixed(2)) : 0;
-
-    return {
-      usedBytes,
-      maxBytes,
-      remainingBytes,
-      usagePercent,
-      scope: isProject ? 'project' : 'personal',
-      spaceId: targetSpaceId,
-    };
+    return this.filesFacade.getQuotaSummary(this.requireUserId(userId), spaceId);
   }
 
   @Get('objects/*')
   @Public()
   @BypassEnvelope()
-  @ApiOperation({ summary: 'Stream public platform object by storage key' })
+  @ApiOperation({
+    summary: 'Stream public platform assets or signed derivative thumbnails',
+  })
   async streamObjectByKey(
     @Req() req: FastifyRequest,
     @Res() res: FastifyReply,
@@ -449,65 +341,70 @@ export class FilesController {
         ? rawUrl.slice(idx + prefix.length).split('?')[0]
         : params?.['*'] || '';
 
-    if (!rawKey) {
-      return res
-        .status(HttpStatus.NOT_FOUND)
-        .send({ statusCode: 404, message: 'Object key is required' });
-    }
-
-    const key = decodeURIComponent(rawKey);
-    const normalizedKey = key.replace(/\\/g, '/');
-    if (
-      normalizedKey.includes('..') ||
-      normalizedKey.startsWith('/') ||
-      normalizedKey.startsWith('backups/') ||
-      normalizedKey.startsWith('private/') ||
-      normalizedKey.startsWith('config/') ||
-      normalizedKey.startsWith('uploads/staging/')
-    ) {
-      return res.status(HttpStatus.FORBIDDEN).send({
-        statusCode: 403,
-        message: 'Access to restricted storage path is forbidden',
-      });
-    }
-
-    const rangeHeader =
-      typeof req.headers?.range === 'string' ? req.headers.range : undefined;
+    const reqAuth = req as FastifyRequest & {
+      user?: { id?: string; sub?: string };
+      query?: { exp?: string; sig?: string };
+    };
 
     try {
-      const output = await this.filesFacade.streamByKey(key, rangeHeader);
-      const mimeType = inferMimeType({ filename: key });
-      const basename = key.split('/').pop() || 'file';
+      const output = await this.filesFacade.resolveAuthorizedObjectStream({
+        rawKey,
+        userId: reqAuth.user?.id || reqAuth.user?.sub,
+        exp: reqAuth.query?.exp,
+        sig: reqAuth.query?.sig,
+        rangeHeader:
+          typeof req.headers?.range === 'string'
+            ? req.headers.range
+            : undefined,
+      });
 
-      res.status(
-        output.contentRange ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK,
-      );
-      this.applyBinaryHeaders(res, {
-        mimeType,
-        filename: basename,
+      res.status(output.statusCode);
+      applyBinaryHeaders(res, {
+        mimeType: output.mimeType,
+        filename: output.filename,
         isDownload: req.url.includes('/download'),
         contentLength: output.contentLength,
         contentRange: output.contentRange,
-        cacheControl: 'public, max-age=300',
+        cacheControl: output.cacheControl,
         varyHeader: 'Range',
       });
 
       return res.send(output.stream);
     } catch (err: unknown) {
-      this.logger.warn(
-        `Failed to stream object ${key}: ${(err as Error)?.message}`,
-      );
-      return res
-        .status(HttpStatus.NOT_FOUND)
-        .send({ statusCode: 404, message: 'Object not found' });
+      const status =
+        err instanceof HttpException ? err.getStatus() : HttpStatus.NOT_FOUND;
+      const message =
+        err instanceof HttpException ? err.message : 'Object not found';
+      if (status === Number(HttpStatus.NOT_FOUND)) {
+        this.logger.warn(
+          `Failed to stream object ${rawKey}: ${(err as Error)?.message}`,
+        );
+      }
+      return res.status(status).send({ statusCode: status, message });
     }
+  }
+
+  @Get(':blobId/download-url')
+  @ApiOperation({
+    summary: 'Issue direct signed download URL (R2 Presigned GET) for a blob',
+  })
+  async getDirectDownloadUrl(
+    @CurrentUser('id') userId: string,
+    @Param('blobId') blobId: string,
+    @Query('filename') filename?: string,
+  ) {
+    return this.filesFacade.getAuthorizedDownloadUrl(
+      this.requireUserId(userId),
+      blobId,
+      filename,
+    );
   }
 
   @Get([':blobId/content', ':blobId/download'])
   @Public()
   @BypassEnvelope()
   @ApiOperation({
-    summary: 'Stream content-addressed blob content with ETag and byte-range',
+    summary: 'Stream or redirect authorized blob content with ETag and Range',
   })
   async streamBlobContent(
     @Param('blobId') blobId: string,
@@ -515,68 +412,62 @@ export class FilesController {
     @Query('download') queryDownload: string | undefined,
     @Req() req: FastifyRequest,
     @Res() res: FastifyReply,
+    @Query('exp') queryExp?: string,
+    @Query('sig') querySig?: string,
+    @Query('redirect') queryRedirect?: string,
   ) {
-    if (!isValidUuid(blobId)) {
-      throw new NotFoundException('File blob not found');
-    }
-
-    const blob = await this.blobService.findBlobById(blobId);
-    if (!blob || !blob.isReady()) {
-      throw new NotFoundException('File blob not found');
-    }
-
-    const etag = `"${blob.contentHash.toHex()}"`;
-    const ifNoneMatch =
-      typeof req.headers?.['if-none-match'] === 'string'
-        ? req.headers['if-none-match']
-        : undefined;
-    const rangeHeader =
-      typeof req.headers?.range === 'string' ? req.headers.range : undefined;
-
-    if (ifNoneMatch && ifNoneMatch === etag && !rangeHeader) {
-      res.status(HttpStatus.NOT_MODIFIED);
-      res.header('ETag', etag);
-      res.header('Cache-Control', 'public, max-age=31536000, immutable');
-      res.header('Vary', 'If-None-Match');
-      return res.send();
-    }
-
-    const mimeType = await this.resolveBlobMimeType(
-      blob.s3Key.value(),
-      blob.sizeBytes,
-    );
-    const streamRes = await this.filesFacade.streamBlob(blob, {
-      rangeHeader,
-      ifNoneMatch,
-      mimeType,
-      filename: queryFilename ? sanitizeFilename(queryFilename) : blob.id,
-    });
-
-    if (streamRes.statusCode === Number(HttpStatus.NOT_MODIFIED)) {
-      res.status(HttpStatus.NOT_MODIFIED);
-      res.header('ETag', etag);
-      res.header('Cache-Control', 'public, max-age=31536000, immutable');
-      res.header('Vary', 'If-None-Match');
-      return res.send();
-    }
-
+    const reqAuth = req as FastifyRequest & {
+      user?: { id?: string; sub?: string };
+    };
     const isDownload =
       req.url.includes('/download') ||
       queryDownload === 'true' ||
       queryDownload === '1';
 
-    res.status(streamRes.statusCode);
-    this.applyBinaryHeaders(res, {
-      mimeType: streamRes.mimeType,
-      filename: streamRes.filename,
+    const outcome = await this.filesFacade.resolveAuthorizedBlobContent({
+      blobId,
+      userId: reqAuth.user?.id || reqAuth.user?.sub,
+      exp: queryExp,
+      sig: querySig,
+      filename: queryFilename,
       isDownload,
-      contentLength: streamRes.contentLength,
-      contentRange: streamRes.contentRange,
-      etag: streamRes.etag || etag,
-      cacheControl: 'public, max-age=31536000, immutable',
+      redirect: queryRedirect === '1' || queryRedirect === 'true',
+      ifNoneMatch:
+        typeof req.headers?.['if-none-match'] === 'string'
+          ? req.headers['if-none-match']
+          : undefined,
+      rangeHeader:
+        typeof req.headers?.range === 'string' ? req.headers.range : undefined,
+    });
+
+    if (outcome.kind === 'redirect') {
+      return res
+        .status(HttpStatus.FOUND)
+        .header('Location', outcome.location)
+        .header('Cache-Control', 'private, max-age=60')
+        .send();
+    }
+
+    if (outcome.kind === 'not-modified') {
+      res.status(HttpStatus.NOT_MODIFIED);
+      res.header('ETag', outcome.etag);
+      res.header('Cache-Control', 'private, max-age=31536000, immutable');
+      res.header('Vary', 'If-None-Match');
+      return res.send();
+    }
+
+    res.status(outcome.statusCode);
+    applyBinaryHeaders(res, {
+      mimeType: outcome.mimeType,
+      filename: outcome.filename,
+      isDownload: outcome.isDownload,
+      contentLength: outcome.contentLength,
+      contentRange: outcome.contentRange,
+      etag: outcome.etag,
+      cacheControl: 'private, max-age=31536000, immutable',
       varyHeader: 'If-None-Match, Range',
     });
 
-    return res.send(streamRes.stream);
+    return res.send(outcome.stream);
   }
 }

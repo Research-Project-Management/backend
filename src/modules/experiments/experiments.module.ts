@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import {
   CacheModule,
@@ -8,8 +8,6 @@ import {
 } from '@/core';
 import { FilesModule } from '@/modules/files';
 import {
-  EXPERIMENT_NODE_REPOSITORY,
-  EXPERIMENT_VERSION_REPOSITORY,
   EXPERIMENTS_PORT,
   EXPERIMENTS_PROCESSING_QUEUE,
 } from './experiments.constant';
@@ -21,13 +19,8 @@ import { ExperimentsService } from './services/experiments.service';
 import { TrashService } from './services/trash.service';
 import { VersionService } from './services/version.service';
 import { UploadService } from './services/upload.service';
-import { MultipartService } from './services/multipart.service';
 import { StreamService } from './services/stream.service';
 import { ExperimentsBackupService } from './services/backup.service';
-import {
-  ExperimentsLifecycleService,
-  TrashRetentionJob,
-} from './services/lifecycle.service';
 import { ExperimentsQueueProducer } from './processors/experiments.producer';
 import { ExperimentsQueueConsumer } from './processors/experiments.processor';
 import { ExperimentsEventListener } from './processors/experiments.listener';
@@ -50,7 +43,6 @@ const workerProviders = shouldRunWorkerConsumers()
   ? [ExperimentsQueueConsumer]
   : [];
 
-@Global()
 @Module({
   imports: [
     CacheModule,
@@ -61,51 +53,25 @@ const workerProviders = shouldRunWorkerConsumers()
   ],
   controllers: [...experimentControllers, ...transferControllers],
   providers: [
-    {
-      provide: EXPERIMENT_NODE_REPOSITORY,
-      useClass: NodeRepository,
-    },
-    {
-      provide: EXPERIMENT_VERSION_REPOSITORY,
-      useClass: VersionRepository,
-    },
+    NodeRepository,
+    VersionRepository,
     ExperimentsAccessPolicy,
     ExperimentsCacheService,
     ExperimentsService,
     TrashService,
     VersionService,
     UploadService,
-    MultipartService,
     StreamService,
     ExperimentsBackupService,
     ExperimentsQueueProducer,
     ...workerProviders,
-    ExperimentsLifecycleService,
     ExperimentsEventListener,
-    TrashRetentionJob,
     ExperimentsFacade,
     {
       provide: EXPERIMENTS_PORT,
       useExisting: ExperimentsFacade,
     },
   ],
-  exports: [
-    EXPERIMENT_NODE_REPOSITORY,
-    EXPERIMENT_VERSION_REPOSITORY,
-    ExperimentsAccessPolicy,
-    ExperimentsCacheService,
-    ExperimentsService,
-    TrashService,
-    VersionService,
-    UploadService,
-    MultipartService,
-    StreamService,
-    ExperimentsBackupService,
-    ExperimentsQueueProducer,
-    ExperimentsLifecycleService,
-    ExperimentsEventListener,
-    ExperimentsFacade,
-    EXPERIMENTS_PORT,
-  ],
+  exports: [ExperimentsFacade, EXPERIMENTS_PORT],
 })
 export class ExperimentsModule {}

@@ -1,35 +1,31 @@
 import {
-  BlobService,
-  IStorageAdapter,
-  IBlobRepository,
-  ISessionRepository,
-  IQuotaRepository,
-  UploadSession,
+  BlobStatus,
   FilesFacade,
-  FileStreamService,
-  PresignService,
-  QuotaService,
+  StorageBlobRecord,
+  UploadSessionRecord,
+  UploadSessionStatus,
 } from '@/modules/files';
-import {
-  UploadService,
-  MultipartService,
-  ExperimentsQueueProducer,
-  INodeRepository,
-  ExperimentsCacheService,
-} from '@/modules/experiments';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
+import type { IStorageAdapter } from '@/modules/files/types/adapter.type';
+import { NodeRepository } from '@/modules/experiments/repositories/node.repository';
+import { ExperimentsCacheService } from '@/modules/experiments/services/cache.service';
+import { UploadService } from '@/modules/experiments/services/upload.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Readable } from 'node:stream';
 
 describe('Presigned & Resumable Multipart Upload Suite', () => {
   let mockDriver: jest.Mocked<IStorageAdapter>;
-  let mockNodeRepo: jest.Mocked<INodeRepository>;
-  let mockBlobRepo: jest.Mocked<IBlobRepository>;
-  let mockSessionRepo: jest.Mocked<ISessionRepository>;
-  let mockQuotaRepo: jest.Mocked<IQuotaRepository>;
+  let mockNodeRepo: jest.Mocked<NodeRepository>;
+  let mockBlobRepo: jest.Mocked<BlobRepository>;
+  let mockSessionRepo: jest.Mocked<SessionRepository>;
+  let mockQuotaRepo: jest.Mocked<QuotaRepository>;
   let mockCache: jest.Mocked<ExperimentsCacheService>;
   let mockEvents: jest.Mocked<EventEmitter2>;
-  let mockQueueProducer: jest.Mocked<ExperimentsQueueProducer>;
 
   beforeEach(() => {
     mockDriver = {
@@ -82,30 +78,80 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
       getFolderPath: jest.fn().mockResolvedValue([]),
       listSharedWithUser: jest.fn().mockResolvedValue({ items: [], total: 0 }),
       shareNode: jest.fn(),
-    };
+    } as unknown as jest.Mocked<NodeRepository>;
 
     mockBlobRepo = {
       findById: jest.fn(),
       findByHash: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation(async (blob) => blob),
+      create: jest.fn().mockImplementation(async (input) => ({
+        id: input.id,
+        contentHashHex: input.contentHashHex,
+        hashAlgorithm: 'SHA256',
+        sizeBytes: input.sizeBytes,
+        mimeType: input.mimeType,
+        checksumVerified: input.checksumVerified,
+        s3Key: input.s3Key,
+        s3Bucket: input.s3Bucket,
+        storageClass: 'STANDARD',
+        refCount: input.refCount ?? 1,
+        status: input.status ?? BlobStatus.READY,
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      }) as StorageBlobRecord),
       delete: jest.fn(),
-      findTombstonedBlobs: jest.fn(),
       incrementRefCount: jest.fn(),
       decrementRefCount: jest.fn(),
-    };
+    } as unknown as jest.Mocked<BlobRepository>;
 
     mockSessionRepo = {
-      create: jest.fn().mockImplementation(async (s) => s),
+      create: jest.fn().mockImplementation(async (input) => ({
+        id: input.id,
+        spaceId: input.spaceId,
+        userId: input.userId,
+        s3UploadId: input.s3UploadId,
+        s3Key: input.s3Key,
+        filename: input.filename,
+        mimeType: input.mimeType,
+        totalSize: input.totalSize,
+        partSize: input.partSize,
+        totalParts: Math.max(1, Math.ceil(Number(input.totalSize) / input.partSize)),
+        expectedHashHex: input.expectedHashHex ?? null,
+        parentId: input.parentId ?? null,
+        status: UploadSessionStatus.INITIALIZED,
+        expiresAt: input.expiresAt,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }) as UploadSessionRecord),
       findById: jest.fn(),
-      update: jest.fn().mockImplementation(async (s) => s),
+      markStatus: jest.fn().mockImplementation(async (id: string, status: UploadSessionStatus) => ({
+        id,
+        spaceId: 'proj-2',
+        userId: 'user-200',
+        s3UploadId: 's3-upload-123',
+        s3Key: `uploads/multipart/${id}/payload.csv`,
+        filename: 'dataset.csv',
+        mimeType: 'text/csv',
+        totalSize: BigInt(20 * 1024 * 1024),
+        partSize: 10 * 1024 * 1024,
+        totalParts: 2,
+        expectedHashHex: null,
+        parentId: null,
+        status,
+        expiresAt: new Date(Date.now() + 3600000),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }) as UploadSessionRecord),
+      markUploadingIfInitialized: jest.fn().mockResolvedValue(true),
       findExpiredSessions: jest.fn().mockResolvedValue([]),
-    };
+    } as unknown as jest.Mocked<SessionRepository>;
 
     mockQuotaRepo = {
       findBySpaceId: jest.fn(),
+      assertAvailable: jest.fn().mockResolvedValue(undefined),
       incrementUsage: jest.fn().mockResolvedValue(0n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
-    };
+    } as unknown as jest.Mocked<QuotaRepository>;
 
     mockCache = {
       invalidateFolder: jest.fn().mockResolvedValue(undefined),
@@ -117,10 +163,6 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     mockEvents = {
       emit: jest.fn(),
     } as any;
-
-    mockQueueProducer = {
-      queueFileProcessing: jest.fn().mockResolvedValue(undefined),
-    } as any;
   });
 
   describe('UploadService (complete)', () => {
@@ -128,17 +170,19 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
 
     beforeEach(() => {
       const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaService = new QuotaService(mockQuotaRepo);
-      const presignService = new PresignService(
+      const uploadService = new FilesUploadService(
+        mockDriver,
         blobService,
-        quotaService,
+        mockBlobRepo,
+        mockQuotaRepo,
         mockSessionRepo,
       );
       const filesPort = new FilesFacade(
+        mockDriver,
         blobService,
-        quotaService,
-        presignService,
-        new FileStreamService(blobService),
+        mockBlobRepo,
+        mockQuotaRepo,
+        uploadService,
       );
       service = new UploadService(
         filesPort,
@@ -201,24 +245,26 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     });
   });
 
-  describe('MultipartService', () => {
-    let service: MultipartService;
+  describe('UploadService (multipart)', () => {
+    let service: UploadService;
 
     beforeEach(() => {
       const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaService = new QuotaService(mockQuotaRepo);
-      const presignService = new PresignService(
+      const uploadService = new FilesUploadService(
+        mockDriver,
         blobService,
-        quotaService,
+        mockBlobRepo,
+        mockQuotaRepo,
         mockSessionRepo,
       );
       const filesPort = new FilesFacade(
+        mockDriver,
         blobService,
-        quotaService,
-        presignService,
-        new FileStreamService(blobService),
+        mockBlobRepo,
+        mockQuotaRepo,
+        uploadService,
       );
-      service = new MultipartService(
+      service = new UploadService(
         filesPort,
         mockNodeRepo,
         mockCache,
@@ -227,7 +273,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     });
 
     it('should initiate multipart upload session with dynamic chunk size', async () => {
-      const result = await service.initiate({
+      const result = await service.initiateMultipart({
         userId: 'user-200',
         filename: 'dataset.csv',
         mimeType: 'text/csv',
@@ -243,7 +289,7 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     });
 
     it('should complete multipart upload, normalize parts, consume quota, and trigger BullMQ processing', async () => {
-      const session = new UploadSession({
+      const session: UploadSessionRecord = {
         id: 'session-123',
         userId: 'user-200',
         spaceId: 'proj-2',
@@ -254,11 +300,16 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
         totalSize: BigInt(20 * 1024 * 1024),
         partSize: 10 * 1024 * 1024,
         totalParts: 2,
+        expectedHashHex: null,
+        parentId: null,
+        status: UploadSessionStatus.INITIALIZED,
         expiresAt: new Date(Date.now() + 3600000),
-      });
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      const result = await service.complete({
+      const result = await service.completeMultipart({
         sessionId: 'session-123',
         parts: [
           { partNumber: 1, eTag: 'etag-part-1' },
@@ -291,9 +342,10 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
     });
 
     it('should abort multipart upload and mark session aborted', async () => {
-      const session = new UploadSession({
+      const session: UploadSessionRecord = {
         id: 'session-abort',
         userId: 'user-200',
+        spaceId: 'user-200',
         s3UploadId: 's3-upload-abort',
         s3Key: 'uploads/multipart/session-abort/payload.bin',
         filename: 'data.bin',
@@ -301,17 +353,25 @@ describe('Presigned & Resumable Multipart Upload Suite', () => {
         totalSize: BigInt(1000),
         partSize: 1000,
         totalParts: 1,
+        expectedHashHex: null,
+        parentId: null,
+        status: UploadSessionStatus.INITIALIZED,
         expiresAt: new Date(Date.now() + 3600000),
-      });
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
       mockSessionRepo.findById.mockResolvedValue(session);
 
-      await service.abort('session-abort');
+      await service.abortMultipart('session-abort');
 
       expect(mockDriver.abortMultipartUpload).toHaveBeenCalledWith(
         'uploads/multipart/session-abort/payload.bin',
         's3-upload-abort',
       );
-      expect(mockSessionRepo.update).toHaveBeenCalledTimes(1);
+      expect(mockSessionRepo.markStatus).toHaveBeenCalledWith(
+        'session-abort',
+        UploadSessionStatus.ABORTED,
+      );
     });
   });
 });

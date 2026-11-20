@@ -3,12 +3,10 @@ import {
   ForbiddenException,
   NotFoundException,
   BadRequestException,
-  Inject,
 } from '@nestjs/common';
-import { PrismaService, isUuid } from '@/core';
-import { EXPERIMENT_NODE_REPOSITORY } from '../experiments.constant';
+import { isUuid } from '@/core';
 import { ExperimentNode } from './node.domain';
-import { INodeRepository } from '../repositories/node.repository';
+import { NodeRepository } from '../repositories/node.repository';
 
 export type ExperimentAction = 'read' | 'write' | 'delete' | 'share';
 
@@ -39,11 +37,30 @@ export function normalizeExperimentProjectId(
 
 @Injectable()
 export class ExperimentsAccessPolicy {
-  constructor(
-    private readonly prisma: PrismaService,
-    @Inject(EXPERIMENT_NODE_REPOSITORY)
-    private readonly nodeRepo: INodeRepository,
-  ) {}
+  constructor(private readonly nodeRepo: NodeRepository) {}
+
+  private assertProjectRoleAllows(
+    rawRole: string,
+    action: ExperimentAction,
+  ): void {
+    const role = rawRole.toLowerCase();
+    if (action === 'read') return;
+    if (
+      action === 'write' &&
+      ['owner', 'coordinator', 'contributor'].includes(role)
+    ) {
+      return;
+    }
+    if (
+      (action === 'delete' || action === 'share') &&
+      ['owner', 'coordinator'].includes(role)
+    ) {
+      return;
+    }
+    throw new ForbiddenException(
+      `Project role ${rawRole} cannot perform ${action}`,
+    );
+  }
 
   async assertCanAccess(
     userId: string,
@@ -72,12 +89,10 @@ export class ExperimentsAccessPolicy {
       }
     }
 
-    const shares = await this.prisma.storageFileShare.findMany({
-      where: {
-        fileId: { in: candidateFileIds },
-        userId,
-      },
-    });
+    const shares = await this.nodeRepo.findUserSharesForFiles(
+      candidateFileIds,
+      userId,
+    );
 
     if (shares.length > 0) {
       if (action === 'read') return node;
@@ -89,28 +104,13 @@ export class ExperimentsAccessPolicy {
     }
 
     if (node.projectId) {
-      const membership = await this.prisma.projectMember.findUnique({
-        where: {
-          projectId_userId: { projectId: node.projectId, userId },
-        },
-      });
-
-      if (membership) {
-        const role = String(membership.role || '').toLowerCase();
-        if (action === 'read') return node;
-        if (
-          action === 'write' &&
-          ['owner', 'coordinator', 'contributor'].includes(role)
-        )
-          return node;
-        if (
-          (action === 'delete' || action === 'share') &&
-          ['owner', 'coordinator'].includes(role)
-        )
-          return node;
-        throw new ForbiddenException(
-          `Project role ${membership.role} cannot perform ${action}`,
-        );
+      const role = await this.nodeRepo.findProjectMemberRole(
+        node.projectId,
+        userId,
+      );
+      if (role !== null) {
+        this.assertProjectRoleAllows(role, action);
+        return node;
       }
     }
 
@@ -151,44 +151,22 @@ export class ExperimentsAccessPolicy {
     if (!isUuid(trimmedProjectId)) {
       throw new BadRequestException('Invalid projectId: expected a valid UUID');
     }
-    const membership = await this.prisma.projectMember.findUnique({
-      where: {
-        projectId_userId: { projectId: trimmedProjectId, userId },
-      },
-    });
-    if (!membership) {
-      const space = this.prisma.space?.findUnique
-        ? await Promise.resolve(
-            this.prisma.space.findUnique({
-              where: { id: trimmedProjectId },
-              select: { ownerUserId: true },
-            }),
-          ).catch(() => null)
+    const role = await this.nodeRepo.findProjectMemberRole(
+      trimmedProjectId,
+      userId,
+    );
+    if (role === null) {
+      const ownerUserId = this.nodeRepo.findSpaceOwnerId
+        ? await this.nodeRepo.findSpaceOwnerId(trimmedProjectId).catch(() => null)
         : null;
-      if (space?.ownerUserId === userId) {
+      if (ownerUserId === userId) {
         return;
       }
       throw new ForbiddenException(
         'Access denied: you are not a member of this project',
       );
     }
-    const role = String(membership.role || '').toLowerCase();
-    if (action === 'read') return;
-    if (
-      action === 'write' &&
-      ['owner', 'coordinator', 'contributor'].includes(role)
-    ) {
-      return;
-    }
-    if (
-      (action === 'delete' || action === 'share') &&
-      ['owner', 'coordinator'].includes(role)
-    ) {
-      return;
-    }
-    throw new ForbiddenException(
-      `Project role ${membership.role} cannot perform ${action}`,
-    );
+    this.assertProjectRoleAllows(role, action);
   }
 
   async assertCanWriteScope(

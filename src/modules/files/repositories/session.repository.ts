@@ -1,62 +1,123 @@
 import { Injectable } from '@nestjs/common';
+import { FileUpload as PrismaSession } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { UploadSession } from '../domain/session.domain';
-import { SessionMapper } from '../domain/files.mapper';
+import { UploadSessionRecord, UploadSessionStatus } from '../types/files.type';
 
-export interface ISessionRepository {
-  findById(id: string): Promise<UploadSession | null>;
-  create(session: UploadSession): Promise<UploadSession>;
-  update(session: UploadSession): Promise<UploadSession>;
-  findExpiredSessions(threshold: Date, limit: number): Promise<UploadSession[]>;
+export interface CreateUploadSessionInput {
+  id: string;
+  spaceId: string;
+  userId: string;
+  s3UploadId: string;
+  s3Key: string;
+  filename: string;
+  mimeType: string;
+  totalSize: bigint;
+  partSize: number;
+  expectedHashHex?: string | null;
+  parentId?: string | null;
+  expiresAt: Date;
 }
 
 @Injectable()
-export class SessionRepository implements ISessionRepository {
+export class SessionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findById(id: string): Promise<UploadSession | null> {
-    const record = await this.prisma.uploadSession.findUnique({
+  private toSessionRecord(record: PrismaSession): UploadSessionRecord {
+    const totalParts =
+      record.totalSize > 0n && record.partSize > 0
+        ? Math.max(1, Math.ceil(Number(record.totalSize) / record.partSize))
+        : 0;
+    return {
+      id: record.id,
+      spaceId: record.spaceId,
+      userId: record.createdById,
+      s3UploadId: record.uploadId,
+      s3Key: record.storageKey,
+      filename: record.filename,
+      mimeType: record.mimeType,
+      totalSize: record.totalSize,
+      partSize: record.partSize,
+      totalParts,
+      expectedHashHex: record.expectedHash
+        ? Buffer.from(record.expectedHash).toString('hex')
+        : null,
+      parentId: record.parentId,
+      status: record.status as UploadSessionStatus,
+      expiresAt: record.expiresAt,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
+
+  async findById(id: string): Promise<UploadSessionRecord | null> {
+    const record = await this.prisma.fileUpload.findUnique({
       where: { id },
     });
-    return record ? SessionMapper.toDomain(record) : null;
+    return record ? this.toSessionRecord(record) : null;
   }
 
-  async create(session: UploadSession): Promise<UploadSession> {
-    const data = SessionMapper.toPrismaCreate(session);
-    const created = await this.prisma.uploadSession.create({
+  async create(input: CreateUploadSessionInput): Promise<UploadSessionRecord> {
+    const expectedHash =
+      input.expectedHashHex && /^[a-f0-9]{64}$/i.test(input.expectedHashHex)
+        ? Uint8Array.from(Buffer.from(input.expectedHashHex, 'hex'))
+        : null;
+
+    const created = await this.prisma.fileUpload.create({
       data: {
-        ...data,
-        expectedHash: session.expectedHash
-          ? Uint8Array.from(session.expectedHash)
-          : null,
+        id: input.id,
+        spaceId: input.spaceId || input.userId,
+        createdById: input.userId,
+        uploadId: input.s3UploadId,
+        storageKey: input.s3Key,
+        filename: input.filename,
+        mimeType: input.mimeType,
+        totalSize: input.totalSize,
+        partSize: input.partSize,
+        expectedHash,
+        parentId: input.parentId ?? null,
+        status: UploadSessionStatus.INITIALIZED,
+        expiresAt: input.expiresAt,
       },
     });
-    return SessionMapper.toDomain(created);
+    return this.toSessionRecord(created);
   }
 
-  async update(session: UploadSession): Promise<UploadSession> {
-    const data = SessionMapper.toPrismaCreate(session);
-    const updated = await this.prisma.uploadSession.update({
-      where: { id: session.id },
+  async markStatus(
+    id: string,
+    status: UploadSessionStatus,
+  ): Promise<UploadSessionRecord> {
+    const updated = await this.prisma.fileUpload.update({
+      where: { id },
       data: {
-        status: data.status,
-        updatedAt: data.updatedAt,
+        status,
+        updatedAt: new Date(),
       },
     });
-    return SessionMapper.toDomain(updated);
+    return this.toSessionRecord(updated);
+  }
+
+  async markUploadingIfInitialized(sessionId: string): Promise<boolean> {
+    const affected = await this.prisma.$executeRaw`
+      UPDATE file_uploads
+      SET status = 'UPLOADING'::"UploadSessionStatus",
+          updated_at = NOW()
+      WHERE id = ${sessionId}::uuid
+        AND status = 'INITIALIZED'::"UploadSessionStatus"
+    `;
+    return Number(affected) > 0;
   }
 
   async findExpiredSessions(
     threshold: Date,
     limit: number,
-  ): Promise<UploadSession[]> {
-    const records = await this.prisma.uploadSession.findMany({
+  ): Promise<UploadSessionRecord[]> {
+    const records = await this.prisma.fileUpload.findMany({
       where: {
         status: { in: ['INITIALIZED', 'UPLOADING'] },
         expiresAt: { lt: threshold },
       },
       take: limit,
     });
-    return records.map((r) => SessionMapper.toDomain(r));
+    return records.map((r) => this.toSessionRecord(r));
   }
 }

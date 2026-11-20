@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsInt,
@@ -10,6 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { MAX_PART_PRESIGN_BATCH } from './files.constant';
 
 export class FilesPresignDto {
   @IsString()
@@ -20,19 +22,10 @@ export class FilesPresignDto {
   @IsOptional()
   mimeType?: string;
 
-  @IsString()
-  @IsOptional()
-  contentType?: string;
-
   @IsNumber()
   @Min(0)
   @IsOptional()
   sizeBytes?: number;
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  size?: number;
 
   @IsString()
   @IsOptional()
@@ -60,11 +53,6 @@ export class FilesCompletePresignDto {
   @Min(0)
   @IsOptional()
   sizeBytes?: number;
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  size?: number;
 
   @IsString()
   @IsOptional()
@@ -94,11 +82,6 @@ export class FilesInitiateMultipartDto {
   @IsOptional()
   sizeBytes?: number;
 
-  @IsNumber()
-  @Min(1)
-  @IsOptional()
-  size?: number;
-
   @IsString()
   @IsOptional()
   expectedHash?: string;
@@ -108,14 +91,13 @@ export class FilesInitiateMultipartDto {
   spaceId?: string;
 }
 
-export class FilesMultipartPartUrlDto {
-  @IsString()
-  @IsNotEmpty({ message: 'Session ID is required' })
-  sessionId!: string;
-
-  @IsInt()
-  @Min(1)
-  partNumber!: number;
+export class FilesBatchPartUrlsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_PART_PRESIGN_BATCH)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  partNumbers!: number[];
 }
 
 export class FilesMultipartPartDto {

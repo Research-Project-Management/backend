@@ -1,20 +1,12 @@
-import {
-  BlobService,
-  StorageBlob,
-  BlobStatus,
-  ContentHash,
-  StorageKey,
-  FilesFacade,
-  FileStreamService,
-  PresignService,
-  QuotaService,
-} from '@/modules/files';
-import {
-  VersionService,
-  ExperimentVersion,
-  ExperimentNode,
-  FileScope,
-} from '@/modules/experiments';
+import { BlobStatus, FilesFacade, StorageBlobRecord } from '@/modules/files';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { SessionRepository } from '@/modules/files/repositories/session.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
+import { FilesUploadService } from '@/modules/files/services/upload.service';
+import { ExperimentNode, FileScope } from '@/modules/experiments/domain/node.domain';
+import { ExperimentVersion } from '@/modules/experiments/domain/version.domain';
+import { VersionService } from '@/modules/experiments/services/version.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Readable } from 'stream';
 
@@ -31,7 +23,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
   let mockEventEmitter: any;
 
   let nodesInDb: Map<string, ExperimentNode>;
-  let blobsInDb: Map<string, StorageBlob>;
+  let blobsInDb: Map<string, StorageBlobRecord>;
   let versionsInDb: Map<string, ExperimentVersion[]>;
 
   beforeEach(() => {
@@ -66,28 +58,40 @@ describe('Storage File & Dataset Versioning Suite', () => {
       findById: jest
         .fn()
         .mockImplementation(async (id: string) => blobsInDb.get(id) || null),
-      findByHash: jest.fn().mockImplementation(async (hash: ContentHash) => {
+      findByHash: jest.fn().mockImplementation(async (hashHex: string) => {
         for (const blob of blobsInDb.values()) {
-          if (blob.contentHash.equals(hash)) return blob;
+          if (blob.contentHashHex === hashHex) return blob;
         }
         return null;
       }),
-      create: jest.fn().mockImplementation(async (b: StorageBlob) => {
-        blobsInDb.set(b.id, b);
-        return b;
+      create: jest.fn().mockImplementation(async (input) => {
+        const record: StorageBlobRecord = {
+          id: input.id,
+          contentHashHex: input.contentHashHex,
+          hashAlgorithm: 'SHA256',
+          sizeBytes: input.sizeBytes,
+          mimeType: input.mimeType,
+          checksumVerified: input.checksumVerified,
+          s3Key: input.s3Key,
+          s3Bucket: input.s3Bucket,
+          storageClass: 'STANDARD',
+          status: input.status ?? BlobStatus.READY,
+          refCount: input.refCount ?? 1,
+          createdAt: new Date(),
+          tombstoneAt: null,
+          claimedAt: null,
+        };
+        blobsInDb.set(record.id, record);
+        return record;
       }),
       incrementRefCount: jest.fn().mockImplementation(async (id: string) => {
         const b = blobsInDb.get(id);
         if (!b) throw new NotFoundException('Blob not found');
-        const updated = new StorageBlob({
-          id: b.id,
-          contentHash: b.contentHash,
-          sizeBytes: b.sizeBytes,
-          s3Key: b.s3Key,
-          s3Bucket: b.s3Bucket,
+        const updated: StorageBlobRecord = {
+          ...b,
           status: BlobStatus.READY,
           refCount: b.refCount + 1,
-        });
+        };
         blobsInDb.set(id, updated);
         return updated;
       }),
@@ -95,15 +99,11 @@ describe('Storage File & Dataset Versioning Suite', () => {
         const b = blobsInDb.get(id);
         if (!b) return null;
         const newCount = Math.max(0, b.refCount - 1);
-        const updated = new StorageBlob({
-          id: b.id,
-          contentHash: b.contentHash,
-          sizeBytes: b.sizeBytes,
-          s3Key: b.s3Key,
-          s3Bucket: b.s3Bucket,
+        const updated: StorageBlobRecord = {
+          ...b,
           status: newCount === 0 ? BlobStatus.DELETED : BlobStatus.READY,
           refCount: newCount,
-        });
+        };
         blobsInDb.set(id, updated);
         return updated;
       }),
@@ -111,6 +111,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
 
     mockQuotaRepo = {
       findBySpaceId: jest.fn().mockResolvedValue(null),
+      assertAvailable: jest.fn().mockResolvedValue(undefined),
       incrementUsage: jest.fn().mockResolvedValue(1000n),
       decrementUsage: jest.fn().mockResolvedValue(0n),
     };
@@ -163,12 +164,18 @@ describe('Storage File & Dataset Versioning Suite', () => {
     };
 
     const blobService = new BlobService(mockDriver, mockBlobRepo);
-    const quotaService = new QuotaService(mockQuotaRepo);
     const filesPort = new FilesFacade(
+      mockDriver,
       blobService,
-      quotaService,
-      new PresignService(blobService, quotaService, {} as any),
-      new FileStreamService(blobService),
+      mockBlobRepo as BlobRepository,
+      mockQuotaRepo,
+      new FilesUploadService(
+        mockDriver,
+        blobService,
+        mockBlobRepo as BlobRepository,
+        mockQuotaRepo,
+        {} as SessionRepository,
+      ),
     );
     versionService = new VersionService(
       filesPort,
@@ -186,15 +193,22 @@ describe('Storage File & Dataset Versioning Suite', () => {
       const initialHash = ContentHash.fromBuffer(
         Buffer.from('version-1-content'),
       );
-      const initialBlob = new StorageBlob({
+      const initialBlob: StorageBlobRecord = {
         id: 'blob-initial-1',
-        contentHash: initialHash,
+        contentHashHex: initialHash.toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 100n,
-        s3Key: StorageKey.forBlob(initialHash.toHex()),
+        mimeType: 'application/pdf',
+        checksumVerified: true,
+        s3Key: StorageKey.forBlob(initialHash.toHex()).value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
         status: BlobStatus.READY,
         refCount: 1,
-      });
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
       blobsInDb.set(initialBlob.id, initialBlob);
 
       const fileNode = new ExperimentNode({
@@ -263,15 +277,22 @@ describe('Storage File & Dataset Versioning Suite', () => {
         'id,feature_a,feature_b\n1,0.95,0.88\n',
       );
       const identicalHash = ContentHash.fromBuffer(identicalBuffer);
-      const existingBlob = new StorageBlob({
+      const existingBlob: StorageBlobRecord = {
         id: 'blob-existing-csv',
-        contentHash: identicalHash,
+        contentHashHex: identicalHash.toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: BigInt(identicalBuffer.length),
-        s3Key: StorageKey.forBlob(identicalHash.toHex()),
+        mimeType: 'text/csv',
+        checksumVerified: true,
+        s3Key: StorageKey.forBlob(identicalHash.toHex()).value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
         status: BlobStatus.READY,
         refCount: 1,
-      });
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
       blobsInDb.set(existingBlob.id, existingBlob);
 
       const result = await versionService.uploadVersion({
@@ -284,7 +305,7 @@ describe('Storage File & Dataset Versioning Suite', () => {
       });
 
       expect(result.isDeduplicated).toBe(true);
-      expect(existingBlob.refCount).toBe(2);
+      expect(blobsInDb.get(existingBlob.id)?.refCount).toBe(2);
       // No S3 put call needed for duplicate content
       expect(mockDriver.put).not.toHaveBeenCalled();
     });
@@ -360,14 +381,22 @@ describe('Storage File & Dataset Versioning Suite', () => {
     it('should download the specific historical version binary with versioned name', async () => {
       const fileId = 'file-target-1';
       const v1Hash = ContentHash.fromBuffer(Buffer.from('v1-content'));
-      const v1Blob = new StorageBlob({
+      const v1Blob: StorageBlobRecord = {
         id: 'blob-v1',
-        contentHash: v1Hash,
+        contentHashHex: v1Hash.toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 80n,
-        s3Key: StorageKey.forBlob(v1Hash.toHex()),
+        mimeType: 'text/x-python',
+        checksumVerified: true,
+        s3Key: StorageKey.forBlob(v1Hash.toHex()).value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
         status: BlobStatus.READY,
-      });
+        refCount: 1,
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
       blobsInDb.set(v1Blob.id, v1Blob);
 
       const fileNode = new ExperimentNode({
@@ -397,24 +426,31 @@ describe('Storage File & Dataset Versioning Suite', () => {
       expect(result.filename).toBe('quantum_sim_v1.py');
       expect(result.versionNumber).toBe(1);
       expect(result.size).toBe(80);
-      expect(mockDriver.getStream).toHaveBeenCalledWith(v1Blob.s3Key.value());
+      expect(mockDriver.getStream).toHaveBeenCalledWith(v1Blob.s3Key);
     });
   });
 
   describe('VersionService.revertVersion', () => {
     it('should revert to an older version and create a new audit snapshot', async () => {
       const fileId = 'file-revert-1';
-      const v1Blob = new StorageBlob({
+      const v1Blob: StorageBlobRecord = {
         id: 'blob-v1',
-        contentHash: ContentHash.fromBuffer(Buffer.from('v1')),
+        contentHashHex: ContentHash.fromBuffer(Buffer.from('v1')).toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 50n,
+        mimeType: 'text/csv',
+        checksumVerified: true,
         s3Key: StorageKey.forBlob(
           '1111111111111111111111111111111111111111111111111111111111111111',
-        ),
+        ).value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
         status: BlobStatus.READY,
         refCount: 1,
-      });
+        createdAt: new Date(),
+        tombstoneAt: null,
+        claimedAt: null,
+      };
       blobsInDb.set(v1Blob.id, v1Blob);
 
       const fileNode = new ExperimentNode({

@@ -32,10 +32,6 @@ export class PresignDto {
 
   @IsString()
   @IsOptional()
-  scope?: string;
-
-  @IsString()
-  @IsOptional()
   contentHash?: string;
 
   @IsObject()
@@ -82,10 +78,6 @@ export class CompletePresignedDto {
 
   @IsString()
   @IsOptional()
-  scope?: string;
-
-  @IsString()
-  @IsOptional()
   contentHash?: string;
 
   @IsObject()
@@ -121,10 +113,6 @@ export class InitiateMultipartDto {
   @IsString()
   @IsOptional()
   parentId?: string;
-
-  @IsString()
-  @IsOptional()
-  scope?: string;
 
   @IsString()
   @IsOptional()
