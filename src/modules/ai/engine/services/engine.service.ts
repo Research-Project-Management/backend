@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { getErrorMessage, tryCatch } from '@/core';
 import type { AiHealthStatus } from '../../ai.type';
 import {
+  mapArtifactsToWidgets,
   mapCitationToSourceItem,
   normalizeRawCitations,
 } from '../domain/stream.mapper';
@@ -224,12 +225,21 @@ export class EngineService implements IAiEnginePort {
   ): EngineChatResponse {
     const citations = normalizeRawCitations(raw.citations);
     const sources = citations.map(mapCitationToSourceItem);
+    const artifacts =
+      raw.artifacts &&
+      typeof raw.artifacts === 'object' &&
+      !Array.isArray(raw.artifacts)
+        ? (raw.artifacts as Record<string, unknown>)
+        : undefined;
+    const widgets = mapArtifactsToWidgets(artifacts);
     return {
       content: typeof raw.content === 'string' ? raw.content : '',
       route: typeof raw.route === 'string' ? raw.route : 'direct',
       status: raw.status === 'interrupted' ? 'interrupted' : 'completed',
       citations,
       sources,
+      ...(artifacts ? { artifacts } : {}),
+      ...(widgets.length > 0 ? { widgets } : {}),
       interrupts: Array.isArray(raw.interrupts) ? raw.interrupts : [],
       usage:
         raw.usage && typeof raw.usage === 'object'

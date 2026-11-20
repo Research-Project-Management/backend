@@ -43,6 +43,8 @@ export class SessionRepository {
         : null,
       parentId: record.parentId,
       status: record.status as UploadSessionStatus,
+      finalizingAt: record.finalizingAt ?? null,
+      resultBlobId: record.resultBlobId ?? null,
       expiresAt: record.expiresAt,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -115,6 +117,64 @@ export class SessionRepository {
       where: {
         status: { in: ['INITIALIZED', 'UPLOADING'] },
         expiresAt: { lt: threshold },
+      },
+      take: limit,
+    });
+    return records.map((r) => this.toSessionRecord(r));
+  }
+
+  async claimForFinalizing(sessionId: string): Promise<boolean> {
+    const affected = await this.prisma.$executeRaw`
+      UPDATE file_uploads
+      SET status = 'FINALIZING'::"UploadSessionStatus",
+          finalizing_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${sessionId}::uuid
+        AND status IN (
+          'INITIALIZED'::"UploadSessionStatus",
+          'UPLOADING'::"UploadSessionStatus"
+        )
+        AND expires_at > NOW()
+    `;
+    return Number(affected) > 0;
+  }
+
+  async markCompletedWithBlob(
+    sessionId: string,
+    blobId: string,
+  ): Promise<UploadSessionRecord> {
+    const updated = await this.prisma.fileUpload.update({
+      where: { id: sessionId },
+      data: {
+        status: UploadSessionStatus.COMPLETED,
+        resultBlobId: blobId,
+        finalizingAt: null,
+        updatedAt: new Date(),
+      },
+    });
+    return this.toSessionRecord(updated);
+  }
+
+  async releaseFinalizingToUploading(sessionId: string): Promise<boolean> {
+    const affected = await this.prisma.$executeRaw`
+      UPDATE file_uploads
+      SET status = 'UPLOADING'::"UploadSessionStatus",
+          finalizing_at = NULL,
+          updated_at = NOW()
+      WHERE id = ${sessionId}::uuid
+        AND status = 'FINALIZING'::"UploadSessionStatus"
+    `;
+    return Number(affected) > 0;
+  }
+
+  async findStaleFinalizingSessions(
+    staleBefore: Date,
+    limit: number,
+  ): Promise<UploadSessionRecord[]> {
+    const records = await this.prisma.fileUpload.findMany({
+      where: {
+        status: UploadSessionStatus.FINALIZING,
+        finalizingAt: { lt: staleBefore },
       },
       take: limit,
     });

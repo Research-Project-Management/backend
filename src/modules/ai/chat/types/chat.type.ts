@@ -1,6 +1,7 @@
 import type { AiChat, AiMessage, MessageRole } from '@prisma/client';
 import type {
   EngineCitation,
+  FrontendResponseWidget,
   FrontendSourceItem,
 } from '../../engine/types/engine.type';
 
@@ -40,6 +41,7 @@ export interface ExecuteChatResult {
   status: 'completed' | 'interrupted';
   sources: FrontendSourceItem[];
   citations: EngineCitation[];
+  widgets?: FrontendResponseWidget[];
   interrupts: unknown[];
   usage: Record<string, unknown>;
   chatId: string;

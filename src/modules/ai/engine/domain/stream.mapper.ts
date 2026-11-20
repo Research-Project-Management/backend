@@ -1,5 +1,7 @@
 import {
   EngineCitation,
+  FrontendEditorPatchItem,
+  FrontendResponseWidget,
   FrontendSourceItem,
   TranslatedSseFrame,
 } from '../types/engine.type';
@@ -20,6 +22,13 @@ export function mapCitationToSourceItem(
   const item: FrontendSourceItem = {
     source: sourceLabel,
   };
+  if (
+    typeof cite.index === 'number' &&
+    Number.isInteger(cite.index) &&
+    cite.index > 0
+  ) {
+    item.index = cite.index;
+  }
   if (typeof cite.title === 'string' && cite.title.trim()) {
     item.title = cite.title;
   }
@@ -50,6 +59,12 @@ export function normalizeRawCitations(raw: unknown): EngineCitation[] {
     if (!sourceId) continue;
 
     citations.push({
+      index:
+        typeof record.index === 'number' &&
+        Number.isInteger(record.index) &&
+        record.index > 0
+          ? record.index
+          : undefined,
       source_id: sourceId,
       source_type:
         typeof record.source_type === 'string' ? record.source_type : undefined,
@@ -60,6 +75,135 @@ export function normalizeRawCitations(raw: unknown): EngineCitation[] {
     });
   }
   return citations;
+}
+
+function normalizeEditorPatch(
+  raw: unknown,
+  idx: number,
+): FrontendEditorPatchItem | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const rec = raw as Record<string, unknown>;
+  const filePath =
+    typeof rec.file_path === 'string' && rec.file_path.trim()
+      ? rec.file_path.trim()
+      : typeof rec.filePath === 'string' && rec.filePath.trim()
+        ? rec.filePath.trim()
+        : '';
+  const searchText =
+    typeof rec.search_text === 'string'
+      ? rec.search_text
+      : typeof rec.searchText === 'string'
+        ? rec.searchText
+        : '';
+  const replaceText =
+    typeof rec.replace_text === 'string'
+      ? rec.replace_text
+      : typeof rec.replaceText === 'string'
+        ? rec.replaceText
+        : '';
+  if (!filePath) return null;
+
+  const warnings = Array.isArray(rec.warnings)
+    ? rec.warnings.filter(
+        (w): w is string => typeof w === 'string' && w.trim().length > 0,
+      )
+    : undefined;
+
+  return {
+    id:
+      typeof rec.id === 'string' && rec.id.trim() ? rec.id : `patch-${idx + 1}`,
+    fileId:
+      typeof rec.file_id === 'string' && rec.file_id.trim()
+        ? rec.file_id
+        : typeof rec.fileId === 'string' && rec.fileId.trim()
+          ? rec.fileId
+          : null,
+    filePath,
+    kind: typeof rec.kind === 'string' ? rec.kind : 'replace',
+    title:
+      typeof rec.title === 'string' && rec.title.trim()
+        ? rec.title.trim()
+        : 'LaTeX Edit',
+    ...(typeof rec.rationale === 'string' && rec.rationale.trim()
+      ? { rationale: rec.rationale.trim() }
+      : {}),
+    searchText,
+    replaceText,
+    ...(typeof rec.from_line === 'number'
+      ? { fromLine: rec.from_line }
+      : typeof rec.fromLine === 'number'
+        ? { fromLine: rec.fromLine }
+        : {}),
+    ...(typeof rec.to_line === 'number'
+      ? { toLine: rec.to_line }
+      : typeof rec.toLine === 'number'
+        ? { toLine: rec.toLine }
+        : {}),
+    ...(typeof rec.match_strategy === 'string'
+      ? { matchStrategy: rec.match_strategy }
+      : typeof rec.matchStrategy === 'string'
+        ? { matchStrategy: rec.matchStrategy }
+        : {}),
+    ...(warnings && warnings.length > 0 ? { warnings } : {}),
+  };
+}
+
+export function mapArtifactsToWidgets(
+  rawArtifacts: unknown,
+): FrontendResponseWidget[] {
+  if (
+    !rawArtifacts ||
+    typeof rawArtifacts !== 'object' ||
+    Array.isArray(rawArtifacts)
+  ) {
+    return [];
+  }
+  const artifacts = rawArtifacts as Record<string, unknown>;
+  const widgets: FrontendResponseWidget[] = [];
+
+  if (
+    Array.isArray(artifacts.editor_patches) &&
+    artifacts.editor_patches.length > 0
+  ) {
+    const patches = artifacts.editor_patches
+      .map((item, idx) => normalizeEditorPatch(item, idx))
+      .filter((p): p is FrontendEditorPatchItem => p !== null);
+    if (patches.length > 0) {
+      widgets.push({
+        type: 'editor_patches',
+        title:
+          patches.length === 1
+            ? 'Proposed LaTeX Edit'
+            : `Proposed LaTeX Edits (${patches.length})`,
+        patches,
+      });
+    }
+  }
+
+  if (Array.isArray(artifacts.widgets)) {
+    for (const rawWidget of artifacts.widgets) {
+      if (
+        !rawWidget ||
+        typeof rawWidget !== 'object' ||
+        Array.isArray(rawWidget)
+      ) {
+        continue;
+      }
+      const rec = rawWidget as Record<string, unknown>;
+      const wType = typeof rec.type === 'string' ? rec.type : '';
+      const wTitle = typeof rec.title === 'string' ? rec.title.trim() : '';
+      if (
+        wTitle &&
+        (wType === 'work_item_overview' ||
+          wType === 'metric_summary' ||
+          wType === 'editor_patches')
+      ) {
+        widgets.push(rec);
+      }
+    }
+  }
+
+  return widgets;
 }
 
 export class SseFrameParser {
@@ -215,14 +359,34 @@ export function translateEngineSseFrame(
       const tool = typeof payload?.tool === 'string' ? payload.tool : undefined;
       const agent =
         typeof payload?.agent === 'string' ? payload.agent : undefined;
+      const isError = payload?.status === 'error';
       return {
         clientFrames: [
           `data: [ACTION]${JSON.stringify({
             type: 'tool_end',
             tool,
             agent,
-            status: 'done',
-            success: true,
+            status: isError ? 'error' : 'done',
+            success: !isError,
+          })}\n\n`,
+        ],
+      };
+    }
+
+    case 'editor.patch_preview': {
+      const patch = normalizeEditorPatch(payload?.patch, 0);
+      if (!patch) return { clientFrames: [] };
+      const agent =
+        typeof payload?.agent === 'string' ? payload.agent : 'editor_agent';
+      return {
+        clientFrames: [
+          `data: [ACTION]${JSON.stringify({
+            type: 'editor_patch_preview',
+            agent,
+            patch,
+            ...(typeof payload?.total_patches === 'number'
+              ? { totalPatches: payload.total_patches }
+              : {}),
           })}\n\n`,
         ],
       };
@@ -260,13 +424,26 @@ export function translateEngineSseFrame(
         typeof payload?.route === 'string' ? payload.route : 'direct';
       const citations = normalizeRawCitations(payload?.citations);
       const sources = citations.map(mapCitationToSourceItem);
+      const rawArtifacts =
+        payload?.artifacts &&
+        typeof payload.artifacts === 'object' &&
+        !Array.isArray(payload.artifacts)
+          ? (payload.artifacts as Record<string, unknown>)
+          : undefined;
+      const widgets = mapArtifactsToWidgets(rawArtifacts);
       return {
         clientFrames: [
-          `data: [META]${JSON.stringify({ agent: route, sources })}\n\n`,
+          `data: [META]${JSON.stringify({
+            agent: route,
+            sources,
+            ...(widgets.length > 0 ? { widgets } : {}),
+          })}\n\n`,
           'data: [DONE]\n\n',
         ],
         route,
         citations,
+        ...(rawArtifacts ? { artifacts: rawArtifacts } : {}),
+        ...(widgets.length > 0 ? { widgets } : {}),
         finished: true,
       };
     }

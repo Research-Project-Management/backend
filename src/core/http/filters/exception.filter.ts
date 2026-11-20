@@ -31,6 +31,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let errorCode = 'INTERNAL_SERVER_ERROR';
     let message = 'An unexpected internal server error occurred';
     let details: unknown = undefined;
+    let retryAfter: number | undefined = undefined;
 
     const isProduction = process.env.NODE_ENV === 'production';
 
@@ -55,6 +56,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
         if (resObj.code && typeof resObj.code === 'string') {
           errorCode = resObj.code;
+        }
+        if (typeof resObj.retryAfter === 'number' && resObj.retryAfter > 0) {
+          retryAfter = Math.ceil(resObj.retryAfter);
         }
       }
     } else if (
@@ -156,6 +160,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (requestId && typeof response.header === 'function') {
       response.header('x-request-id', requestId);
+    }
+    if (retryAfter !== undefined && typeof response.header === 'function') {
+      response.header('Retry-After', String(retryAfter));
     }
 
     const payload: ApiErrorEnvelope = {

@@ -14,6 +14,7 @@ enum BlobStatus {
 enum UploadSessionStatus {
   INITIALIZED
   UPLOADING
+  FINALIZING
   COMPLETED
   ABORTED
   EXPIRED
@@ -112,10 +113,11 @@ model FileBlob {
   tombstoneAt      DateTime?  @map("tombstone_at") @db.Timestamptz(6)
   claimedAt        DateTime?  @map("claimed_at") @db.Timestamptz(6)
 
-  files     FileNode[]
-  versions  FileVersion[]
-  pageFiles PageFile[]
-  refs      FileBlobRef[]
+  files         FileNode[]
+  versions      FileVersion[]
+  pageFiles     PageFile[]
+  refs          FileBlobRef[]
+  resultUploads FileUpload[] @relation("FileUploadResultBlob")
 
   @@unique([contentHash], map: "uq_file_blobs_content_hash")
   @@unique([bucket, storageKey], map: "uq_file_blobs_bucket_key")
@@ -187,6 +189,9 @@ model FileUpload {
   parentId     String?             @map("parent_id") @db.Uuid
   parent       FileNode?           @relation("FileUploadParent", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_file_uploads_parent_id")
   status       UploadSessionStatus @default(INITIALIZED)
+  finalizingAt DateTime?           @map("finalizing_at") @db.Timestamptz(6)
+  resultBlobId String?             @map("result_blob_id") @db.Uuid
+  resultBlob   FileBlob?           @relation("FileUploadResultBlob", fields: [resultBlobId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_file_uploads_result_blob_id")
   expiresAt    DateTime            @map("expires_at") @db.Timestamptz(6)
   createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -196,6 +201,10 @@ model FileUpload {
   @@index([spaceId], map: "idx_file_uploads_space")
   @@index([createdById], map: "idx_file_uploads_creator")
   @@index([parentId], map: "idx_file_uploads_parent")
+  @@index([spaceId, status, expiresAt], map: "idx_file_uploads_space_active")
+  @@index([createdById, status, expiresAt], map: "idx_file_uploads_creator_active")
+  @@index([status, finalizingAt], map: "idx_file_uploads_finalizing_stale")
+  @@index([resultBlobId], map: "idx_file_uploads_result_blob")
   @@map("file_uploads")
 }
 

@@ -396,6 +396,43 @@ export class ChatService {
   }
 
   /**
+   * Resolve all member userIds for targeted user:<id> notification fan-out.
+   * For project channels, includes project owner & all project members even if
+   * they have not lazily opened the channel yet.
+   */
+  async getConversationMemberIds(conversationId: string): Promise<string[]> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        type: true,
+        members: { select: { userId: true } },
+        project: {
+          select: {
+            createdById: true,
+            members: { select: { userId: true } },
+          },
+        },
+      },
+    });
+
+    if (!conv) {
+      return [];
+    }
+
+    const memberIds = new Set<string>(conv.members.map((m) => m.userId));
+    if (conv.type === ConversationType.project_channel && conv.project) {
+      if (conv.project.createdById) {
+        memberIds.add(conv.project.createdById);
+      }
+      for (const pm of conv.project.members) {
+        memberIds.add(pm.userId);
+      }
+    }
+
+    return Array.from(memberIds);
+  }
+
+  /**
    * Get messages with 2-tier architecture (Hot Cache Redis RAM -> Cold Storage PostgreSQL).
    * Cursor-based pagination on cold storage.
    */
@@ -666,6 +703,8 @@ export class ChatService {
    * Mark conversation as read for the user.
    */
   async markAsRead(conversationId: string, userId: string) {
+    await this.verifyConversationAccess(conversationId, userId);
+
     const now = new Date();
     await this.prisma.conversationMember.updateMany({
       where: { conversationId, userId },
@@ -721,6 +760,8 @@ export class ChatService {
     if (!msg) {
       throw new NotFoundException('Message not found');
     }
+
+    await this.verifyConversationAccess(msg.conversationId, userId);
 
     await this.prisma.messageReaction.deleteMany({
       where: {

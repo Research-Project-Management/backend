@@ -14,6 +14,7 @@ import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
 import { PagesModule } from './modules/pages/pages.module';
 import { AiModule } from './modules/ai/ai.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
 import { ClsiCompileProcessor } from './modules/pages/clsi/processors/clsi-compile.processor';
 
 /**
@@ -46,6 +47,7 @@ import { ClsiCompileProcessor } from './modules/pages/clsi/processors/clsi-compi
     ExperimentsModule,
     LibraryModule,
     PagesModule,
+    RealtimeModule,
     AiModule,
   ],
   providers: [ClsiCompileProcessor],

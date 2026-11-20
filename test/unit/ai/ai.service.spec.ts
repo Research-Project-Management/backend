@@ -15,6 +15,13 @@ import { ChatService } from '@/modules/ai/chat/services/chat.service';
 import { SessionService } from '@/modules/ai/chat/services/session.service';
 import { TitleService } from '@/modules/ai/chat/services/title.service';
 import type { IAiEnginePort } from '@/modules/ai/engine/engine.port';
+import { normalizeIntentHint } from '@/modules/ai/chat/domain/context.mapper';
+import {
+  mapArtifactsToWidgets,
+  mapCitationToSourceItem,
+  normalizeRawCitations,
+  translateEngineSseFrame,
+} from '@/modules/ai/engine/domain/stream.mapper';
 import type { StreamCompletionResult } from '@/modules/ai/engine/types/engine.type';
 
 interface MockChatRecord {
@@ -46,6 +53,7 @@ interface MockAiMessageCreateManyArgs {
     role: string;
     content: string;
     sources?: unknown[];
+    widgets?: unknown[];
   }>;
 }
 
@@ -441,6 +449,59 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         }),
       );
     });
+
+    it('reuses existing global chatId when both chatId and pageId are supplied, and creates distinct page-linked sessions for new editor chats', async () => {
+      mockPrisma.page.findFirst.mockResolvedValue({
+        id: mockPageId,
+        title: 'Introduction',
+        spaceId: mockUserId,
+      });
+      mockPrisma.aiChat.findFirst.mockResolvedValueOnce(
+        makeChatRecord({ id: mockChatId, title: 'Global Research Thread' }),
+      );
+
+      await chatService.stream(
+        mockUserId,
+        {
+          chatId: mockChatId,
+          pageId: mockPageId,
+          query: 'Continue global chat in editor',
+        },
+        mockReply,
+      );
+
+      expect(mockPrisma.aiChat.create).not.toHaveBeenCalled();
+      expect(mockEngine.chatStream).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          chat_id: mockChatId,
+          page_id: mockPageId,
+        }),
+        mockReply,
+        expect.any(Object),
+      );
+
+      // Starting a new chat in editor (pageId present, no chatId) creates a new session with pageId metadata
+      await chatService.stream(
+        mockUserId,
+        {
+          pageId: mockPageId,
+          query: 'Fresh editor chat session',
+        },
+        mockReply,
+      );
+
+      expect(mockPrisma.aiChat.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.aiChat.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            createdById: mockUserId,
+            spaceId: mockUserId,
+            pageId: mockPageId,
+            title: 'Fresh editor chat session',
+          }),
+        }),
+      );
+    });
   });
 
   describe('Session lifecycle, Space projectId & AiFacade', () => {
@@ -495,6 +556,292 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
           context: { temperature: 0.2 },
         }),
       );
+    });
+  });
+
+  describe('stream.mapper citation index preservation', () => {
+    it('preserves positive integer index and drops zero/non-integer values', () => {
+      const normalized = normalizeRawCitations([
+        {
+          index: 6,
+          source_id: 'doc-resnet',
+          title: 'ResNet',
+          page: 6,
+          snippet: 'CIFAR-10 results',
+        },
+        {
+          index: 0,
+          source_id: 'doc-invalid-zero',
+          title: 'Zero Index',
+        },
+        {
+          index: 1.5,
+          source_id: 'doc-float',
+          title: 'Float Index',
+        },
+      ]);
+
+      expect(normalized).toHaveLength(3);
+      expect(normalized[0].index).toBe(6);
+      expect(normalized[1].index).toBeUndefined();
+      expect(normalized[2].index).toBeUndefined();
+
+      const mapped0 = mapCitationToSourceItem(normalized[0]);
+      const mapped1 = mapCitationToSourceItem(normalized[1]);
+      expect(mapped0.index).toBe(6);
+      expect(mapped0.page).toBe(6);
+      expect(mapped1.index).toBeUndefined();
+    });
+  });
+
+  describe('editor_agent intent routing, widgets mapping, and persistence', () => {
+    it('routes editor_agent and latex intent hints cleanly while falling back when docs/domains attached', () => {
+      expect(normalizeIntentHint('editor_agent', false, false)).toBe(
+        'editor_agent',
+      );
+      expect(normalizeIntentHint('editor', true, true)).toBe('editor_agent');
+      expect(normalizeIntentHint('latex', false, false)).toBe('editor_agent');
+      expect(normalizeIntentHint('latex', true, false)).toBeNull();
+    });
+
+    it('maps artifacts.editor_patches into editor_patches widget and forwards via run.finished [META]', () => {
+      const widgets = mapArtifactsToWidgets({
+        editor_patches: [
+          {
+            id: 'patch-1',
+            file_id: 'doc-1',
+            file_path: 'sections/intro.tex',
+            kind: 'replace',
+            title: 'Polish intro sentence',
+            rationale: 'More concise academic phrasing',
+            search_text: 'Old line',
+            replace_text: 'New line',
+            from_line: 10,
+            to_line: 10,
+            match_strategy: 'exact',
+            warnings: ['Verify cite key'],
+          },
+        ],
+      });
+
+      expect(widgets).toEqual([
+        {
+          type: 'editor_patches',
+          title: 'Proposed LaTeX Edit',
+          patches: [
+            {
+              id: 'patch-1',
+              fileId: 'doc-1',
+              filePath: 'sections/intro.tex',
+              kind: 'replace',
+              title: 'Polish intro sentence',
+              rationale: 'More concise academic phrasing',
+              searchText: 'Old line',
+              replaceText: 'New line',
+              fromLine: 10,
+              toLine: 10,
+              matchStrategy: 'exact',
+              warnings: ['Verify cite key'],
+            },
+          ],
+        },
+      ]);
+
+      const translated = translateEngineSseFrame(
+        'run.finished',
+        JSON.stringify({
+          route: 'editor_agent',
+          citations: [],
+          artifacts: {
+            editor_patches: [
+              {
+                id: 'patch-1',
+                file_path: 'main.tex',
+                title: 'Fix typo',
+                search_text: 'teh',
+                replace_text: 'the',
+                from_line: 4,
+                to_line: 4,
+              },
+            ],
+          },
+        }),
+      );
+
+      expect(translated.widgets).toHaveLength(1);
+      expect(translated.clientFrames[0]).toContain('[META]');
+      expect(translated.clientFrames[0]).toContain('editor_patches');
+    });
+
+    it('persists editor_patches widgets on stream completion', async () => {
+      type OnCompleteFn = (
+        result: StreamCompletionResult,
+      ) => Promise<void> | void;
+      let capturedOnComplete: OnCompleteFn | undefined;
+      mockEngine.chatStream.mockImplementation(
+        async (_req, _reply, options) => {
+          capturedOnComplete = options?.onComplete;
+        },
+      );
+
+      await chatService.stream(
+        mockUserId,
+        {
+          chatId: mockChatId,
+          query: 'Fix brace mismatch',
+          intentHint: 'editor_agent',
+        },
+        mockReply,
+      );
+
+      const widgetPayload = [
+        {
+          type: 'editor_patches',
+          title: 'Proposed LaTeX Edit',
+          patches: [
+            {
+              id: 'p1',
+              filePath: 'main.tex',
+              title: 'Close brace',
+              searchText: '\\section{Intro',
+              replaceText: '\\section{Intro}',
+            },
+          ],
+        },
+      ];
+
+      await capturedOnComplete!({
+        content: 'Closed missing brace on line 4.',
+        route: 'editor_agent',
+        citations: [],
+        sources: [],
+        widgets: widgetPayload,
+        interrupts: [],
+        cancelled: false,
+      });
+
+      const msgCalls = mockPrisma.aiMessage.createMany.mock.calls;
+      const lastMsgCall = msgCalls[msgCalls.length - 1]?.[0];
+      expect(lastMsgCall?.data).toEqual([
+        expect.objectContaining({
+          chatId: mockChatId,
+          role: 'assistant',
+          content: 'Closed missing brace on line 4.',
+          widgets: widgetPayload,
+        }),
+      ]);
+    });
+
+    it('translates editor.patch_preview and error status on tool.completed cleanly', () => {
+      const previewTranslated = translateEngineSseFrame(
+        'editor.patch_preview',
+        JSON.stringify({
+          agent: 'editor_agent',
+          total_patches: 2,
+          patch: {
+            id: 'patch-live-1',
+            file_id: 'doc-method',
+            file_path: 'sections/method.tex',
+            kind: 'replace',
+            title: 'Tighten method claim',
+            search_text: 'We study FluxKV.',
+            replace_text: 'We analyze FluxKV.',
+            from_line: 5,
+            to_line: 5,
+            match_strategy: 'exact',
+          },
+        }),
+      );
+
+      expect(previewTranslated.finished).toBeUndefined();
+      expect(previewTranslated.widgets).toBeUndefined();
+      expect(previewTranslated.clientFrames).toHaveLength(1);
+      expect(previewTranslated.clientFrames[0]).toContain('[ACTION]');
+      const actionJson: unknown = JSON.parse(
+        previewTranslated.clientFrames[0]
+          .replace(/^data: \[ACTION\]/, '')
+          .trim(),
+      );
+      expect(actionJson).toMatchObject({
+        type: 'editor_patch_preview',
+        agent: 'editor_agent',
+        totalPatches: 2,
+        patch: {
+          id: 'patch-live-1',
+          fileId: 'doc-method',
+          filePath: 'sections/method.tex',
+          kind: 'replace',
+          title: 'Tighten method claim',
+          searchText: 'We study FluxKV.',
+          replaceText: 'We analyze FluxKV.',
+          fromLine: 5,
+          toLine: 5,
+          matchStrategy: 'exact',
+        },
+      });
+
+      const toolErr = translateEngineSseFrame(
+        'tool.completed',
+        JSON.stringify({
+          tool: 'propose_edit',
+          agent: 'editor_agent',
+          status: 'error',
+        }),
+      );
+      expect(toolErr.clientFrames[0]).toContain('"status":"error"');
+      expect(toolErr.clientFrames[0]).toContain('"success":false');
+    });
+
+    it('forwards resolved projectId to engine context and maps artifacts.widgets for project_agent', async () => {
+      mockPrisma.space.findFirst.mockResolvedValue({
+        id: 'space-proj-1',
+        type: 'project',
+        ownerUserId: null,
+        projectId: mockProjectId,
+      });
+      mockPrisma.project.findFirst.mockResolvedValue({
+        id: mockProjectId,
+        spaceId: 'space-proj-1',
+      });
+
+      await chatService.execute(mockUserId, {
+        spaceId: mockProjectId,
+        query: 'Show overdue tasks',
+        intentHint: 'project',
+      });
+
+      const chatSyncCalls = mockEngine.chatSync.mock.calls;
+      const sentReq = chatSyncCalls[chatSyncCalls.length - 1]?.[0];
+      expect(sentReq?.intent_hint).toBe('project_agent');
+      expect(sentReq?.context?.project_id).toBe(mockProjectId);
+
+      const widgets = mapArtifactsToWidgets({
+        widgets: [
+          {
+            type: 'work_item_overview',
+            title: 'Project Work Items Overview',
+            total: 2,
+            done: 1,
+            inProgress: 1,
+            overdue: 1,
+            groups: [],
+          },
+          {
+            type: 'metric_summary',
+            title: 'Workload Summary',
+            metrics: [{ label: 'Total Items', value: 2 }],
+          },
+        ],
+      });
+      expect(widgets).toHaveLength(2);
+      expect(widgets[0]).toMatchObject({
+        type: 'work_item_overview',
+        title: 'Project Work Items Overview',
+      });
+      expect(widgets[1]).toMatchObject({
+        type: 'metric_summary',
+        title: 'Workload Summary',
+      });
     });
   });
 });

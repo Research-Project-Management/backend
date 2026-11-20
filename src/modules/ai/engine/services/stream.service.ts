@@ -10,6 +10,7 @@ import {
 } from '../domain/stream.mapper';
 import {
   EngineCitation,
+  FrontendResponseWidget,
   StreamCompletionResult,
   StreamOptions,
   TranslatedSseFrame,
@@ -111,6 +112,8 @@ export class EngineStreamService {
         route: 'direct',
         citations: [],
         sources: [],
+        artifacts: {},
+        widgets: [],
         interrupts: [],
         cancelled: false,
       });
@@ -125,6 +128,8 @@ export class EngineStreamService {
     let accumulatedText = '';
     let resolvedRoute = 'direct';
     let finalCitations: EngineCitation[] = [];
+    let finalArtifacts: Record<string, unknown> = {};
+    let finalWidgets: FrontendResponseWidget[] = [];
     let finalInterrupts: unknown[] = [];
     let sawTerminalFrame = false;
     let cancelled = false;
@@ -139,6 +144,12 @@ export class EngineStreamService {
       }
       if (translated.citations) {
         finalCitations = translated.citations;
+      }
+      if (translated.artifacts) {
+        finalArtifacts = translated.artifacts;
+      }
+      if (translated.widgets) {
+        finalWidgets = translated.widgets;
       }
       if (translated.interrupts) {
         finalInterrupts = translated.interrupts;
@@ -182,6 +193,8 @@ export class EngineStreamService {
           route: resolvedRoute,
           citations: finalCitations,
           sources,
+          artifacts: finalArtifacts,
+          widgets: finalWidgets,
           interrupts: finalInterrupts,
           cancelled: cancelled || clientDisconnected,
         });

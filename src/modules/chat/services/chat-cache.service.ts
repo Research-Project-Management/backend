@@ -1,5 +1,29 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { RedisCacheService } from '@/core/infrastructure/redis/redis.service';
+
+export interface ChatCacheConfig {
+  maxCachedMessages: number;
+  cacheTtlSeconds: number;
+}
+
+export const CHAT_CACHE_DEFAULTS: ChatCacheConfig = {
+  maxCachedMessages: 50,
+  cacheTtlSeconds: 86_400 * 7, // 7 days
+};
+
+export const CHAT_REDIS_KEYS = {
+  conversationMessages: (conversationId: string): string =>
+    `chat:conv:${conversationId}:messages`,
+} as const;
+
+function parsePositiveInt(
+  raw: string | number | undefined,
+  fallback: number,
+): number {
+  const parsed = typeof raw === 'number' ? raw : parseInt(raw || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 export interface CachedMessage {
   id: string;
@@ -34,16 +58,30 @@ export interface CachedMessage {
 @Injectable()
 export class ChatCacheService {
   private readonly logger = new Logger(ChatCacheService.name);
-  private static readonly MAX_CACHED_MESSAGES = 50;
-  private static readonly CACHE_TTL_SECONDS = 86400 * 7; // 7 days
 
   // In-memory fallback if Redis is unreachable
   private memoryCache = new Map<string, CachedMessage[]>();
 
-  constructor(private readonly redisCache: RedisCacheService) {}
+  constructor(
+    private readonly redisCache: RedisCacheService,
+    @Optional() private readonly configService?: ConfigService,
+  ) {}
+
+  private get cacheConfig(): ChatCacheConfig {
+    return {
+      maxCachedMessages: parsePositiveInt(
+        this.configService?.get<string | number>('CHAT_CACHE_MAX_MESSAGES'),
+        CHAT_CACHE_DEFAULTS.maxCachedMessages,
+      ),
+      cacheTtlSeconds: parsePositiveInt(
+        this.configService?.get<string | number>('CHAT_CACHE_TTL_SECONDS'),
+        CHAT_CACHE_DEFAULTS.cacheTtlSeconds,
+      ),
+    };
+  }
 
   private getKey(conversationId: string): string {
-    return `chat:conv:${conversationId}:messages`;
+    return CHAT_REDIS_KEYS.conversationMessages(conversationId);
   }
 
   /**
@@ -52,17 +90,18 @@ export class ChatCacheService {
    */
   async getRecentMessages(
     conversationId: string,
-    limit = 50,
+    limit = this.cacheConfig.maxCachedMessages,
   ): Promise<CachedMessage[] | null> {
     const key = this.getKey(conversationId);
     const client = this.redisCache.getClient();
+    const { maxCachedMessages } = this.cacheConfig;
 
     if (this.redisCache.isReady() && client) {
       try {
         const rawList = await client.lrange(
           key,
           0,
-          Math.min(limit, ChatCacheService.MAX_CACHED_MESSAGES) - 1,
+          Math.min(limit, maxCachedMessages) - 1,
         );
         if (rawList && rawList.length > 0) {
           return rawList.map((item) => JSON.parse(item) as CachedMessage);
@@ -93,11 +132,12 @@ export class ChatCacheService {
     const key = this.getKey(conversationId);
     const serialized = JSON.stringify(message);
     const client = this.redisCache.getClient();
+    const { maxCachedMessages, cacheTtlSeconds } = this.cacheConfig;
 
     // 1. In-memory fallback
     const currentMem = this.memoryCache.get(conversationId) || [];
     currentMem.unshift(message);
-    if (currentMem.length > ChatCacheService.MAX_CACHED_MESSAGES) {
+    if (currentMem.length > maxCachedMessages) {
       currentMem.pop();
     }
     this.memoryCache.set(conversationId, currentMem);
@@ -107,8 +147,8 @@ export class ChatCacheService {
       try {
         const pipeline = client.pipeline();
         pipeline.lpush(key, serialized);
-        pipeline.ltrim(key, 0, ChatCacheService.MAX_CACHED_MESSAGES - 1);
-        pipeline.expire(key, ChatCacheService.CACHE_TTL_SECONDS);
+        pipeline.ltrim(key, 0, maxCachedMessages - 1);
+        pipeline.expire(key, cacheTtlSeconds);
         await pipeline.exec();
       } catch (err: unknown) {
         this.logger.warn(
@@ -128,7 +168,8 @@ export class ChatCacheService {
   ): Promise<void> {
     if (!messages || messages.length === 0) return;
     const key = this.getKey(conversationId);
-    const bounded = messages.slice(0, ChatCacheService.MAX_CACHED_MESSAGES);
+    const { maxCachedMessages, cacheTtlSeconds } = this.cacheConfig;
+    const bounded = messages.slice(0, maxCachedMessages);
     const client = this.redisCache.getClient();
 
     this.memoryCache.set(conversationId, [...bounded]);
@@ -140,7 +181,7 @@ export class ChatCacheService {
         // rpush in order of descending messages so index 0 is newest
         const serialized = bounded.map((m) => JSON.stringify(m));
         pipeline.rpush(key, ...serialized);
-        pipeline.expire(key, ChatCacheService.CACHE_TTL_SECONDS);
+        pipeline.expire(key, cacheTtlSeconds);
         await pipeline.exec();
       } catch (err: unknown) {
         this.logger.warn(

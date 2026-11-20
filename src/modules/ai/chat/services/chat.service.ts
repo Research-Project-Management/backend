@@ -60,15 +60,20 @@ export class ChatService {
 
     const onComplete = async (result: StreamCompletionResult) => {
       await turn.persistUserMsgPromise;
-      if (result.cancelled || !result.content.trim()) return;
+      const hasWidgets = Boolean(result.widgets && result.widgets.length > 0);
+      if (result.cancelled || (!result.content.trim() && !hasWidgets)) return;
 
       await this.persistAssistantResponse({
         chatId: turn.chatId,
         userId,
         spaceId: turn.spaceId,
         userText: turn.userQuery,
-        assistantText: result.content,
+        assistantText: this.resolveFallbackAssistantText(
+          result.content,
+          result.widgets,
+        ),
         sources: result.sources,
+        widgets: result.widgets,
         currentTitle: turn.title,
         documentIds: turn.resolvedDocumentIds,
       });
@@ -90,14 +95,21 @@ export class ChatService {
 
     const response = await this.engine.chatSync(turn.engineRequest);
 
-    if (response.content.trim()) {
+    if (
+      response.content.trim() ||
+      (response.widgets && response.widgets.length > 0)
+    ) {
       await this.persistAssistantResponse({
         chatId: turn.chatId,
         userId,
         spaceId: turn.spaceId,
         userText: turn.userQuery,
-        assistantText: response.content,
+        assistantText: this.resolveFallbackAssistantText(
+          response.content,
+          response.widgets,
+        ),
         sources: response.sources,
+        widgets: response.widgets,
         currentTitle: turn.title,
         documentIds: turn.resolvedDocumentIds,
       });
@@ -110,6 +122,9 @@ export class ChatService {
       status: response.status,
       sources: response.sources,
       citations: response.citations,
+      ...(response.widgets && response.widgets.length > 0
+        ? { widgets: response.widgets }
+        : {}),
       interrupts: response.interrupts,
       usage: response.usage,
       chatId: turn.chatId,
@@ -132,16 +147,21 @@ export class ChatService {
 
     return this.engine.resumeStream(engineRequest, reply, {
       onComplete: async (result) => {
-        if (result.cancelled || !result.content.trim()) return;
+        const hasWidgets = Boolean(result.widgets && result.widgets.length > 0);
+        if (result.cancelled || (!result.content.trim() && !hasWidgets)) return;
         await this.sessionService
           .appendMessages(dto.chatId, userId, {
             messages: [
               {
                 role: 'assistant',
-                content: result.content,
+                content: this.resolveFallbackAssistantText(
+                  result.content,
+                  result.widgets,
+                ),
                 ...(result.sources.length > 0
                   ? { sources: result.sources }
                   : {}),
+                ...(hasWidgets ? { widgets: result.widgets } : {}),
               },
             ],
           })
@@ -163,14 +183,23 @@ export class ChatService {
 
     const response = await this.engine.resumeSync(engineRequest);
 
-    if (response.content.trim()) {
+    if (
+      response.content.trim() ||
+      (response.widgets && response.widgets.length > 0)
+    ) {
       await this.sessionService
         .appendMessages(dto.chatId, userId, {
           messages: [
             {
               role: 'assistant',
-              content: response.content,
+              content: this.resolveFallbackAssistantText(
+                response.content,
+                response.widgets,
+              ),
               sources: response.sources,
+              ...(response.widgets && response.widgets.length > 0
+                ? { widgets: response.widgets }
+                : {}),
             },
           ],
         })
@@ -242,6 +271,7 @@ export class ChatService {
     const engineRequest = buildEngineChatRequest({
       userId,
       spaceId: turnAccess.spaceId,
+      projectId: turnAccess.projectId,
       chatId,
       pageId: turnAccess.canonicalPageId ?? dto.pageId,
       documentIds: turnAccess.resolvedDocumentIds,
@@ -290,6 +320,7 @@ export class ChatService {
     userText: string;
     assistantText: string;
     sources: unknown[];
+    widgets?: unknown[];
     currentTitle: string;
     documentIds: string[];
   }): Promise<void> {
@@ -300,6 +331,9 @@ export class ChatService {
             role: 'assistant',
             content: params.assistantText,
             ...(params.sources.length > 0 ? { sources: params.sources } : {}),
+            ...(params.widgets && params.widgets.length > 0
+              ? { widgets: params.widgets }
+              : {}),
           },
         ],
         documentIds: params.documentIds,
@@ -321,6 +355,24 @@ export class ChatService {
     });
   }
 
+  private resolveFallbackAssistantText(
+    content: string,
+    widgets?: unknown[],
+  ): string {
+    if (content.trim()) return content;
+    const hasEditorPatches = Boolean(
+      widgets?.some(
+        (w) =>
+          w &&
+          typeof w === 'object' &&
+          (w as Record<string, unknown>).type === 'editor_patches',
+      ),
+    );
+    return hasEditorPatches
+      ? 'Proposed manuscript edits ready for review.'
+      : 'Workspace summary ready.';
+  }
+
   private async resolveOrEstablishChat(params: {
     userId: string;
     spaceId?: string;
@@ -330,15 +382,6 @@ export class ChatService {
     userQuery: string;
     documentIds: string[];
   }): Promise<{ chatId: string; title: string }> {
-    if (params.rawPageId) {
-      const pageChat = await this.sessionService.getOrCreatePageChat(
-        params.canonicalPageId || params.rawPageId,
-        params.userId,
-        params.spaceId,
-      );
-      return { chatId: pageChat.id, title: pageChat.title };
-    }
-
     if (params.existingChat) {
       return {
         chatId: params.existingChat.id,
@@ -352,6 +395,7 @@ export class ChatService {
     );
     const created = await this.sessionService.createChat(params.userId, {
       spaceId: params.spaceId,
+      pageId: params.canonicalPageId || params.rawPageId,
       title: initialTitle,
       documentIds: params.documentIds,
     });

@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Query,
+  Optional,
   UseGuards,
   Req,
   Res,
@@ -16,8 +17,8 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { BypassEnvelope } from '@/core';
 import { AuthGuard, CurrentUser, Public } from '@/modules/identity/auth';
+import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { ChatService } from '../services/chat.service';
-import { ChatGateway } from '../gateways/chat.gateway';
 import { ChatAttachmentService } from '../services/chat-attachment.service';
 import {
   CreateDirectConversationDto,
@@ -38,8 +39,8 @@ import { MAX_CHAT_FILE_BYTES } from '../chat.constant';
 export class ChatController {
   constructor(
     private readonly chatService: ChatService,
-    private readonly chatGateway: ChatGateway,
     private readonly chatAttachmentService: ChatAttachmentService,
+    @Optional() private readonly realtimeFacade?: RealtimeFacade,
   ) {}
 
   @Get('conversations')
@@ -89,7 +90,7 @@ export class ChatController {
       userId,
       dto,
     );
-    this.chatGateway.broadcastMessage(conversationId, message);
+    await this.realtimeFacade?.publishChatMessage(conversationId, message);
     return message;
   }
 
@@ -217,6 +218,13 @@ export class ChatController {
       userId,
       dto.emoji,
     );
+    await this.realtimeFacade?.publishChatReaction(res.conversationId, {
+      conversationId: res.conversationId,
+      messageId,
+      userId,
+      emoji: dto.emoji,
+      action: 'add',
+    });
     return res;
   }
 
@@ -226,6 +234,14 @@ export class ChatController {
     @Param('emoji') emoji: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.chatService.removeReaction(messageId, userId, emoji);
+    const res = await this.chatService.removeReaction(messageId, userId, emoji);
+    await this.realtimeFacade?.publishChatReaction(res.conversationId, {
+      conversationId: res.conversationId,
+      messageId,
+      userId,
+      emoji,
+      action: 'remove',
+    });
+    return res;
   }
 }

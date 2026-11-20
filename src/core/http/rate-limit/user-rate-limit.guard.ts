@@ -119,6 +119,29 @@ export class UserRateLimitGuard implements CanActivate {
     const req = http.getRequest();
     const res = http.getResponse();
 
+    // Defer global APP_GUARD evaluation when route/controller explicitly mounts UserRateLimitGuard
+    // after JwtAuthGuard and rules require authenticated user identity.
+    const classGuards = Reflect.getMetadata('__guards__', context.getClass()) as
+      | unknown[]
+      | undefined;
+    const handlerGuards = Reflect.getMetadata(
+      '__guards__',
+      context.getHandler(),
+    ) as unknown[] | undefined;
+    const hasExplicitGuard =
+      (Array.isArray(classGuards) &&
+        classGuards.includes(UserRateLimitGuard)) ||
+      (Array.isArray(handlerGuards) &&
+        handlerGuards.includes(UserRateLimitGuard));
+    const reqUser = req?.user?.id || req?.user?.sub;
+    if (
+      hasExplicitGuard &&
+      !reqUser &&
+      normalizedRules.every((r) => r.keyType === 'user')
+    ) {
+      return true;
+    }
+
     // Iterate through all rules (Dual-Key IP + Identity evaluation)
     for (const rule of normalizedRules) {
       const budget = this.configService.getBudget(rule.bucket);

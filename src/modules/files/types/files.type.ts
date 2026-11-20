@@ -7,6 +7,7 @@ export { BlobStatus };
 export enum UploadSessionStatus {
   INITIALIZED = 'INITIALIZED',
   UPLOADING = 'UPLOADING',
+  FINALIZING = 'FINALIZING',
   COMPLETED = 'COMPLETED',
   ABORTED = 'ABORTED',
   EXPIRED = 'EXPIRED',
@@ -50,9 +51,21 @@ export interface UploadSessionRecord {
   readonly expectedHashHex: string | null;
   readonly parentId: string | null;
   readonly status: UploadSessionStatus;
+  readonly finalizingAt?: Date | null;
+  readonly resultBlobId?: string | null;
   readonly expiresAt: Date;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+}
+
+export interface PromoteCasJobData {
+  blobId: string;
+  stagingKey: string;
+  declaredHashHex?: string;
+}
+
+export interface DeleteStagingObjectJobData {
+  storageKey: string;
 }
 
 export interface BlobRefRecord {

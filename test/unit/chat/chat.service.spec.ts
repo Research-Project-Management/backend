@@ -40,6 +40,7 @@ describe('ChatService Unit Tests', () => {
         findUnique: jest.fn(),
       },
       message: {
+        findUnique: jest.fn(),
         findMany: jest.fn(),
         create: jest.fn(),
         count: jest.fn(),
@@ -239,6 +240,105 @@ describe('ChatService Unit Tests', () => {
         }),
       );
       expect(mockChatCache.pushMessage).toHaveBeenCalled();
+    });
+  });
+
+  describe('getConversationMemberIds', () => {
+    it('returns empty array when conversation is not found', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue(null);
+      await expect(
+        service.getConversationMemberIds('conv-missing'),
+      ).resolves.toEqual([]);
+    });
+
+    it('returns direct and group conversation member IDs', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        type: ConversationType.group,
+        members: [{ userId: 'u-1' }, { userId: 'u-2' }, { userId: 'u-1' }],
+        project: null,
+      });
+
+      const ids = await service.getConversationMemberIds('conv-group');
+      expect(ids).toEqual(['u-1', 'u-2']);
+    });
+
+    it('unions conversation members, project creator, and project members for project_channel', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        type: ConversationType.project_channel,
+        members: [{ userId: 'u-1' }],
+        project: {
+          createdById: 'owner-1',
+          members: [{ userId: 'u-2' }, { userId: 'u-1' }],
+        },
+      });
+
+      const ids = await service.getConversationMemberIds('conv-proj');
+      expect(ids).toEqual(expect.arrayContaining(['u-1', 'owner-1', 'u-2']));
+      expect(ids).toHaveLength(3);
+    });
+  });
+
+  describe('markAsRead & removeReaction security', () => {
+    it('markAsRead throws ForbiddenException for non-members and updates lastReadAt for valid members', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
+        id: 'conv-1',
+        type: ConversationType.direct,
+        members: [],
+      });
+
+      await expect(service.markAsRead('conv-1', 'outsider')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockPrisma.conversationMember.updateMany).not.toHaveBeenCalled();
+
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
+        id: 'conv-1',
+        type: ConversationType.direct,
+        members: [{ userId: 'member-1' }],
+      });
+      mockPrisma.conversationMember.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
+
+      const res = await service.markAsRead('conv-1', 'member-1');
+      expect(res.success).toBe(true);
+      expect(typeof res.lastReadAt).toBe('string');
+      expect(mockPrisma.conversationMember.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { conversationId: 'conv-1', userId: 'member-1' },
+        }),
+      );
+    });
+
+    it('removeReaction throws ForbiddenException for non-members and deletes + invalidates cache for valid members', async () => {
+      mockPrisma.message.findUnique.mockResolvedValue({
+        id: 'msg-1',
+        conversationId: 'conv-1',
+      });
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
+        id: 'conv-1',
+        type: ConversationType.direct,
+        members: [],
+      });
+
+      await expect(
+        service.removeReaction('msg-1', 'outsider', '👍'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.messageReaction.deleteMany).not.toHaveBeenCalled();
+
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
+        id: 'conv-1',
+        type: ConversationType.direct,
+        members: [{ userId: 'member-1' }],
+      });
+      mockPrisma.messageReaction.deleteMany.mockResolvedValueOnce({ count: 1 });
+
+      const res = await service.removeReaction('msg-1', 'member-1', '👍');
+      expect(res).toEqual({ success: true, conversationId: 'conv-1' });
+      expect(mockPrisma.messageReaction.deleteMany).toHaveBeenCalledWith({
+        where: { messageId: 'msg-1', userId: 'member-1', emoji: '👍' },
+      });
+      expect(mockChatCache.invalidate).toHaveBeenCalledWith('conv-1');
     });
   });
 });

@@ -97,6 +97,16 @@ export class QueryDto {
   @IsOptional()
   filename?: string;
 
+  @FromSnake('active_file_id')
+  @IsString()
+  @IsOptional()
+  activeFileId?: string;
+
+  @FromSnake('active_file_path')
+  @IsString()
+  @IsOptional()
+  activeFilePath?: string;
+
   @FromSnake('file_content')
   @IsString()
   @IsOptional()

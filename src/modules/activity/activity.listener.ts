@@ -150,8 +150,8 @@ export class ActivityListener {
     }
   }
 
-  @OnEvent('manuscripts.*', { async: true })
-  async handleManuscriptEvents(payload: {
+  @OnEvent('pages.*', { async: true })
+  async handlePagesRealtimeEvents(payload: {
     spaceId?: string;
     projectId?: string;
     event?: string;

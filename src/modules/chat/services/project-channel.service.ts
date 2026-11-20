@@ -333,7 +333,9 @@ export class ProjectChannelService {
         unreadCount: 0,
         isMuted: membership?.isMuted || false,
         isPinned: membership?.isPinned || false,
-        updatedAt: ch.updatedAt ? ch.updatedAt.toISOString() : new Date().toISOString(),
+        updatedAt: ch.updatedAt
+          ? ch.updatedAt.toISOString()
+          : new Date().toISOString(),
       };
     });
   }

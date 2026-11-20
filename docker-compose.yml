@@ -118,6 +118,8 @@ services:
       FLUX_AI_ENABLED: "${FLUX_AI_ENABLED:-true}"
       FLUX_AI_URL: "${FLUX_AI_URL:-http://host.docker.internal:18420}"
       AI_INTERNAL_API_KEY: "${AI_INTERNAL_API_KEY:-}"
+      REALTIME_SERVICE_URL: http://flux_realtime:3014
+      REALTIME_INTERNAL_API_KEY: "${REALTIME_INTERNAL_API_KEY:-}"
     volumes:
       - flux_clsi_scratch:/tmp/clsi-scratch
     depends_on:
@@ -169,6 +171,8 @@ services:
       CLSI_SANDBOX_MODE: remote
       CLSI_SCRATCH_DIR: /tmp/clsi-scratch
       SKIP_MIGRATIONS: "true"
+      REALTIME_SERVICE_URL: http://flux_realtime:3014
+      REALTIME_INTERNAL_API_KEY: "${REALTIME_INTERNAL_API_KEY:-}"
       TRUSTED_EXTRACTION_ENABLED: "true"
       TRUSTED_EXTRACTION_SHADOW_MODE: "${TRUSTED_SHADOW_MODE:-false}"
       TRUSTED_EXTRACTION_CANARY_PERCENT: "100"
@@ -241,6 +245,64 @@ services:
         aliases:
           - clsi
           - flux_clsi
+
+  # ----------------------------------------------------------------------------
+  # 6. Dedicated Realtime Collaboration & Messaging Service (Socket.IO + Yjs)
+  # ----------------------------------------------------------------------------
+  realtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    image: ghcr.io/research-project-management/backend:latest
+    container_name: flux_realtime
+    restart: "no"
+    command: ["node", "dist/realtime.js"]
+    ports:
+      - "${REALTIME_PORT:-3014}:3014"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3014
+      REALTIME_PORT: 3014
+      REALTIME_MODE: "true"
+      SKIP_MIGRATIONS: "true"
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
+      DIRECT_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      REDIS_CACHE_URL: "redis://redis:6379"
+      REDIS_QUEUE_URL: "redis://redis:6379"
+      CLIENT_URL: ${CLIENT_URL}
+      ORIGINS: ${ORIGINS}
+      REALTIME_INTERNAL_API_KEY: "${REALTIME_INTERNAL_API_KEY:-}"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3014/health/liveness || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 192M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      flux_network:
+        aliases:
+          - realtime
+          - flux_realtime
 
 volumes:
   postgres_data:

@@ -18,6 +18,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'node:stream';
+import { DEFAULT_STAGING_LIFECYCLE_DAYS } from '../files.constant';
 import {
   IStorageAdapter,
   StorageObjectMetadata,
@@ -304,8 +305,8 @@ export class S3StorageAdapter implements IStorageAdapter {
         id: 'cleanup-staging-uploads',
         prefix: 'uploads/staging/',
         status: 'Enabled',
-        expirationDays: 1,
-        abortIncompleteMultipartUploadDays: 1,
+        expirationDays: DEFAULT_STAGING_LIFECYCLE_DAYS,
+        abortIncompleteMultipartUploadDays: 2,
       },
       {
         id: 'cleanup-temp-uploads',

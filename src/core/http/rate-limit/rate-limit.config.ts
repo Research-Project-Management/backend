@@ -5,6 +5,10 @@ export type RateLimitBucket =
   | 'compile'
   | 'import'
   | 'upload'
+  | 'files-presign'
+  | 'files-parts'
+  | 'files-complete'
+  | 'files-download'
   | 'linked-file'
   | 'search-replace'
   | 'git'
@@ -27,6 +31,10 @@ export const DEFAULT_RATE_LIMIT_BUDGETS: Record<
   compile: { limit: 10, windowSeconds: 60 },
   import: { limit: 5, windowSeconds: 60 },
   upload: { limit: 30, windowSeconds: 60 },
+  'files-presign': { limit: 60, windowSeconds: 60 },
+  'files-parts': { limit: 240, windowSeconds: 60 },
+  'files-complete': { limit: 60, windowSeconds: 60 },
+  'files-download': { limit: 300, windowSeconds: 60 },
   'linked-file': { limit: 10, windowSeconds: 60 },
   'search-replace': { limit: 20, windowSeconds: 60 },
   git: { limit: 60, windowSeconds: 60 },

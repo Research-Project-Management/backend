@@ -406,4 +406,71 @@ export class BlobRepository {
     });
     return row !== null;
   }
+
+  async findByStorageKey(
+    storageKey: string,
+  ): Promise<StorageBlobRecord | null> {
+    const normalizedKey = StorageKey.fromString(storageKey).value();
+    const record = await this.prisma.fileBlob.findFirst({
+      where: { storageKey: normalizedKey },
+    });
+    return record ? this.toBlobRecord(record) : null;
+  }
+
+  async existsByStorageKey(storageKey: string): Promise<boolean> {
+    const normalizedKey = StorageKey.fromString(storageKey).value();
+    const row = await this.prisma.fileBlob.findFirst({
+      where: { storageKey: normalizedKey },
+      select: { id: true },
+    });
+    return row !== null;
+  }
+
+  async promoteStorageLocation(input: {
+    blobId: string;
+    expectedCurrentKey: string;
+    nextStorageKey: string;
+    nextContentHashHex?: string;
+    checksumVerified: boolean;
+  }): Promise<boolean> {
+    const expectedCurrentKey = StorageKey.fromString(
+      input.expectedCurrentKey,
+    ).value();
+    const nextStorageKey = StorageKey.fromString(input.nextStorageKey).value();
+
+    const res = await this.prisma.fileBlob.updateMany({
+      where: {
+        id: input.blobId,
+        storageKey: expectedCurrentKey,
+      },
+      data: {
+        storageKey: nextStorageKey,
+        checksumVerified: input.checksumVerified,
+        ...(input.nextContentHashHex
+          ? {
+              contentHash: Uint8Array.from(
+                ContentHash.fromHex(input.nextContentHashHex).toBytes(),
+              ),
+            }
+          : {}),
+      },
+    });
+    return res.count > 0;
+  }
+
+  async findUnpromotedStagingBlobs(
+    olderThan: Date,
+    limit: number,
+  ): Promise<StorageBlobRecord[]> {
+    const records = await this.prisma.fileBlob.findMany({
+      where: {
+        status: BlobStatus.READY,
+        storageKey: { startsWith: 'uploads/staging/' },
+        createdAt: { lt: olderThan },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    return records.map((r) => this.toBlobRecord(r));
+  }
 }

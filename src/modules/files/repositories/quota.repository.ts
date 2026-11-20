@@ -1,8 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import { DEFAULT_STORAGE_QUOTA_BYTES } from '../files.constant';
+import {
+  DEFAULT_STORAGE_QUOTA_BYTES,
+  MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER,
+} from '../files.constant';
 import { cleanUuid } from '../domain/files.policy';
-import { StorageQuotaRecord } from '../types/files.type';
+import { StorageQuotaRecord, UploadSessionStatus } from '../types/files.type';
 
 @Injectable()
 export class QuotaRepository {
@@ -32,15 +35,74 @@ export class QuotaRepository {
     };
   }
 
+  async getPendingUploadBytes(spaceId: string): Promise<bigint> {
+    const validSpaceId = cleanUuid(spaceId);
+    if (!validSpaceId || typeof this.prisma.fileUpload?.aggregate !== 'function') {
+      return 0n;
+    }
+
+    const agg = await this.prisma.fileUpload.aggregate({
+      where: {
+        spaceId: validSpaceId,
+        status: {
+          in: [
+            UploadSessionStatus.INITIALIZED,
+            UploadSessionStatus.UPLOADING,
+            UploadSessionStatus.FINALIZING,
+          ],
+        },
+        expiresAt: { gt: new Date() },
+      },
+      _sum: {
+        totalSize: true,
+      },
+    });
+    return agg._sum?.totalSize ?? 0n;
+  }
+
+  async countActiveUserSessions(userId: string): Promise<number> {
+    const validUserId = cleanUuid(userId);
+    if (!validUserId || typeof this.prisma.fileUpload?.count !== 'function') {
+      return 0;
+    }
+
+    return this.prisma.fileUpload.count({
+      where: {
+        createdById: validUserId,
+        status: {
+          in: [
+            UploadSessionStatus.INITIALIZED,
+            UploadSessionStatus.UPLOADING,
+            UploadSessionStatus.FINALIZING,
+          ],
+        },
+        expiresAt: { gt: new Date() },
+      },
+    });
+  }
+
   async assertAvailable(
     spaceId: string | null | undefined,
     requiredBytes: bigint,
+    options?: { userId?: string; enforceSessionCap?: boolean },
   ): Promise<void> {
     const quota = spaceId ? await this.findBySpaceId(spaceId) : null;
     const maxBytes = quota ? quota.maxBytes : DEFAULT_STORAGE_QUOTA_BYTES;
     const usedBytes = quota ? quota.usedBytes : 0n;
-    if (usedBytes + requiredBytes > maxBytes) {
+    const pendingBytes = spaceId
+      ? await this.getPendingUploadBytes(spaceId)
+      : 0n;
+    if (usedBytes + pendingBytes + requiredBytes > maxBytes) {
       throw new BadRequestException('Storage quota exceeded');
+    }
+
+    if (options?.enforceSessionCap && options.userId) {
+      const activeCount = await this.countActiveUserSessions(options.userId);
+      if (activeCount >= MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER) {
+        throw new BadRequestException(
+          `Too many active upload sessions (max ${MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER})`,
+        );
+      }
     }
   }
 

@@ -165,7 +165,7 @@ export class ClsiService implements OnModuleDestroy {
     const mainFile = dto.mainFile || 'main.tex';
     const source = dto.source || '';
     const files = dto.files || {};
-    const engine = dto.engine || 'pdflatex';
+    const requestedEngine = dto.engine;
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
     const waitingCount = this.slots.stats().waiting;
@@ -221,12 +221,14 @@ export class ClsiService implements OnModuleDestroy {
         );
       }
 
-      this.logger.log(`Compiling project ${projectId} using engine ${engine}`);
+      this.logger.log(
+        `Compiling project ${projectId} using engine ${requestedEngine || 'auto'}`,
+      );
 
       const pipelineResult = await this.pipeline.execute({
         projectId,
         mainFile,
-        engine,
+        engine: requestedEngine,
         texLiveVersion: dto.texLiveVersion || '2025',
         draft: dto.draft,
         syntaxOnly: dto.syntaxOnly,
@@ -239,7 +241,7 @@ export class ClsiService implements OnModuleDestroy {
       });
 
       this.metrics.record({
-        engine,
+        engine: requestedEngine || 'pdflatex',
         durationMs: pipelineResult.durationMs,
         success: pipelineResult.success,
         isCached: false,

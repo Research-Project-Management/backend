@@ -1,4 +1,3 @@
-import { resolveServiceUrl } from './core/utils/public-urls';
 import 'dotenv/config';
 
 try {
@@ -25,7 +24,6 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Http2ServerRequest } from 'node:http2';
 import {
-  RedisIoAdapter,
   GlobalExceptionFilter,
   LoggerService,
   LoggerInterceptor,
@@ -100,16 +98,6 @@ async function bootstrap() {
   );
   app.useLogger(logger);
 
-  // WebSocket Redis Fan-Out Adapter
-  const redisUrl = resolveServiceUrl(
-    'REDIS_URL',
-    process.env.REDIS_URL,
-    'redis://localhost:6379',
-  );
-  const redisIoAdapter = new RedisIoAdapter(app);
-  await redisIoAdapter.connectToRedis(redisUrl);
-  app.useWebSocketAdapter(redisIoAdapter);
-
   // Modular HTTP Middlewares & Security Setup
   await setupFastifyPlugins(app);
   setupCors(app);
@@ -146,17 +134,11 @@ async function bootstrap() {
 
   // Graceful Shutdown on SIGTERM/SIGINT with clean connection draining
   app.enableShutdownHooks();
-  const handleShutdown = async (signal: string) => {
+  const handleShutdown = (signal: string) => {
     logger.log(`Received ${signal}. Gracefully draining connections...`);
-    try {
-      await redisIoAdapter.close();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`Error during redisIoAdapter shutdown: ${msg}`);
-    }
   };
-  process.once('SIGTERM', () => void handleShutdown('SIGTERM'));
-  process.once('SIGINT', () => void handleShutdown('SIGINT'));
+  process.once('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.once('SIGINT', () => handleShutdown('SIGINT'));
 
   // Start HTTP Listener with Port Resilience
   await startServer(app, logger);

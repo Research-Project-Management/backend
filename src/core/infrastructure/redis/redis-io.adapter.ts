@@ -2,8 +2,17 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Server, ServerOptions } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
-import { Logger } from '@nestjs/common';
+import { Logger, type INestApplicationContext } from '@nestjs/common';
 import { isOriginAllowed } from '../../http/setup/allowed-origins';
+
+export interface RedisIoTransportOptions {
+  path?: string;
+  transports?: Array<'websocket' | 'polling'>;
+  pingTimeoutMs?: number;
+  pingIntervalMs?: number;
+  connectTimeoutMs?: number;
+  maxMessageSizeBytes?: number;
+}
 
 /**
  * Enterprise Redis IO Adapter for Socket.IO
@@ -15,6 +24,13 @@ export class RedisIoAdapter extends IoAdapter {
   private adapterConstructor: ReturnType<typeof createAdapter> | null = null;
   private pubClient: Redis | null = null;
   private subClient: Redis | null = null;
+
+  constructor(
+    appOrHttpServer?: INestApplicationContext,
+    private readonly transportOptions?: RedisIoTransportOptions,
+  ) {
+    super(appOrHttpServer);
+  }
 
   async connectToRedis(redisUrl: string): Promise<void> {
     if (
@@ -74,9 +90,17 @@ export class RedisIoAdapter extends IoAdapter {
       credentials: true,
     };
 
+    const parsedEnvMaxSize = process.env.REALTIME_MAX_MESSAGE_SIZE_BYTES
+      ? parseInt(process.env.REALTIME_MAX_MESSAGE_SIZE_BYTES, 10)
+      : NaN;
+    const fallbackMaxMessageSizeBytes =
+      Number.isFinite(parsedEnvMaxSize) && parsedEnvMaxSize > 0
+        ? parsedEnvMaxSize
+        : 1024 * 1024; // 1MB (RT-07, SC-004)
+
     const serverOptions: ServerOptions = {
       ...(options as ServerOptions),
-      path: options?.path ?? '/socket.io/',
+      path: options?.path ?? this.transportOptions?.path ?? '/socket.io/',
       cors: options?.cors ?? defaultCors,
       allowRequest: (req, callback) => {
         const origin = req.headers?.origin;
@@ -88,15 +112,14 @@ export class RedisIoAdapter extends IoAdapter {
         }
         callback(null, true);
       },
-      transports: ['websocket', 'polling'],
-      pingTimeout: 60000,
-      pingInterval: 25000,
+      transports: this.transportOptions?.transports ?? ['websocket', 'polling'],
+      pingTimeout: this.transportOptions?.pingTimeoutMs ?? 60000,
+      pingInterval: this.transportOptions?.pingIntervalMs ?? 25000,
       maxHttpBufferSize:
         options?.maxHttpBufferSize ??
-        (process.env.REALTIME_MAX_MESSAGE_SIZE_BYTES
-          ? parseInt(process.env.REALTIME_MAX_MESSAGE_SIZE_BYTES, 10)
-          : 1024 * 1024), // 1MB (RT-07, SC-004)
-      connectTimeout: 45000,
+        this.transportOptions?.maxMessageSizeBytes ??
+        fallbackMaxMessageSizeBytes,
+      connectTimeout: this.transportOptions?.connectTimeoutMs ?? 45000,
       allowUpgrades: true,
     };
     const server = super.createIOServer(port, serverOptions) as Server;

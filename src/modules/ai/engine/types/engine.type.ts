@@ -29,6 +29,7 @@ export interface EngineResumeRequest {
 }
 
 export interface EngineCitation {
+  index?: number;
   source_id: string;
   source_type?: string;
   title?: string;
@@ -38,6 +39,7 @@ export interface EngineCitation {
 }
 
 export interface FrontendSourceItem {
+  index?: number;
   source?: string;
   title?: string;
   snippet?: string;
@@ -47,12 +49,31 @@ export interface FrontendSourceItem {
   page?: number;
 }
 
+export interface FrontendEditorPatchItem {
+  id: string;
+  fileId?: string | null;
+  filePath: string;
+  kind?: string;
+  title: string;
+  rationale?: string;
+  searchText: string;
+  replaceText: string;
+  fromLine?: number;
+  toLine?: number;
+  matchStrategy?: string;
+  warnings?: string[];
+}
+
+export type FrontendResponseWidget = Record<string, unknown>;
+
 export interface EngineChatResponse {
   content: string;
   route: string;
   status: 'completed' | 'interrupted';
   citations: EngineCitation[];
   sources: FrontendSourceItem[];
+  artifacts?: Record<string, unknown>;
+  widgets?: FrontendResponseWidget[];
   interrupts: unknown[];
   usage: Record<string, unknown>;
   stateless?: boolean;
@@ -71,6 +92,8 @@ export interface StreamCompletionResult {
   route: string;
   citations: EngineCitation[];
   sources: FrontendSourceItem[];
+  artifacts?: Record<string, unknown>;
+  widgets?: FrontendResponseWidget[];
   interrupts: unknown[];
   cancelled: boolean;
 }
@@ -144,6 +167,8 @@ export interface TranslatedSseFrame {
   deltaText?: string;
   route?: string;
   citations?: EngineCitation[];
+  artifacts?: Record<string, unknown>;
+  widgets?: FrontendResponseWidget[];
   interrupts?: unknown[];
   finished?: boolean;
   cancelled?: boolean;

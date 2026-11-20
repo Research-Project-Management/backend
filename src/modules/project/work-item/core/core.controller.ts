@@ -10,18 +10,8 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Sse,
-  MessageEvent,
-  Optional,
-  Req,
-  OnModuleInit,
-  OnModuleDestroy,
 } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Observable, Subject, fromEvent } from 'rxjs';
-import { map, filter, takeUntil } from 'rxjs/operators';
 import { CoreService } from './core.service';
 import {
   CreateWorkItemDto,
@@ -40,54 +30,8 @@ import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
 @ApiBearerAuth('JWT-auth')
 @Controller(['api/v1', 'api'])
 @UseGuards(JwtAuthGuard)
-export class CoreController implements OnModuleInit, OnModuleDestroy {
-  private readonly workItemEvents$ = new Subject<Record<string, unknown>>();
-  private wildcardListener?: (event: Record<string, unknown>) => void;
-
-  constructor(
-    private readonly coreService: CoreService,
-    @Optional() private readonly eventEmitter?: EventEmitter2,
-  ) {}
-
-  onModuleInit() {
-    if (this.eventEmitter) {
-      this.wildcardListener = (event: Record<string, unknown>) => {
-        this.workItemEvents$.next(event);
-      };
-      this.eventEmitter.on('work-item.**', this.wildcardListener);
-      this.eventEmitter.on('state.**', this.wildcardListener);
-    }
-  }
-
-  onModuleDestroy() {
-    if (this.eventEmitter && this.wildcardListener) {
-      this.eventEmitter.off('work-item.**', this.wildcardListener);
-      this.eventEmitter.off('state.**', this.wildcardListener);
-    }
-  }
-
-  @Sse('projects/:projectId/work-items/events')
-  @UseGuards(ProjectAccessGuard)
-  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
-  @ApiOperation({
-    summary: 'Stream realtime events for work items in a project',
-  })
-  streamWorkItemEvents(
-    @Param('projectId') projectId: string,
-    @Req() req: FastifyRequest,
-  ): Observable<MessageEvent> {
-    const disconnect$ = fromEvent(req.raw, 'close');
-
-    return this.workItemEvents$.pipe(
-      filter(
-        (event: Record<string, unknown>) => event?.projectId === projectId,
-      ),
-      map((event: Record<string, unknown>) => ({
-        data: event,
-      })),
-      takeUntil(disconnect$),
-    );
-  }
+export class CoreController {
+  constructor(private readonly coreService: CoreService) {}
 
   @Get('work-items')
   @ApiOperation({
@@ -111,10 +55,7 @@ export class CoreController implements OnModuleInit, OnModuleDestroy {
     @Param('projectId') projectId: string,
     @Query() queryWorkItemDto: QueryWorkItemDto,
   ) {
-    return this.coreService.getProjectWorkItems(
-      projectId,
-      queryWorkItemDto,
-    );
+    return this.coreService.getProjectWorkItems(projectId, queryWorkItemDto);
   }
 
   @Get('projects/:projectId/work-items/analytics')

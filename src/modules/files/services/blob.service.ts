@@ -37,6 +37,29 @@ export class BlobService {
     return this.driver.getBucketName?.() || 'flux';
   }
 
+  private isUniqueConstraintError(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const obj = err as {
+      code?: string;
+      meta?: { driverAdapterError?: { cause?: { originalCode?: string } } };
+    };
+    return (
+      obj.code === 'P2002' ||
+      obj.code === '23505' ||
+      String(obj.meta?.driverAdapterError?.cause?.originalCode ?? '') ===
+        '23505'
+    );
+  }
+
+  private deleteObjectQuietly(storageKey: string, label = 'redundant'): void {
+    if (typeof this.driver?.delete !== 'function') return;
+    Promise.resolve(this.driver.delete(storageKey)).catch((err: unknown) => {
+      this.logger.warn(
+        `Failed to clean up ${label} object ${storageKey}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }
+
   private async incrementExistingBlob(
     blobId: string,
   ): Promise<StorageBlobRecord> {
@@ -249,6 +272,230 @@ export class BlobService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Fast-Finalize path for HTTP upload completion: registers a READY FileBlob
+   * pointing to the staging key without synchronous full-stream hashing or S3 copy.
+   * Canonical CAS promotion runs asynchronously in the files-finalize-cas worker.
+   */
+  async registerStagingObjectFast(
+    input: RegisterUploadedObjectInput,
+  ): Promise<StoreBufferCasResult & { needsAsyncPromotion: boolean }> {
+    const normalizedStagingKey = StorageKey.fromString(
+      input.storageKey,
+    ).value();
+    const declaredHex =
+      input.contentHashHex && /^[a-f0-9]{64}$/i.test(input.contentHashHex)
+        ? input.contentHashHex.toLowerCase()
+        : null;
+
+    if (Boolean(input.checksumVerified) && declaredHex) {
+      const existingBlob = await this.blobRepo.findByHash(declaredHex);
+      if (existingBlob && existingBlob.status === BlobStatus.READY) {
+        try {
+          const updated = await this.incrementExistingBlob(existingBlob.id);
+          if (normalizedStagingKey !== existingBlob.s3Key) {
+            this.deleteObjectQuietly(normalizedStagingKey);
+          }
+          return {
+            blob: updated,
+            isDeduplicated: true,
+            needsAsyncPromotion: false,
+          };
+        } catch (err) {
+          if (!(err instanceof NotFoundException)) throw err;
+        }
+      }
+
+      const blobId = crypto.randomUUID();
+      const canonicalKey = StorageKey.forBlob(declaredHex).value();
+      try {
+        const created = await this.blobRepo.create({
+          id: blobId,
+          contentHashHex: declaredHex,
+          sizeBytes: input.sizeBytes,
+          mimeType: input.mimeType || 'application/octet-stream',
+          checksumVerified: true,
+          s3Key: normalizedStagingKey,
+          s3Bucket: this.getBucketName(),
+          status: BlobStatus.READY,
+          refCount: 1,
+        });
+        return {
+          blob: created,
+          isDeduplicated: false,
+          needsAsyncPromotion: normalizedStagingKey !== canonicalKey,
+        };
+      } catch (err: unknown) {
+        if (this.isUniqueConstraintError(err)) {
+          const concurrentBlob = await this.blobRepo.findByHash(declaredHex);
+          if (concurrentBlob) {
+            const updated = await this.incrementExistingBlob(concurrentBlob.id);
+            if (normalizedStagingKey !== concurrentBlob.s3Key) {
+              this.deleteObjectQuietly(normalizedStagingKey);
+            }
+            return {
+              blob: updated,
+              isDeduplicated: true,
+              needsAsyncPromotion: false,
+            };
+          }
+        }
+        throw err;
+      }
+    }
+
+    const blobId = crypto.randomUUID();
+    const placeholderHashHex = crypto
+      .createHash('sha256')
+      .update(`unhashed:${blobId}`)
+      .digest('hex');
+
+    const created = await this.blobRepo.create({
+      id: blobId,
+      contentHashHex: placeholderHashHex,
+      sizeBytes: input.sizeBytes,
+      mimeType: input.mimeType || 'application/octet-stream',
+      checksumVerified: false,
+      s3Key: normalizedStagingKey,
+      s3Bucket: this.getBucketName(),
+      status: BlobStatus.READY,
+      refCount: 1,
+    });
+
+    return {
+      blob: created,
+      isDeduplicated: false,
+      needsAsyncPromotion: true,
+    };
+  }
+
+  /**
+   * Worker-side CAS promotion: streams staging object to compute SHA-256 (if unverified),
+   * copies to canonical CAS (or isolated blobs/raw/<p1>/<blobId> on post-facto hash collision),
+   * updates FileBlob atomically before scheduling delayed staging object cleanup.
+   */
+  async promoteStagingBlobToCas(input: {
+    blobId: string;
+    stagingKey: string;
+    declaredHashHex?: string;
+  }): Promise<{
+    promoted: boolean;
+    isolated: boolean;
+    finalKey?: string;
+    stagingKeyToDelete?: string;
+  }> {
+    const normalizedStagingKey = StorageKey.fromString(
+      input.stagingKey,
+    ).value();
+    const blob = await this.blobRepo.findById(input.blobId);
+    if (
+      !blob ||
+      blob.status === BlobStatus.DELETED ||
+      blob.s3Key !== normalizedStagingKey
+    ) {
+      return { promoted: false, isolated: false };
+    }
+
+    if (blob.checksumVerified) {
+      const canonicalKey = StorageKey.forBlob(blob.contentHashHex).value();
+      if (normalizedStagingKey === canonicalKey) {
+        return { promoted: false, isolated: false };
+      }
+      await this.driver.copy(normalizedStagingKey, canonicalKey);
+      const updated = await this.blobRepo.promoteStorageLocation({
+        blobId: blob.id,
+        expectedCurrentKey: normalizedStagingKey,
+        nextStorageKey: canonicalKey,
+        checksumVerified: true,
+      });
+      if (!updated) {
+        return { promoted: false, isolated: false };
+      }
+      return {
+        promoted: true,
+        isolated: false,
+        finalKey: canonicalKey,
+        stagingKeyToDelete: normalizedStagingKey,
+      };
+    }
+
+    const computedHex = await this.computeStreamSha256Hex(normalizedStagingKey);
+    if (!computedHex) {
+      let missingPermanently = false;
+      try {
+        await this.driver.stat(normalizedStagingKey);
+      } catch (statErr: unknown) {
+        if (statErr instanceof NotFoundException) {
+          missingPermanently = true;
+        }
+      }
+      if (missingPermanently) {
+        this.logger.error(
+          `Staging object ${normalizedStagingKey} missing during CAS promotion for blob ${blob.id}`,
+        );
+        return { promoted: false, isolated: false };
+      }
+      throw new Error(
+        `Failed to stream staging object ${normalizedStagingKey} for CAS promotion`,
+      );
+    }
+
+    if (
+      input.declaredHashHex &&
+      /^[a-f0-9]{64}$/i.test(input.declaredHashHex) &&
+      input.declaredHashHex.toLowerCase() !== computedHex
+    ) {
+      this.logger.warn(
+        `CAS declared hash mismatch for blob ${blob.id}: declared=${input.declaredHashHex.toLowerCase()}, actual=${computedHex}. Promoting using actual digest.`,
+      );
+    }
+
+    const existingByHash = await this.blobRepo.findByHash(computedHex);
+    if (!existingByHash || existingByHash.id === blob.id) {
+      const canonicalKey = StorageKey.forBlob(computedHex).value();
+      await this.driver.copy(normalizedStagingKey, canonicalKey);
+      try {
+        const updated = await this.blobRepo.promoteStorageLocation({
+          blobId: blob.id,
+          expectedCurrentKey: normalizedStagingKey,
+          nextStorageKey: canonicalKey,
+          nextContentHashHex: computedHex,
+          checksumVerified: true,
+        });
+        return updated
+          ? {
+              promoted: true,
+              isolated: false,
+              finalKey: canonicalKey,
+              stagingKeyToDelete: normalizedStagingKey,
+            }
+          : { promoted: false, isolated: false };
+      } catch (err: unknown) {
+        if (!this.isUniqueConstraintError(err)) {
+          throw err;
+        }
+        // Winner already owns canonicalKey; fall through to isolated storage without touching canonicalKey.
+      }
+    }
+
+    const isolatedKey = StorageKey.forUnhashedBlob(blob.id).value();
+    await this.driver.copy(normalizedStagingKey, isolatedKey);
+    const updated = await this.blobRepo.promoteStorageLocation({
+      blobId: blob.id,
+      expectedCurrentKey: normalizedStagingKey,
+      nextStorageKey: isolatedKey,
+      checksumVerified: true,
+    });
+    return updated
+      ? {
+          promoted: true,
+          isolated: true,
+          finalKey: isolatedKey,
+          stagingKeyToDelete: normalizedStagingKey,
+        }
+      : { promoted: false, isolated: false };
   }
 
   async openStream(

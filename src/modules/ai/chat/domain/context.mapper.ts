@@ -47,7 +47,27 @@ export function normalizeIntentHint(
   if (hint === 'web_search' || hint === 'web_search_agent') {
     return 'web_search_agent';
   }
-  if (hint === 'direct' || hint === 'chat' || hint === 'latex') {
+  if (hint === 'library' || hint === 'library_agent') {
+    return 'library_agent';
+  }
+  if (hint === 'editor' || hint === 'editor_agent' || hint === 'latex_editor') {
+    return 'editor_agent';
+  }
+  if (hint === 'project_agent') {
+    return 'project_agent';
+  }
+  if (
+    hint === 'project' ||
+    hint === 'work_item' ||
+    hint === 'work_item_agent' ||
+    hint === 'workspace_agent'
+  ) {
+    return !hasDocuments && !hasAllowedDomains ? 'project_agent' : null;
+  }
+  if (hint === 'latex') {
+    return !hasDocuments && !hasAllowedDomains ? 'editor_agent' : null;
+  }
+  if (hint === 'direct' || hint === 'chat') {
     return !hasDocuments && !hasAllowedDomains ? 'direct' : null;
   }
   return null;
@@ -56,6 +76,7 @@ export function normalizeIntentHint(
 export function buildEngineChatRequest(params: {
   userId: string;
   spaceId: string;
+  projectId?: string | null;
   chatId?: string | null;
   pageId?: string | null;
   documentIds?: string[];
@@ -110,11 +131,14 @@ export function buildEngineChatRequest(params: {
     user_id: params.userId,
   };
   if (pageId) context.page_id = pageId;
+  if (params.projectId) context.project_id = params.projectId;
   if (documentIds.length > 0) context.document_ids = documentIds;
   if (webSearchSites.length > 0 && !context.allowed_domains) {
     context.allowed_domains = webSearchSites;
   }
   if (dto.filename) context.filename = dto.filename;
+  if (dto.activeFileId) context.active_file_id = dto.activeFileId;
+  if (dto.activeFilePath) context.active_file_path = dto.activeFilePath;
   if (dto.cursorLine !== undefined) context.cursor_line = dto.cursorLine;
   if (dto.cursorColumn !== undefined) context.cursor_column = dto.cursorColumn;
   if (fileContent) context.file_content = fileContent;
