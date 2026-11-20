@@ -11,6 +11,8 @@ import {
   FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
   FILES_JOB_RECLAIM_ORPHAN_BLOBS,
   FILES_JOB_RECONCILE_QUOTAS,
+  FILES_JOB_RECOVER_STALE_FINALIZING,
+  FILES_JOB_SWEEP_STAGING_BLOBS,
   FILES_MAINTENANCE_QUEUE,
   STORAGE_ADAPTER,
 } from '../files.constant';
@@ -129,6 +131,16 @@ export class FilesMaintenanceProcessor
         pattern: '30 3 * * *',
         name: FILES_JOB_RECONCILE_QUOTAS,
       },
+      {
+        id: 'files-repeat-stale-finalizing-recovery',
+        pattern: '*/5 * * * *',
+        name: FILES_JOB_RECOVER_STALE_FINALIZING,
+      },
+      {
+        id: 'files-repeat-sweep-staging-blobs',
+        pattern: '*/10 * * * *',
+        name: FILES_JOB_SWEEP_STAGING_BLOBS,
+      },
     ];
 
     try {
@@ -177,6 +189,18 @@ export class FilesMaintenanceProcessor
           `Running FilesModule maintenance: Reconcile Space quotas [${job.id}]`,
         );
         return this.quotaRepo ? this.quotaRepo.reconcileSpaceQuotas(200) : 0;
+      }
+      case FILES_JOB_RECOVER_STALE_FINALIZING: {
+        this.logger.log(
+          `Running FilesModule maintenance: Recover stale FINALIZING upload sessions [${job.id}]`,
+        );
+        return this.uploadService.recoverStaleFinalizingSessions(100);
+      }
+      case FILES_JOB_SWEEP_STAGING_BLOBS: {
+        this.logger.log(
+          `Running FilesModule maintenance: Sweep unpromoted staging blobs [${job.id}]`,
+        );
+        return this.uploadService.sweepUnpromotedStagingBlobs(100);
       }
       default: {
         this.logger.warn(

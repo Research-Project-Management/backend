@@ -43,7 +43,7 @@ async function bootstrap() {
 
   logger.log('✅ [Flux Dedicated Worker] Successfully initialized.');
   logger.log(
-    '📡 Subscribed queues: [LIBRARY_INGESTION_QUEUE, LIBRARY_OUTBOX_QUEUE, FILES_MAINTENANCE_QUEUE, EXPERIMENTS_PROCESSING_QUEUE, AI_KNOWLEDGE_QUEUE]',
+    '📡 Subscribed queues: [LIBRARY_INGESTION_QUEUE, LIBRARY_OUTBOX_QUEUE, FILES_MAINTENANCE_QUEUE, FILES_MEDIA_QUEUE, FILES_FINALIZE_CAS_QUEUE, EXPERIMENTS_PROCESSING_QUEUE, AI_KNOWLEDGE_QUEUE]',
   );
   logger.log('⚡ Ready to process background jobs...');
 }

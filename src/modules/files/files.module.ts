@@ -7,6 +7,7 @@ import {
   shouldRunWorkerConsumers,
 } from '@/core';
 import {
+  FILES_FINALIZE_CAS_QUEUE,
   FILES_MAINTENANCE_QUEUE,
   FILES_MEDIA_QUEUE,
   FILES_PORT,
@@ -20,6 +21,7 @@ import { FileAccessService } from './services/access.service';
 import { BlobService } from './services/blob.service';
 import { ThumbnailService } from './services/thumbnail.service';
 import { FilesUploadService } from './services/upload.service';
+import { FilesFinalizeCasProcessor } from './processors/files-finalize-cas.processor';
 import { FilesMaintenanceProcessor } from './processors/files-maintenance.processor';
 import { FilesMediaProcessor } from './processors/files-media.processor';
 import { FilesController } from './controllers/files.controller';
@@ -31,7 +33,7 @@ const filesControllers = shouldMountTransferControllers()
   : [];
 
 const maintenanceWorkerProviders = shouldRunWorkerConsumers()
-  ? [FilesMaintenanceProcessor, FilesMediaProcessor]
+  ? [FilesMaintenanceProcessor, FilesMediaProcessor, FilesFinalizeCasProcessor]
   : [];
 
 @Module({
@@ -41,6 +43,7 @@ const maintenanceWorkerProviders = shouldRunWorkerConsumers()
     BullModule.registerQueue(
       { name: FILES_MAINTENANCE_QUEUE },
       { name: FILES_MEDIA_QUEUE },
+      { name: FILES_FINALIZE_CAS_QUEUE },
     ),
   ],
   controllers: filesControllers,

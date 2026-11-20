@@ -37,7 +37,10 @@ export class QuotaRepository {
 
   async getPendingUploadBytes(spaceId: string): Promise<bigint> {
     const validSpaceId = cleanUuid(spaceId);
-    if (!validSpaceId || typeof this.prisma.fileUpload?.aggregate !== 'function') {
+    if (
+      !validSpaceId ||
+      typeof this.prisma.fileUpload?.aggregate !== 'function'
+    ) {
       return 0n;
     }
 

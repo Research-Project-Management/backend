@@ -256,14 +256,12 @@ export class BlobRepository {
     const projectRecord = space.project;
     return Boolean(
       projectRecord &&
-      (projectRecord.createdById === userId || projectRecord.members.length > 0),
+      (projectRecord.createdById === userId ||
+        projectRecord.members.length > 0),
     );
   }
 
-  async hasUserAccessToBlob(
-    userId: string,
-    blobId: string,
-  ): Promise<boolean> {
+  async hasUserAccessToBlob(userId: string, blobId: string): Promise<boolean> {
     const rows = await this.prisma.$queryRaw<Array<{ allowed: boolean }>>`
       WITH accessible_spaces AS (
         SELECT s.id

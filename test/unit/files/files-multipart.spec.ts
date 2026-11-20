@@ -12,15 +12,19 @@ import {
   UploadSessionStatus,
 } from '@/modules/files';
 import {
+  FILES_JOB_DELETE_STAGING_OBJECT,
+  FILES_JOB_PROMOTE_CAS,
   MIN_MULTIPART_PART_SIZE_BYTES,
   MULTIPART_LARGE_PART_SIZE_BYTES,
   MULTIPART_MEDIUM_PART_SIZE_BYTES,
+  STAGING_DELETE_DELAY_MS,
 } from '@/modules/files/files.constant';
 import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
 import { FilesFacade } from '@/modules/files/files.facade';
 import { FilesController } from '@/modules/files/controllers/files.controller';
 import { LocalFilesController } from '@/modules/files/controllers/local.controller';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
+import { FilesFinalizeCasProcessor } from '@/modules/files/processors/files-finalize-cas.processor';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';
@@ -79,6 +83,43 @@ function createInMemoryRepos() {
     claimOrphanBlobsBatch: jest.fn().mockResolvedValue([]),
     restoreClaimedBlob: jest.fn().mockResolvedValue(undefined),
     hasSpaceAccessToBlob: jest.fn().mockResolvedValue(true),
+    findByStorageKey: jest.fn(async (key: string) => {
+      for (const blob of blobs.values()) {
+        if (blob.s3Key === key) return blob;
+      }
+      return null;
+    }),
+    existsByStorageKey: jest.fn(async (key: string) => {
+      for (const blob of blobs.values()) {
+        if (blob.s3Key === key) return true;
+      }
+      return false;
+    }),
+    promoteStorageLocation: jest.fn(async (input) => {
+      const existing = blobs.get(input.blobId);
+      if (!existing || existing.s3Key !== input.expectedCurrentKey) {
+        return false;
+      }
+      blobs.set(input.blobId, {
+        ...existing,
+        s3Key: input.nextStorageKey,
+        contentHashHex: input.nextContentHashHex ?? existing.contentHashHex,
+        checksumVerified: input.checksumVerified,
+      });
+      return true;
+    }),
+    findUnpromotedStagingBlobs: jest.fn(
+      async (olderThan: Date, limit: number) => {
+        return Array.from(blobs.values())
+          .filter(
+            (b) =>
+              b.status === BlobStatus.READY &&
+              b.s3Key.startsWith('uploads/staging/') &&
+              b.createdAt < olderThan,
+          )
+          .slice(0, limit);
+      },
+    ),
   } as unknown as jest.Mocked<BlobRepository>;
 
   let usedBytes = 0n;
@@ -131,6 +172,8 @@ function createInMemoryRepos() {
         expectedHashHex: input.expectedHashHex ?? null,
         parentId: input.parentId ?? null,
         status: UploadSessionStatus.INITIALIZED,
+        finalizingAt: null,
+        resultBlobId: null,
         expiresAt: input.expiresAt,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -158,15 +201,86 @@ function createInMemoryRepos() {
       return true;
     }),
     findExpiredSessions: jest.fn().mockResolvedValue([]),
+    claimForFinalizing: jest.fn(async (id: string) => {
+      const existing = sessions.get(id);
+      if (
+        !existing ||
+        (existing.status !== UploadSessionStatus.INITIALIZED &&
+          existing.status !== UploadSessionStatus.UPLOADING) ||
+        existing.expiresAt.getTime() <= Date.now()
+      ) {
+        return false;
+      }
+      sessions.set(id, {
+        ...existing,
+        status: UploadSessionStatus.FINALIZING,
+        finalizingAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return true;
+    }),
+    markCompletedWithBlob: jest.fn(async (id: string, blobId: string) => {
+      const existing = sessions.get(id)!;
+      const updated: UploadSessionRecord = {
+        ...existing,
+        status: UploadSessionStatus.COMPLETED,
+        resultBlobId: blobId,
+        finalizingAt: null,
+        updatedAt: new Date(),
+      };
+      sessions.set(id, updated);
+      return updated;
+    }),
+    releaseFinalizingToUploading: jest.fn(async (id: string) => {
+      const existing = sessions.get(id);
+      if (!existing || existing.status !== UploadSessionStatus.FINALIZING) {
+        return false;
+      }
+      sessions.set(id, {
+        ...existing,
+        status: UploadSessionStatus.UPLOADING,
+        finalizingAt: null,
+        updatedAt: new Date(),
+      });
+      return true;
+    }),
+    findStaleFinalizingSessions: jest.fn(
+      async (staleBefore: Date, limit: number) =>
+        Array.from(sessions.values())
+          .filter(
+            (s) =>
+              s.status === UploadSessionStatus.FINALIZING &&
+              s.finalizingAt &&
+              s.finalizingAt < staleBefore,
+          )
+          .slice(0, limit),
+    ),
   } as unknown as jest.Mocked<SessionRepository>;
 
-  return { blobs, sessions, blobRepo, quotaRepo, sessionRepo };
+  const enqueuedJobs: Array<{ name: string; data: any; opts?: any }> = [];
+  const finalizeCasQueue = {
+    add: jest.fn(async (name: string, data: any, opts?: any) => {
+      enqueuedJobs.push({ name, data, opts });
+      return { id: opts?.jobId ?? `${name}-${enqueuedJobs.length}` };
+    }),
+  };
+
+  return {
+    blobs,
+    sessions,
+    blobRepo,
+    quotaRepo,
+    sessionRepo,
+    enqueuedJobs,
+    finalizeCasQueue,
+  };
 }
 
 describe('FilesController Multipart Endpoints', () => {
   let tempDir: string;
   let localAdapter: LocalStorageAdapter;
   let controller: FilesController;
+  let casProcessor: FilesFinalizeCasProcessor;
   let repos: ReturnType<typeof createInMemoryRepos>;
 
   beforeEach(() => {
@@ -181,6 +295,13 @@ describe('FilesController Multipart Endpoints', () => {
       repos.blobRepo,
       repos.quotaRepo,
       repos.sessionRepo,
+      repos.finalizeCasQueue as any,
+    );
+    casProcessor = new FilesFinalizeCasProcessor(
+      localAdapter,
+      blobService,
+      repos.blobRepo,
+      repos.finalizeCasQueue as any,
     );
     const facade = new FilesFacade(
       localAdapter,
@@ -242,11 +363,43 @@ describe('FilesController Multipart Endpoints', () => {
     expect(completeRes.filename).toBe('research-paper.pdf');
     expect(completeRes.size).toBe(fullPayload.length);
 
-    const canonicalKey = `blobs/${shaHex.slice(0, 2)}/${shaHex.slice(2, 4)}/${shaHex}`;
-    expect(await localAdapter.exists(canonicalKey)).toBe(true);
-
     const savedSession = repos.sessions.get(initRes.sessionId);
     expect(savedSession?.status).toBe(UploadSessionStatus.COMPLETED);
+    expect(savedSession?.resultBlobId).toBe(completeRes.blobId);
+
+    const stagingKey = savedSession!.s3Key;
+    const stagingBlob = repos.blobs.get(completeRes.blobId);
+    expect(stagingBlob?.status).toBe(BlobStatus.READY);
+    expect(stagingBlob?.s3Key).toBe(stagingKey);
+    expect(stagingBlob?.checksumVerified).toBe(false);
+    expect(await localAdapter.exists(stagingKey)).toBe(true);
+
+    expect(repos.enqueuedJobs).toHaveLength(1);
+    expect(repos.enqueuedJobs[0].name).toBe(FILES_JOB_PROMOTE_CAS);
+
+    await casProcessor.process({
+      id: 'job-promote-1',
+      name: FILES_JOB_PROMOTE_CAS,
+      data: repos.enqueuedJobs[0].data,
+    } as any);
+
+    const canonicalKey = `blobs/${shaHex.slice(0, 2)}/${shaHex.slice(2, 4)}/${shaHex}`;
+    expect(await localAdapter.exists(canonicalKey)).toBe(true);
+    expect(repos.blobs.get(completeRes.blobId)?.s3Key).toBe(canonicalKey);
+    expect(repos.blobs.get(completeRes.blobId)?.contentHashHex).toBe(shaHex);
+    expect(repos.blobs.get(completeRes.blobId)?.checksumVerified).toBe(true);
+    expect(await localAdapter.exists(stagingKey)).toBe(true);
+
+    expect(repos.enqueuedJobs).toHaveLength(2);
+    expect(repos.enqueuedJobs[1].name).toBe(FILES_JOB_DELETE_STAGING_OBJECT);
+    expect(repos.enqueuedJobs[1].opts?.delay).toBe(STAGING_DELETE_DELAY_MS);
+
+    await casProcessor.process({
+      id: 'job-del-1',
+      name: FILES_JOB_DELETE_STAGING_OBJECT,
+      data: repos.enqueuedJobs[1].data,
+    } as any);
+    expect(await localAdapter.exists(stagingKey)).toBe(false);
   });
 
   it('short-circuits initiateMultipart via Instant CAS SHA-256 deduplication', async () => {

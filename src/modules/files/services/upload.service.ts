@@ -1,17 +1,24 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
 import * as path from 'path';
+import { RedisCacheService } from '@/core';
 import {
   DEFAULT_MULTIPART_TTL_HOURS,
   DEFAULT_PRESIGN_SIZE_BYTES,
   DEFAULT_STAGING_TTL_SECONDS,
+  FILES_FINALIZE_CAS_QUEUE,
+  FILES_JOB_PROMOTE_CAS,
   MAX_MULTIPART_PARTS,
   MAX_PART_PRESIGN_BATCH,
   MIN_MULTIPART_PART_SIZE_BYTES,
@@ -19,6 +26,9 @@ import {
   MULTIPART_LARGE_THRESHOLD_BYTES,
   MULTIPART_MEDIUM_PART_SIZE_BYTES,
   MULTIPART_MEDIUM_THRESHOLD_BYTES,
+  PRESIGN_COMPLETE_IDEM_TTL_SECONDS,
+  STALE_FINALIZING_LEASE_MINUTES,
+  STAGING_SWEEP_MIN_AGE_MINUTES,
   STORAGE_ADAPTER,
 } from '../files.constant';
 import { StorageKey } from '../domain/storage-vo';
@@ -48,6 +58,7 @@ import {
   MultipartPartUrlItem,
   PresignFileUploadInput,
   PresignFileUploadOutput,
+  PromoteCasJobData,
   StorageBlobRecord,
   StoreBufferCasResult,
   UploadFilesInput,
@@ -56,6 +67,14 @@ import {
   UploadSessionStatus,
 } from '../types/files.type';
 import { BlobService } from './blob.service';
+
+interface PresignCompleteCache {
+  blobId: string;
+  cleanFilename: string;
+  mimeType: string;
+  sizeBytes: string;
+  isDeduplicated: boolean;
+}
 
 /**
  * Unified upload orchestration service covering direct buffer uploads,
@@ -71,7 +90,103 @@ export class FilesUploadService {
     private readonly blobRepo: BlobRepository,
     private readonly quotaRepo: QuotaRepository,
     private readonly sessionRepo: SessionRepository,
+    @Optional()
+    @InjectQueue(FILES_FINALIZE_CAS_QUEUE)
+    private readonly finalizeCasQueue?: Queue,
+    @Optional()
+    private readonly redis?: RedisCacheService,
   ) {}
+
+  private async enqueueCasPromotion(data: PromoteCasJobData): Promise<void> {
+    if (!this.finalizeCasQueue) return;
+    try {
+      await this.finalizeCasQueue.add(FILES_JOB_PROMOTE_CAS, data, {
+        jobId: `promote-cas-${data.blobId}`,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: 200,
+        removeOnFail: 500,
+      });
+    } catch (err: unknown) {
+      this.logger.error(
+        `Failed to enqueue async CAS promotion for blob ${data.blobId} (${data.stagingKey}); maintenance sweep will recover: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private buildCompletePresignedOutput(params: {
+    blob: StorageBlobRecord;
+    cleanFilename: string;
+    actualSize: bigint;
+    actualMime: string;
+    isDeduplicated: boolean;
+  }): CompletePresignedFileOutput {
+    return {
+      blob: params.blob,
+      fileId: params.blob.id,
+      blobId: params.blob.id,
+      url: getFileContentPath(params.blob.id),
+      filename: params.cleanFilename,
+      size: Number(params.actualSize),
+      sizeBytes: params.actualSize,
+      mimeType: params.actualMime,
+      cleanFilename: params.cleanFilename,
+      isDeduplicated: params.isDeduplicated,
+    };
+  }
+
+  private buildMultipartOutput(
+    blob: StorageBlobRecord,
+    session: UploadSessionRecord,
+    cleanFilename: string,
+    isDeduplicated: boolean,
+  ): CompleteFileMultipartOutput {
+    return {
+      blob,
+      session,
+      isDeduplicated,
+      fileId: blob.id,
+      blobId: blob.id,
+      url: getFileContentPath(blob.id),
+      filename: cleanFilename,
+      size: Number(blob.sizeBytes),
+      mimeType: blob.mimeType || session.mimeType,
+    };
+  }
+
+  private async tryReplayPresignComplete(
+    idemKey: string,
+    cleanFilename: string,
+  ): Promise<CompletePresignedFileOutput | null> {
+    if (!this.redis) return null;
+    try {
+      const cached = await this.redis.get<PresignCompleteCache>(idemKey);
+      if (!cached?.blobId) return null;
+      const blob = await this.blobRepo.findById(cached.blobId);
+      if (!blob || blob.status === BlobStatus.DELETED) return null;
+      return this.buildCompletePresignedOutput({
+        blob,
+        cleanFilename: cached.cleanFilename || cleanFilename,
+        actualSize: cached.sizeBytes
+          ? BigInt(cached.sizeBytes)
+          : blob.sizeBytes,
+        actualMime: cached.mimeType || blob.mimeType,
+        isDeduplicated: Boolean(cached.isDeduplicated),
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private throwFinalizingConflict(message: string): never {
+    throw new ConflictException({
+      statusCode: 409,
+      code: 'UPLOAD_FINALIZING',
+      message,
+      retryAfter: 2,
+      details: { retryAfter: 2 },
+    });
+  }
 
   private validateSafeFilename(filename: string): string {
     const cleanFilename = sanitizeFilename(filename);
@@ -116,17 +231,25 @@ export class FilesUploadService {
     if (!hashHex || !targetSpaceId) return null;
     const existingBlob = await this.blobRepo.findByHash(hashHex);
     if (!existingBlob || existingBlob.status !== BlobStatus.READY) return null;
-    if (!(await this.blobRepo.hasSpaceAccessToBlob(existingBlob.id, targetSpaceId))) {
+    if (
+      !(await this.blobRepo.hasSpaceAccessToBlob(
+        existingBlob.id,
+        targetSpaceId,
+      ))
+    ) {
       return null;
     }
 
     await this.quotaRepo.incrementUsage(targetSpaceId, existingBlob.sizeBytes);
     try {
       const updated = await this.blobRepo.incrementRefCount(existingBlob.id);
-      if (!updated) throw new NotFoundException('Physical data blob not found in storage');
+      if (!updated)
+        throw new NotFoundException('Physical data blob not found in storage');
       return updated;
     } catch (err) {
-      await this.quotaRepo.decrementUsage(targetSpaceId, existingBlob.sizeBytes).catch(() => {});
+      await this.quotaRepo
+        .decrementUsage(targetSpaceId, existingBlob.sizeBytes)
+        .catch(() => {});
       throw err;
     }
   }
@@ -137,10 +260,14 @@ export class FilesUploadService {
     cleanFilename: string,
   ): Promise<void> {
     try {
-      const streamRes = await this.driver.getStream(storageKey, { start: 0, end: 511 });
+      const streamRes = await this.driver.getStream(storageKey, {
+        start: 0,
+        end: 511,
+      });
       if (!streamRes?.stream) return;
       const headerBuffer = await streamToBuffer(streamRes.stream);
-      if (headerBuffer.length > 0) validateMagicBytes(headerBuffer, mimeType, cleanFilename);
+      if (headerBuffer.length > 0)
+        validateMagicBytes(headerBuffer, mimeType, cleanFilename);
     } catch (err: unknown) {
       if (err instanceof BadRequestException) {
         this.deleteKeyQuietly(storageKey);
@@ -157,7 +284,7 @@ export class FilesUploadService {
     validationFilename: string;
     contentHashHex?: string;
     checksumVerified: boolean;
-  }): Promise<StoreBufferCasResult> {
+  }): Promise<StoreBufferCasResult & { needsAsyncPromotion: boolean }> {
     await this.verifyMagicBytesOrCleanup(
       params.storageKey,
       params.mimeType,
@@ -170,7 +297,7 @@ export class FilesUploadService {
       throw quotaErr;
     }
     try {
-      return await this.blobService.registerUploadedObject({
+      return await this.blobService.registerStagingObjectFast({
         storageKey: params.storageKey,
         sizeBytes: params.sizeBytes,
         contentHashHex: params.contentHashHex,
@@ -178,20 +305,33 @@ export class FilesUploadService {
         checksumVerified: params.checksumVerified,
       });
     } catch (err) {
-      await this.quotaRepo.decrementUsage(params.spaceId, params.sizeBytes).catch(() => {});
+      await this.quotaRepo
+        .decrementUsage(params.spaceId, params.sizeBytes)
+        .catch(() => {});
       throw err;
     }
   }
 
   async uploadFile(input: UploadFilesInput): Promise<UploadFilesOutput> {
-    if (!input.buffer?.length) throw new BadRequestException('File buffer cannot be empty');
+    if (!input.buffer?.length)
+      throw new BadRequestException('File buffer cannot be empty');
     const cleanFilename = this.validateSafeFilename(input.filename);
-    const mimeType = this.resolveMimeType(input.mimeType, cleanFilename, input.buffer);
+    const mimeType = this.resolveMimeType(
+      input.mimeType,
+      cleanFilename,
+      input.buffer,
+    );
     validateMagicBytes(input.buffer, mimeType, cleanFilename);
 
     const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
-    await this.quotaRepo.assertAvailable(targetSpaceId, BigInt(input.buffer.length));
-    const { blob, isDeduplicated } = await this.blobService.storeBuffer(input.buffer, mimeType);
+    await this.quotaRepo.assertAvailable(
+      targetSpaceId,
+      BigInt(input.buffer.length),
+    );
+    const { blob, isDeduplicated } = await this.blobService.storeBuffer(
+      input.buffer,
+      mimeType,
+    );
 
     try {
       await this.quotaRepo.incrementUsage(targetSpaceId, blob.sizeBytes);
@@ -227,17 +367,31 @@ export class FilesUploadService {
     mimeType?: string;
   }): Promise<{ key: string; url: string; mimeType: string; size: number }> {
     const cleanFilename = sanitizeFilename(input.filename);
-    const detectedMime = this.resolveMimeType(input.mimeType, cleanFilename, input.buffer);
-    if (!detectedMime.startsWith('image/') || detectedMime === 'image/svg+xml') {
+    const detectedMime = this.resolveMimeType(
+      input.mimeType,
+      cleanFilename,
+      input.buffer,
+    );
+    if (
+      !detectedMime.startsWith('image/') ||
+      detectedMime === 'image/svg+xml'
+    ) {
       throw new BadRequestException(
         'Public asset uploads only support raster image formats (PNG, JPEG, WebP, GIF)',
       );
     }
 
     validateMagicBytes(input.buffer, detectedMime, cleanFilename);
-    const ext = path.extname(cleanFilename).replace(/[^a-zA-Z0-9.]/g, '').toLowerCase() || '.png';
+    const ext =
+      path
+        .extname(cleanFilename)
+        .replace(/[^a-zA-Z0-9.]/g, '')
+        .toLowerCase() || '.png';
     const key = `public/avatars/${crypto.randomUUID()}${ext}`;
-    await this.driver.put(key, input.buffer, { mimeType: detectedMime, size: input.buffer.length });
+    await this.driver.put(key, input.buffer, {
+      mimeType: detectedMime,
+      size: input.buffer.length,
+    });
 
     return {
       key,
@@ -316,61 +470,155 @@ export class FilesUploadService {
     }
 
     const cleanFilename = this.validateSafeFilename(input.filename);
-    let actualSize = input.sizeBytes ? BigInt(input.sizeBytes) : 0n;
-    let actualMime = input.mimeType || 'application/octet-stream';
-    let statChecksumSha256: string | undefined;
+    const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
+    const spaceScope = targetSpaceId ?? input.userId;
+    const keyDigest = crypto
+      .createHash('sha256')
+      .update(`${spaceScope}:${input.storageKey}`)
+      .digest('hex')
+      .slice(0, 32);
+    const idemKey = `files:idem:complete:${keyDigest}`;
+    const lockResource = `files:complete:${keyDigest}`;
+
+    const initialReplay = await this.tryReplayPresignComplete(
+      idemKey,
+      cleanFilename,
+    );
+    if (initialReplay) {
+      return initialReplay;
+    }
+
+    let lockToken: string | null = null;
+    if (this.redis) {
+      lockToken = await this.redis.acquireLock(lockResource, 30_000);
+      if (!lockToken) {
+        const concurrentReplay = await this.tryReplayPresignComplete(
+          idemKey,
+          cleanFilename,
+        );
+        if (concurrentReplay) {
+          return concurrentReplay;
+        }
+        this.throwFinalizingConflict(
+          'Presigned upload is currently finalizing. Please retry shortly.',
+        );
+      }
+    }
 
     try {
-      const stat = await this.driver.stat(input.storageKey);
-      if (stat && stat.size > 0) {
-        actualSize = BigInt(stat.size);
-        statChecksumSha256 = stat.checksumSha256;
-        if (stat.mimeType && stat.mimeType !== 'application/octet-stream') {
-          actualMime = stat.mimeType;
-        }
-      }
-    } catch (err: unknown) {
-      if (err instanceof NotFoundException) {
-        throw new NotFoundException('Uploaded object not found or verified in storage backend');
-      }
-      this.logger.debug(
-        `Physical object stat check deferred for ${input.storageKey}: ${(err as Error)?.message}`,
+      const lockedReplay = await this.tryReplayPresignComplete(
+        idemKey,
+        cleanFilename,
       );
+      if (lockedReplay) {
+        return lockedReplay;
+      }
+
+      const existingByKey =
+        typeof this.blobRepo.findByStorageKey === 'function'
+          ? await this.blobRepo.findByStorageKey(input.storageKey)
+          : null;
+      if (existingByKey && existingByKey.status !== BlobStatus.DELETED) {
+        const cachePayload: PresignCompleteCache = {
+          blobId: existingByKey.id,
+          cleanFilename,
+          mimeType: existingByKey.mimeType,
+          sizeBytes: existingByKey.sizeBytes.toString(),
+          isDeduplicated: false,
+        };
+        await this.redis
+          ?.set(idemKey, cachePayload, PRESIGN_COMPLETE_IDEM_TTL_SECONDS)
+          .catch(() => {});
+        return this.buildCompletePresignedOutput({
+          blob: existingByKey,
+          cleanFilename,
+          actualSize: existingByKey.sizeBytes,
+          actualMime: existingByKey.mimeType,
+          isDeduplicated: false,
+        });
+      }
+
+      let actualSize = input.sizeBytes ? BigInt(input.sizeBytes) : 0n;
+      let actualMime = input.mimeType || 'application/octet-stream';
+      let statChecksumSha256: string | undefined;
+
+      try {
+        const stat = await this.driver.stat(input.storageKey);
+        if (stat && stat.size > 0) {
+          actualSize = BigInt(stat.size);
+          statChecksumSha256 = stat.checksumSha256;
+          if (stat.mimeType && stat.mimeType !== 'application/octet-stream') {
+            actualMime = stat.mimeType;
+          }
+        }
+      } catch (err: unknown) {
+        if (err instanceof NotFoundException) {
+          throw new NotFoundException(
+            'Uploaded object not found or verified in storage backend',
+          );
+        }
+        this.logger.debug(
+          `Physical object stat check deferred for ${input.storageKey}: ${(err as Error)?.message}`,
+        );
+      }
+
+      if (actualSize <= 0n) {
+        throw new NotFoundException(
+          'Uploaded object is empty or not found in storage backend',
+        );
+      }
+
+      const validHashHex = this.normalizeSha256Hex(input.contentHash);
+      const checksumVerified = Boolean(
+        validHashHex &&
+        statChecksumSha256 &&
+        statChecksumSha256 ===
+          Buffer.from(validHashHex, 'hex').toString('base64'),
+      );
+
+      const registered = await this.finalizeStagingObject({
+        storageKey: input.storageKey,
+        spaceId: targetSpaceId,
+        sizeBytes: actualSize,
+        mimeType: actualMime,
+        validationFilename: cleanFilename,
+        contentHashHex: validHashHex,
+        checksumVerified,
+      });
+
+      if (registered.needsAsyncPromotion) {
+        await this.enqueueCasPromotion({
+          blobId: registered.blob.id,
+          stagingKey: input.storageKey,
+          declaredHashHex: validHashHex,
+        });
+      }
+
+      if (this.redis) {
+        const cachePayload: PresignCompleteCache = {
+          blobId: registered.blob.id,
+          cleanFilename,
+          mimeType: actualMime,
+          sizeBytes: actualSize.toString(),
+          isDeduplicated: registered.isDeduplicated,
+        };
+        await this.redis
+          .set(idemKey, cachePayload, PRESIGN_COMPLETE_IDEM_TTL_SECONDS)
+          .catch(() => {});
+      }
+
+      return this.buildCompletePresignedOutput({
+        blob: registered.blob,
+        cleanFilename,
+        actualSize,
+        actualMime,
+        isDeduplicated: registered.isDeduplicated,
+      });
+    } finally {
+      if (lockToken && this.redis) {
+        await this.redis.releaseLock(lockResource, lockToken).catch(() => {});
+      }
     }
-
-    if (actualSize <= 0n) {
-      throw new NotFoundException('Uploaded object is empty or not found in storage backend');
-    }
-
-    const validHashHex = this.normalizeSha256Hex(input.contentHash);
-    const checksumVerified = Boolean(
-      validHashHex &&
-      statChecksumSha256 &&
-      statChecksumSha256 === Buffer.from(validHashHex, 'hex').toString('base64'),
-    );
-
-    const registered = await this.finalizeStagingObject({
-      storageKey: input.storageKey,
-      spaceId: resolveTargetSpaceId(input.spaceId, input.userId),
-      sizeBytes: actualSize,
-      mimeType: actualMime,
-      validationFilename: cleanFilename,
-      contentHashHex: validHashHex,
-      checksumVerified,
-    });
-
-    return {
-      blob: registered.blob,
-      fileId: registered.blob.id,
-      blobId: registered.blob.id,
-      url: getFileContentPath(registered.blob.id),
-      filename: cleanFilename,
-      size: Number(actualSize),
-      sizeBytes: actualSize,
-      mimeType: actualMime,
-      cleanFilename,
-      isDeduplicated: registered.isDeduplicated,
-    };
   }
 
   async initiateMultipart(
@@ -379,17 +627,22 @@ export class FilesUploadService {
     const cleanFilename = this.validateSafeFilename(input.filename);
     const totalSizeBytes = BigInt(input.totalSize);
     const targetSpaceId = resolveTargetSpaceId(input.spaceId, input.userId);
-    await this.quotaRepo.assertAvailable(targetSpaceId, totalSizeBytes);
+    await this.quotaRepo.assertAvailable(targetSpaceId, totalSizeBytes, {
+      userId: input.userId,
+      enforceSessionCap: true,
+    });
 
     const expectedHashHex = this.normalizeSha256Hex(input.expectedHash);
     const dedupBlob = expectedHashHex
-      ? await this.tryInstantDedup(expectedHashHex, targetSpaceId).catch((err: unknown) => {
-          if (err instanceof BadRequestException) throw err;
-          this.logger.debug(
-            `Multipart instant CAS lookup fell back to normal upload: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          return null;
-        })
+      ? await this.tryInstantDedup(expectedHashHex, targetSpaceId).catch(
+          (err: unknown) => {
+            if (err instanceof BadRequestException) throw err;
+            this.logger.debug(
+              `Multipart instant CAS lookup fell back to normal upload: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return null;
+          },
+        )
       : null;
 
     if (dedupBlob) {
@@ -415,7 +668,10 @@ export class FilesUploadService {
         : input.totalSize > MULTIPART_MEDIUM_THRESHOLD_BYTES
           ? MULTIPART_MEDIUM_PART_SIZE_BYTES
           : MIN_MULTIPART_PART_SIZE_BYTES;
-    const partSize = Math.max(basePartSize, Math.ceil(input.totalSize / MAX_MULTIPART_PARTS));
+    const partSize = Math.max(
+      basePartSize,
+      Math.ceil(input.totalSize / MAX_MULTIPART_PARTS),
+    );
     const totalParts = Math.max(1, Math.ceil(input.totalSize / partSize));
 
     const sessionId = crypto.randomUUID();
@@ -437,7 +693,9 @@ export class FilesUploadService {
       partSize,
       expectedHashHex: expectedHashHex ?? null,
       parentId: input.parentId ?? null,
-      expiresAt: new Date(Date.now() + DEFAULT_MULTIPART_TTL_HOURS * 3600 * 1000),
+      expiresAt: new Date(
+        Date.now() + DEFAULT_MULTIPART_TTL_HOURS * 3600 * 1000,
+      ),
     });
 
     return {
@@ -451,9 +709,16 @@ export class FilesUploadService {
     };
   }
 
-  private verifySessionAccess(session: UploadSessionRecord, actor?: FileActorContext): void {
+  private verifySessionAccess(
+    session: UploadSessionRecord,
+    actor?: FileActorContext,
+  ): void {
     if (!actor || session.userId === actor.userId) return;
-    if (session.spaceId !== session.userId && actor.spaceId && session.spaceId === actor.spaceId) {
+    if (
+      session.spaceId !== session.userId &&
+      actor.spaceId &&
+      session.spaceId === actor.spaceId
+    ) {
       return;
     }
     throw new NotFoundException('Upload session not found');
@@ -468,22 +733,35 @@ export class FilesUploadService {
       throw new NotFoundException('Upload session not found or expired');
     }
     this.verifySessionAccess(session, actor);
+    if (session.status === UploadSessionStatus.FINALIZING) {
+      this.throwFinalizingConflict(
+        'Upload session is currently finalizing. Please retry shortly.',
+      );
+    }
     if (
       session.status === UploadSessionStatus.ABORTED ||
-      session.status === UploadSessionStatus.COMPLETED
+      session.status === UploadSessionStatus.COMPLETED ||
+      session.status === UploadSessionStatus.EXPIRED
     ) {
-      throw new BadRequestException(`Upload session has already been ${session.status}`);
+      throw new BadRequestException(
+        `Upload session has already been ${session.status}`,
+      );
     }
     return session;
   }
 
-  private async ensureSessionUploading(session: UploadSessionRecord): Promise<void> {
+  private async ensureSessionUploading(
+    session: UploadSessionRecord,
+  ): Promise<void> {
     if (session.status !== UploadSessionStatus.INITIALIZED) return;
     if (typeof this.sessionRepo.markUploadingIfInitialized === 'function') {
       await this.sessionRepo.markUploadingIfInitialized(session.id);
       return;
     }
-    await this.sessionRepo.markStatus(session.id, UploadSessionStatus.UPLOADING);
+    await this.sessionRepo.markStatus(
+      session.id,
+      UploadSessionStatus.UPLOADING,
+    );
   }
 
   async presignMultipartParts(
@@ -491,7 +769,11 @@ export class FilesUploadService {
     partNumbers: number[],
     actor?: FileActorContext,
   ): Promise<MultipartPartUrlItem[]> {
-    if (!Array.isArray(partNumbers) || partNumbers.length === 0 || partNumbers.length > MAX_PART_PRESIGN_BATCH) {
+    if (
+      !Array.isArray(partNumbers) ||
+      partNumbers.length === 0 ||
+      partNumbers.length > MAX_PART_PRESIGN_BATCH
+    ) {
       throw new BadRequestException(
         `partNumbers must contain between 1 and ${MAX_PART_PRESIGN_BATCH} part numbers`,
       );
@@ -500,7 +782,11 @@ export class FilesUploadService {
     const session = await this.getValidActiveSession(sessionId, actor);
     const uniqueParts = Array.from(new Set(partNumbers));
     for (const partNumber of uniqueParts) {
-      if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > session.totalParts) {
+      if (
+        !Number.isInteger(partNumber) ||
+        partNumber < 1 ||
+        partNumber > session.totalParts
+      ) {
         throw new BadRequestException(
           `Invalid part number ${partNumber}. Expected an integer between 1 and ${session.totalParts}`,
         );
@@ -521,69 +807,186 @@ export class FilesUploadService {
     );
   }
 
+  private async replayCompletedSession(
+    session: UploadSessionRecord,
+    cleanFilename: string,
+  ): Promise<CompleteFileMultipartOutput> {
+    if (session.resultBlobId) {
+      const blob = await this.blobRepo.findById(session.resultBlobId);
+      if (blob && blob.status !== BlobStatus.DELETED) {
+        return this.buildMultipartOutput(blob, session, cleanFilename, false);
+      }
+    }
+    throw new BadRequestException(
+      `Upload session has already been ${session.status}`,
+    );
+  }
+
   async completeMultipart(
     input: CompleteFileMultipartInput,
   ): Promise<CompleteFileMultipartOutput> {
-    const session = await this.getValidActiveSession(input.sessionId, input.actor);
-    const cleanFilename = this.validateSafeFilename(session.filename);
     if (!Array.isArray(input.parts) || input.parts.length === 0) {
       throw new BadRequestException('Parts array cannot be empty');
     }
 
-    await this.driver.completeMultipartUpload(
-      session.s3Key,
-      session.s3UploadId,
-      input.parts.map((p) => ({ partNumber: p.partNumber, eTag: p.eTag })),
-    );
+    const session = await this.sessionRepo.findById(input.sessionId);
+    if (!session) {
+      throw new NotFoundException('Upload session not found or expired');
+    }
+    this.verifySessionAccess(session, input.actor);
+    const cleanFilename = this.validateSafeFilename(session.filename);
 
-    const registered = await this.finalizeStagingObject({
-      storageKey: session.s3Key,
-      spaceId: resolveTargetSpaceId(session.spaceId, session.userId),
-      sizeBytes: session.totalSize,
-      mimeType: session.mimeType,
-      validationFilename: session.filename,
-      contentHashHex: session.expectedHashHex ?? undefined,
-      checksumVerified: false,
-    });
+    if (session.status === UploadSessionStatus.COMPLETED) {
+      return this.replayCompletedSession(session, cleanFilename);
+    }
+    if (
+      session.status === UploadSessionStatus.ABORTED ||
+      session.status === UploadSessionStatus.EXPIRED
+    ) {
+      throw new BadRequestException(
+        `Upload session has already been ${session.status}`,
+      );
+    }
+    if (Date.now() > session.expiresAt.getTime()) {
+      throw new NotFoundException('Upload session not found or expired');
+    }
+    if (session.status === UploadSessionStatus.FINALIZING) {
+      this.throwFinalizingConflict(
+        'Upload session is currently finalizing. Please retry shortly.',
+      );
+    }
 
-    const completedSession = await this.sessionRepo.markStatus(
-      session.id,
-      UploadSessionStatus.COMPLETED,
-    );
+    const claimed = await this.sessionRepo.claimForFinalizing(session.id);
+    if (!claimed) {
+      const latest = await this.sessionRepo.findById(session.id);
+      if (latest?.status === UploadSessionStatus.COMPLETED) {
+        return this.replayCompletedSession(latest, cleanFilename);
+      }
+      if (latest?.status === UploadSessionStatus.FINALIZING) {
+        this.throwFinalizingConflict(
+          'Upload session is currently finalizing. Please retry shortly.',
+        );
+      }
+      throw new BadRequestException(
+        'Upload session cannot be completed in its current state',
+      );
+    }
 
-    return {
-      blob: registered.blob,
-      session: completedSession,
-      isDeduplicated: registered.isDeduplicated,
-      fileId: registered.blob.id,
-      blobId: registered.blob.id,
-      url: getFileContentPath(registered.blob.id),
-      filename: cleanFilename,
-      size: Number(registered.blob.sizeBytes),
-      mimeType: session.mimeType,
-    };
+    let completed = false;
+    try {
+      try {
+        await this.driver.completeMultipartUpload(
+          session.s3Key,
+          session.s3UploadId,
+          input.parts.map((p) => ({ partNumber: p.partNumber, eTag: p.eTag })),
+        );
+      } catch (assembleErr: unknown) {
+        const alreadyAssembled = await this.driver
+          .stat(session.s3Key)
+          .then((s) => Boolean(s && s.size > 0))
+          .catch(() => false);
+        if (!alreadyAssembled) {
+          throw assembleErr;
+        }
+        this.logger.warn(
+          `completeMultipartUpload threw for session ${session.id}, but staging object ${session.s3Key} already exists; continuing stat verification.`,
+        );
+      }
+
+      const stat = await this.driver.stat(session.s3Key);
+      if (!stat || stat.size <= 0) {
+        throw new NotFoundException(
+          'Completed multipart object is empty or not found in storage backend',
+        );
+      }
+
+      const actualSizeBytes = BigInt(stat.size);
+      const actualMime =
+        stat.mimeType && stat.mimeType !== 'application/octet-stream'
+          ? stat.mimeType
+          : session.mimeType;
+
+      const registered = await this.finalizeStagingObject({
+        storageKey: session.s3Key,
+        spaceId: resolveTargetSpaceId(session.spaceId, session.userId),
+        sizeBytes: actualSizeBytes,
+        mimeType: actualMime,
+        validationFilename: session.filename,
+        contentHashHex: session.expectedHashHex ?? undefined,
+        checksumVerified: false,
+      });
+
+      const completedSession = await this.sessionRepo.markCompletedWithBlob(
+        session.id,
+        registered.blob.id,
+      );
+      completed = true;
+
+      if (registered.needsAsyncPromotion) {
+        await this.enqueueCasPromotion({
+          blobId: registered.blob.id,
+          stagingKey: session.s3Key,
+          declaredHashHex: session.expectedHashHex ?? undefined,
+        });
+      }
+
+      return this.buildMultipartOutput(
+        registered.blob,
+        completedSession,
+        cleanFilename,
+        registered.isDeduplicated,
+      );
+    } catch (err) {
+      if (!completed) {
+        await this.sessionRepo
+          .releaseFinalizingToUploading(session.id)
+          .catch(() => {});
+      }
+      throw err;
+    }
   }
 
-  async abortMultipart(sessionId: string, actor?: FileActorContext): Promise<void> {
+  async abortMultipart(
+    sessionId: string,
+    actor?: FileActorContext,
+  ): Promise<void> {
     const session = await this.sessionRepo.findById(sessionId);
     if (!session) throw new NotFoundException('Upload session not found');
     this.verifySessionAccess(session, actor);
     if (session.status === UploadSessionStatus.COMPLETED) {
-      throw new BadRequestException('Cannot abort an already completed upload session');
+      throw new BadRequestException(
+        'Cannot abort an already completed upload session',
+      );
+    }
+    if (session.status === UploadSessionStatus.FINALIZING) {
+      this.throwFinalizingConflict(
+        'Upload session is currently finalizing and cannot be aborted',
+      );
     }
     if (session.status === UploadSessionStatus.ABORTED) return;
 
-    await this.driver.abortMultipartUpload(session.s3Key, session.s3UploadId).catch(() => {});
+    await this.driver
+      .abortMultipartUpload(session.s3Key, session.s3UploadId)
+      .catch(() => {});
     await this.sessionRepo.markStatus(session.id, UploadSessionStatus.ABORTED);
   }
 
   async cleanupExpiredSessions(limit = 50): Promise<number> {
-    const expiredSessions = await this.sessionRepo.findExpiredSessions(new Date(), limit);
+    const expiredSessions = await this.sessionRepo.findExpiredSessions(
+      new Date(),
+      limit,
+    );
     let abortedCount = 0;
     for (const session of expiredSessions) {
       try {
-        await this.driver.abortMultipartUpload(session.s3Key, session.s3UploadId);
-        await this.sessionRepo.markStatus(session.id, UploadSessionStatus.ABORTED);
+        await this.driver.abortMultipartUpload(
+          session.s3Key,
+          session.s3UploadId,
+        );
+        await this.sessionRepo.markStatus(
+          session.id,
+          UploadSessionStatus.ABORTED,
+        );
         abortedCount++;
       } catch (err: unknown) {
         this.logger.warn(
@@ -592,5 +995,61 @@ export class FilesUploadService {
       }
     }
     return abortedCount;
+  }
+
+  async recoverStaleFinalizingSessions(limit = 50): Promise<number> {
+    const staleBefore = new Date(
+      Date.now() - STALE_FINALIZING_LEASE_MINUTES * 60_000,
+    );
+    const staleSessions = await this.sessionRepo.findStaleFinalizingSessions(
+      staleBefore,
+      limit,
+    );
+    let recoveredCount = 0;
+    for (const session of staleSessions) {
+      try {
+        if (session.expiresAt.getTime() <= Date.now()) {
+          await this.driver
+            .abortMultipartUpload(session.s3Key, session.s3UploadId)
+            .catch(() => {});
+          await this.sessionRepo.markStatus(
+            session.id,
+            UploadSessionStatus.ABORTED,
+          );
+          recoveredCount++;
+        } else {
+          const released = await this.sessionRepo.releaseFinalizingToUploading(
+            session.id,
+          );
+          if (released) recoveredCount++;
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed recovering stale FINALIZING session ${session.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return recoveredCount;
+  }
+
+  async sweepUnpromotedStagingBlobs(limit = 100): Promise<number> {
+    if (!this.finalizeCasQueue) return 0;
+    const olderThan = new Date(
+      Date.now() - STAGING_SWEEP_MIN_AGE_MINUTES * 60_000,
+    );
+    const blobs = await this.blobRepo.findUnpromotedStagingBlobs(
+      olderThan,
+      limit,
+    );
+    for (const blob of blobs) {
+      await this.enqueueCasPromotion({
+        blobId: blob.id,
+        stagingKey: blob.s3Key,
+        declaredHashHex: blob.checksumVerified
+          ? blob.contentHashHex
+          : undefined,
+      });
+    }
+    return blobs.length;
   }
 }

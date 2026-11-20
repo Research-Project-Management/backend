@@ -18,7 +18,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { BypassEnvelope } from '@/core';
+import { BypassEnvelope, UserRateLimit, UserRateLimitGuard } from '@/core';
 import { CurrentUser, JwtAuthGuard, Public } from '@/modules/identity/auth';
 import { DEFAULT_PRESIGN_SIZE_BYTES } from '../files.constant';
 import {
@@ -53,6 +53,8 @@ export class FilesController {
   }
 
   @Post('upload')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-presign', keyType: 'user' })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Upload a platform binary asset directly via multipart/form-data',
@@ -89,6 +91,8 @@ export class FilesController {
   }
 
   @Post('public/upload')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-presign', keyType: 'user' })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Upload a public image asset (avatar, cover, icon)',
@@ -111,6 +115,8 @@ export class FilesController {
   }
 
   @Post('presign')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-presign', keyType: 'user' })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate presigned upload URL for FilesModule' })
   async presign(
@@ -151,6 +157,8 @@ export class FilesController {
   }
 
   @Post('presign/complete')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-complete', keyType: 'user' })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Complete and finalize a presigned upload' })
   async completePresigned(
@@ -185,6 +193,8 @@ export class FilesController {
   }
 
   @Post('multipart/initiate')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-presign', keyType: 'user' })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Initiate a resumable multipart upload session for FilesModule',
@@ -232,6 +242,8 @@ export class FilesController {
   }
 
   @Get('multipart/:sessionId/part-url')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-parts', keyType: 'user' })
   @ApiOperation({ summary: 'Generate presigned part URL via query parameter' })
   async getMultipartPartUrl(
     @CurrentUser('id') userId: string,
@@ -255,6 +267,8 @@ export class FilesController {
   }
 
   @Post('multipart/:sessionId/part-urls')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-parts', keyType: 'user' })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Batch generate presigned upload URLs for multiple parts',
@@ -274,6 +288,8 @@ export class FilesController {
   }
 
   @Post('multipart/complete')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-complete', keyType: 'user' })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Complete a multipart upload session and finalize CAS blob',
@@ -300,6 +316,8 @@ export class FilesController {
   }
 
   @Delete('multipart/:sessionId')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-complete', keyType: 'user' })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Abort an active multipart upload session' })
   async abortMultipart(
@@ -312,6 +330,8 @@ export class FilesController {
   }
 
   @Get('quota')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-download', keyType: 'user' })
   @ApiOperation({
     summary: 'Get storage quota usage metrics for personal or project space',
   })
@@ -319,11 +339,15 @@ export class FilesController {
     @CurrentUser('id') userId: string,
     @Query('spaceId') spaceId?: string,
   ) {
-    return this.filesFacade.getQuotaSummary(this.requireUserId(userId), spaceId);
+    return this.filesFacade.getQuotaSummary(
+      this.requireUserId(userId),
+      spaceId,
+    );
   }
 
   @Get('objects/*')
   @Public()
+  @UserRateLimit({ bucket: 'files-download', keyType: 'user-or-ip' })
   @BypassEnvelope()
   @ApiOperation({
     summary: 'Stream public platform assets or signed derivative thumbnails',
@@ -385,6 +409,8 @@ export class FilesController {
   }
 
   @Get(':blobId/download-url')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit({ bucket: 'files-download', keyType: 'user' })
   @ApiOperation({
     summary: 'Issue direct signed download URL (R2 Presigned GET) for a blob',
   })
@@ -402,6 +428,7 @@ export class FilesController {
 
   @Get([':blobId/content', ':blobId/download'])
   @Public()
+  @UserRateLimit({ bucket: 'files-download', keyType: 'user-or-ip' })
   @BypassEnvelope()
   @ApiOperation({
     summary: 'Stream or redirect authorized blob content with ETag and Range',

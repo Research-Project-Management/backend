@@ -14,6 +14,8 @@ import {
   FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
   FILES_JOB_RECLAIM_ORPHAN_BLOBS,
   FILES_JOB_RECONCILE_QUOTAS,
+  FILES_JOB_RECOVER_STALE_FINALIZING,
+  FILES_JOB_SWEEP_STAGING_BLOBS,
 } from '@/modules/files/files.constant';
 import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
 import { FilesFacade } from '@/modules/files/files.facade';
@@ -110,8 +112,9 @@ function createMockBlobRepo(): jest.Mocked<BlobRepository> {
 }
 
 function createMockQuotaRepo(
-  findImpl: (spaceId?: string | null) => Promise<StorageQuotaRecord | null> = async () =>
-    null,
+  findImpl: (
+    spaceId?: string | null,
+  ) => Promise<StorageQuotaRecord | null> = async () => null,
 ): jest.Mocked<QuotaRepository> {
   return {
     findBySpaceId: jest.fn(findImpl),
@@ -175,7 +178,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
       await processor.onApplicationBootstrap();
 
       expect(adapter.applyLifecycleRules).toHaveBeenCalledTimes(1);
-      expect(mockQueue.upsertJobScheduler).toHaveBeenCalledTimes(3);
+      expect(mockQueue.upsertJobScheduler).toHaveBeenCalledTimes(5);
       expect(mockQueue.upsertJobScheduler).toHaveBeenNthCalledWith(
         1,
         'files-repeat-multipart-cleanup',
@@ -200,6 +203,24 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         { pattern: '30 3 * * *' },
         {
           name: FILES_JOB_RECONCILE_QUOTAS,
+          opts: { removeOnComplete: 100, removeOnFail: 200 },
+        },
+      );
+      expect(mockQueue.upsertJobScheduler).toHaveBeenNthCalledWith(
+        4,
+        'files-repeat-stale-finalizing-recovery',
+        { pattern: '*/5 * * * *' },
+        {
+          name: FILES_JOB_RECOVER_STALE_FINALIZING,
+          opts: { removeOnComplete: 100, removeOnFail: 200 },
+        },
+      );
+      expect(mockQueue.upsertJobScheduler).toHaveBeenNthCalledWith(
+        5,
+        'files-repeat-sweep-staging-blobs',
+        { pattern: '*/10 * * * *' },
+        {
+          name: FILES_JOB_SWEEP_STAGING_BLOBS,
           opts: { removeOnComplete: 100, removeOnFail: 200 },
         },
       );
@@ -244,6 +265,8 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
       } as unknown as BlobService;
       const mockUploadService = {
         cleanupExpiredSessions: jest.fn().mockResolvedValue(3),
+        recoverStaleFinalizingSessions: jest.fn().mockResolvedValue(2),
+        sweepUnpromotedStagingBlobs: jest.fn().mockResolvedValue(5),
       } as unknown as FilesUploadService;
       const mockQuotaRepo = {
         reconcileSpaceQuotas: jest.fn().mockResolvedValue(2),
@@ -284,6 +307,26 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
       } as Job<unknown>);
       expect(mockQuotaRepo.reconcileSpaceQuotas).toHaveBeenCalledWith(200);
       expect(quotaResult).toBe(2);
+
+      const staleResult = await processor.process({
+        id: 'job-stale-1',
+        name: FILES_JOB_RECOVER_STALE_FINALIZING,
+        data: {},
+      } as Job<unknown>);
+      expect(
+        mockUploadService.recoverStaleFinalizingSessions,
+      ).toHaveBeenCalledWith(100);
+      expect(staleResult).toBe(2);
+
+      const sweepResult = await processor.process({
+        id: 'job-sweep-1',
+        name: FILES_JOB_SWEEP_STAGING_BLOBS,
+        data: {},
+      } as Job<unknown>);
+      expect(
+        mockUploadService.sweepUnpromotedStagingBlobs,
+      ).toHaveBeenCalledWith(100);
+      expect(sweepResult).toBe(5);
 
       const unknownResult = await processor.process({
         id: 'job-unknown',
@@ -406,7 +449,9 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
     it('skips streaming and returns null for PDFs exceeding 25 MB, while rendering smaller PDFs', async () => {
       const adapter = createMockAdapter();
       const blobRepo = createMockBlobRepo();
-      const hashSmall = ContentHash.fromBuffer(Buffer.from('small-pdf')).toHex();
+      const hashSmall = ContentHash.fromBuffer(
+        Buffer.from('small-pdf'),
+      ).toHex();
       const hashBig = ContentHash.fromBuffer(Buffer.from('big-pdf')).toHex();
 
       const smallBlob = makeBlobRecord({
@@ -615,6 +660,11 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         'archive-cold-storage',
         'expire-old-backups',
       ]);
+      const stagingRule = rules.find((r) => r.ID === 'cleanup-staging-uploads');
+      expect(stagingRule?.Expiration?.Days).toBe(3);
+      expect(
+        stagingRule?.AbortIncompleteMultipartUpload?.DaysAfterInitiation,
+      ).toBe(2);
 
       const allTransitions = rules.flatMap((r) => r.Transitions ?? []);
       expect(

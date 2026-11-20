@@ -32,10 +32,10 @@ export interface RateLimitResult {
 
 /**
  * Enterprise Sliding Window Counter Rate Limiter Guard.
- * 
+ *
  * Implements the Cloudflare Hybrid Sliding Window approximation algorithm:
  *   EstimatedCount = CurrentWindowCount + PrevWindowCount * (1 - ElapsedInCurrentWindow / WindowSize)
- * 
+ *
  * Guarantees:
  * 1. O(1) Memory Footprint: Only 2 integer keys in Redis (~72 bytes total per active actor).
  * 2. Complete Boundary Spike Elimination: Prevents 2x bursts at window rollover.
@@ -56,7 +56,7 @@ export class UserRateLimitGuard implements CanActivate {
    * ARGV[1]: Limit (number)
    * ARGV[2]: Window size in seconds (number)
    * ARGV[3]: Current timestamp in ms (number)
-   * 
+   *
    * Returns: [allowed (1 or 0), estimated_count, retry_after_seconds]
    */
   private static readonly SLIDING_WINDOW_LUA = `
@@ -121,9 +121,10 @@ export class UserRateLimitGuard implements CanActivate {
 
     // Defer global APP_GUARD evaluation when route/controller explicitly mounts UserRateLimitGuard
     // after JwtAuthGuard and rules require authenticated user identity.
-    const classGuards = Reflect.getMetadata('__guards__', context.getClass()) as
-      | unknown[]
-      | undefined;
+    const classGuards = Reflect.getMetadata(
+      '__guards__',
+      context.getClass(),
+    ) as unknown[] | undefined;
     const handlerGuards = Reflect.getMetadata(
       '__guards__',
       context.getHandler(),
@@ -323,7 +324,8 @@ export class UserRateLimitGuard implements CanActivate {
     const windowStartMs = currentWindowIndex * windowMs;
     const elapsedMs = nowMs - windowStartMs;
     const weight = Math.max(0, 1 - elapsedMs / windowMs);
-    const estimatedCount = entry.currentCount + Math.floor(entry.prevCount * weight);
+    const estimatedCount =
+      entry.currentCount + Math.floor(entry.prevCount * weight);
 
     if (estimatedCount >= limit) {
       const retryAfter = Math.max(1, Math.ceil((windowMs - elapsedMs) / 1000));
