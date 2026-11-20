@@ -9,7 +9,7 @@ import {
 import { createHash } from 'crypto';
 import { isUUID } from 'class-validator';
 import { AttachmentsService } from './attachments.service';
-import { FILES_PORT, IFilesPort } from '@/modules/files';
+import { FILES_PORT, getFileObjectPath, IFilesPort } from '@/modules/files';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 import {
   ExternalProviderException,
@@ -411,7 +411,7 @@ export class WebSnapshotService {
     const fileKey = `${userId}/library/snapshots/${itemId}_snapshot_${timestamp}.html`;
     const filename = `Snapshot_${sanitizedTitle}_${new Date().toISOString().slice(0, 10)}.html`;
 
-    if (!this.filesPort?.uploadFile && !this.filesPort?.uploadBuffer) {
+    if (!this.filesPort?.uploadFile && !this.filesPort?.putObject) {
       throw new AttachmentStorageException(
         'Failed to store web snapshot in storage: Storage provider is not configured',
       );
@@ -432,7 +432,6 @@ export class WebSnapshotService {
           filename,
           buffer,
           mimeType: 'text/html; charset=utf-8',
-          source: 'library_snapshot',
         });
         fileUrl = uploadResult.url;
         resolvedFileId = uploadResult.fileId;
@@ -441,19 +440,18 @@ export class WebSnapshotService {
         lastUploadError = err;
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Storage uploadFile failed, falling back to uploadBuffer: ${message}`,
+          `Storage uploadFile failed, falling back to putObject: ${message}`,
         );
       }
     }
 
-    if (!uploaded && this.filesPort?.uploadBuffer) {
+    if (!uploaded && this.filesPort?.putObject) {
       try {
-        const uploadResult = await this.filesPort.uploadBuffer(
-          fileKey,
-          buffer,
-          'text/html; charset=utf-8',
-        );
-        fileUrl = uploadResult.url;
+        await this.filesPort.putObject(fileKey, buffer, {
+          mimeType: 'text/html; charset=utf-8',
+          size: buffer.length,
+        });
+        fileUrl = getFileObjectPath(fileKey);
         uploaded = true;
       } catch (err: unknown) {
         lastUploadError = err;

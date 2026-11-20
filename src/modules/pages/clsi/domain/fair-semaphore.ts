@@ -4,33 +4,68 @@
  * 100% Pure TypeScript, zero framework dependencies.
  */
 
-export class SemaphoreQueueFullError extends Error {
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+
+export class SemaphoreQueueFullError extends PagesDomainError {
   constructor(public readonly maxQueue: number) {
-    super(`Compile queue is full (${maxQueue} waiting)`);
-    this.name = 'SemaphoreQueueFullError';
+    super(`Compile queue is full (${maxQueue} waiting)`, {
+      code: 'COMPILE_QUEUE_FULL',
+      statusCode: 503,
+    });
   }
 }
 
-export class SemaphoreWaitTimeoutError extends Error {
+export class SemaphoreWaitTimeoutError extends PagesDomainError {
   constructor(public readonly waitedMs: number) {
-    super(`Timed out after ${waitedMs}ms waiting for a compile slot`);
-    this.name = 'SemaphoreWaitTimeoutError';
+    super(`Timed out after ${waitedMs}ms waiting for a compile slot`, {
+      code: 'COMPILE_QUEUE_TIMEOUT',
+      statusCode: 504,
+    });
   }
 }
 
-export class SemaphoreAbortedError extends Error {
+export class SemaphoreAbortedError extends PagesDomainError {
   constructor() {
-    super('Wait for compile slot aborted');
-    this.name = 'SemaphoreAbortedError';
+    super('Wait for compile slot aborted', {
+      code: 'COMPILE_ABORTED',
+      statusCode: 499,
+    });
   }
 }
 
-export class CompileRateLimitExceededError extends Error {
+export class CompileRateLimitExceededError extends PagesDomainError {
   constructor(public readonly maxPerMinute: number) {
     super(
       `Compilation rate limit exceeded (${maxPerMinute} runs/min). Please wait a moment before recompiling.`,
+      {
+        code: 'COMPILE_RATE_LIMITED',
+        statusCode: 429,
+      },
     );
-    this.name = 'CompileRateLimitExceededError';
+  }
+}
+
+export class AutoCompileShedError extends PagesDomainError {
+  constructor(
+    public readonly waiting: number,
+    public readonly threshold: number,
+  ) {
+    super(
+      'Auto-compilation shed under high queue contention to prioritize manual builds',
+      {
+        code: 'AUTO_COMPILE_SHED',
+        statusCode: 429,
+      },
+    );
+  }
+}
+
+export class CompileSupersededError extends PagesDomainError {
+  constructor(message = 'Compilation superseded by a newer request') {
+    super(message, {
+      code: 'COMPILE_SUPERSEDED',
+      statusCode: 409,
+    });
   }
 }
 

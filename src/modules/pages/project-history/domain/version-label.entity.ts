@@ -4,6 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 
 export interface CreateVersionLabelProps {
   id?: string;
@@ -18,13 +19,12 @@ export interface CreateVersionLabelProps {
   updatedAt?: Date;
 }
 
-export class InvalidVersionLabelException extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'INVALID_VERSION_LABEL';
-
+export class InvalidVersionLabelException extends PagesDomainError {
   constructor(message: string = 'Version label cannot be empty.') {
-    super(message);
-    this.name = 'InvalidVersionLabelException';
+    super(message, {
+      code: 'INVALID_VERSION_LABEL',
+      statusCode: 400,
+    });
   }
 }
 

@@ -12,8 +12,6 @@
 --      - Validates token expiration guarantees (expires_at > created_at).
 --   3. Partial Index on Active Refresh Tokens:
 --      Accelerates JWT refresh validation by filtering out revoked/dead tokens.
---   4. Active Verification Tokens Index:
---      Accelerates email/password reset token lookup for non-expired tokens.
 -- =============================================================================
 
 -- 1. Soft-Delete Safe Partial Unique Index for User Email
@@ -59,11 +57,7 @@ CREATE INDEX IF NOT EXISTS "idx_refresh_tokens_active"
   ON "refresh_tokens" ("user_id", "expires_at")
   WHERE "is_revoked" = false;
 
--- 4. Active Verification Tokens Index
-CREATE INDEX IF NOT EXISTS "idx_verification_tokens_active"
-  ON "verification_tokens" ("user_id", "type", "expires_at");
-
--- 5. Expiration Sanity Constraints
+-- 4. Expiration Sanity Constraints
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_refresh_tokens_expires') THEN

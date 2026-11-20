@@ -4,57 +4,92 @@
  * User-facing messages are strictly sanitized to prevent host path and environment leakage.
  */
 
-export class SandboxUnavailableException extends Error {
-  public readonly statusCode = 503;
-  public readonly code = 'SANDBOX_UNAVAILABLE';
-  public readonly httpStatus = 503;
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 
+export class SandboxUnavailableException extends PagesDomainError {
   constructor(
     message: string = 'Compilation is temporarily unavailable.',
-    public readonly internalReason?: string,
+    internalReason?: string,
   ) {
-    super(message);
-    this.name = 'SandboxUnavailableException';
+    super(message, {
+      code: 'SANDBOX_UNAVAILABLE',
+      statusCode: 503,
+      internalReason,
+    });
   }
 }
 
-export class SandboxConfigurationException extends Error {
-  public readonly statusCode = 500;
-  public readonly code = 'SANDBOX_CONFIG_INVALID';
-
+export class SandboxConfigurationException extends PagesDomainError {
   constructor(
     message: string = 'CLSI Sandbox configuration is invalid.',
-    public readonly internalReason?: string,
+    internalReason?: string,
   ) {
-    super(message);
-    this.name = 'SandboxConfigurationException';
+    super(message, {
+      code: 'SANDBOX_CONFIG_INVALID',
+      statusCode: 500,
+      internalReason,
+    });
   }
 }
 
-export class SandboxPolicyViolationException extends Error {
-  public readonly statusCode = 500;
-  public readonly code = 'SANDBOX_POLICY_VIOLATION';
-  public readonly httpStatus = 500;
-
+export class SandboxPolicyViolationException extends PagesDomainError {
   constructor(
     message: string = 'Compilation could not be started.',
-    public readonly internalReason?: string,
+    internalReason?: string,
   ) {
-    super(message);
-    this.name = 'SandboxPolicyViolationException';
+    super(message, {
+      code: 'SANDBOX_POLICY_VIOLATION',
+      statusCode: 500,
+      internalReason,
+    });
   }
 }
 
-export class UnsafePathException extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'UNSAFE_PATH';
-  public readonly httpStatus = 400;
+export class UnsafePathException extends PagesDomainError {
+  constructor(message: string = 'Invalid file path.', internalReason?: string) {
+    super(message, {
+      code: 'UNSAFE_PATH',
+      statusCode: 400,
+      internalReason,
+    });
+  }
+}
+
+export class ClsiQueueUnavailableError extends PagesDomainError {
+  constructor(message: string = 'CLSI compile queue is not initialized') {
+    super(message, {
+      code: 'CLSI_QUEUE_UNAVAILABLE',
+      statusCode: 503,
+    });
+  }
+}
+
+export class ClsiWorkerExecutionError extends PagesDomainError {
+  public readonly isWorkerExecutionError = true;
 
   constructor(
-    message: string = 'Invalid file path.',
-    public readonly internalReason?: string,
+    message: string = 'Job execution failed in CLSI worker',
+    statusCode = 503,
+    code = 'CLSI_WORKER_FAILED',
   ) {
-    super(message);
-    this.name = 'UnsafePathException';
+    super(message, {
+      code,
+      statusCode,
+    });
+  }
+}
+
+export class RemoteClsiClientError extends PagesDomainError {
+  constructor(
+    message: string,
+    statusCode: number,
+    code = 'REMOTE_CLSI_CLIENT_ERROR',
+    details?: unknown,
+  ) {
+    super(message, {
+      code,
+      statusCode,
+      details,
+    });
   }
 }

@@ -8,8 +8,8 @@ export class KnowledgeRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findFileById(fileId: string) {
-    if (!this.prisma.storageFile?.findUnique) return null;
-    return this.prisma.storageFile
+    if (!this.prisma.fileNode?.findUnique) return null;
+    return this.prisma.fileNode
       .findUnique({
         where: { id: fileId },
       })
@@ -20,8 +20,8 @@ export class KnowledgeRepository {
     fileId: string,
     metadata: Record<string, unknown>,
   ): Promise<void> {
-    if (!this.prisma.storageFile?.update) return;
-    await this.prisma.storageFile.update({
+    if (!this.prisma.fileNode?.update) return;
+    await this.prisma.fileNode.update({
       where: { id: fileId },
       data: {
         metadata: metadata as Prisma.InputJsonValue,
@@ -30,8 +30,8 @@ export class KnowledgeRepository {
   }
 
   async listSpaceFiles(spaceId: string): Promise<StorageFileKnowledgeRow[]> {
-    if (!this.prisma.storageFile?.findMany) return [];
-    const rows = await this.prisma.storageFile
+    if (!this.prisma.fileNode?.findMany) return [];
+    const rows = await this.prisma.fileNode
       .findMany({
         where: {
           spaceId,
@@ -58,8 +58,8 @@ export class KnowledgeRepository {
     ids: string[],
     spaceId: string,
   ): Promise<StorageFileKnowledgeRow[]> {
-    if (!ids.length || !this.prisma.storageFile?.findMany) return [];
-    const rows = await this.prisma.storageFile
+    if (!ids.length || !this.prisma.fileNode?.findMany) return [];
+    const rows = await this.prisma.fileNode
       .findMany({
         where: {
           id: { in: ids },
@@ -85,8 +85,8 @@ export class KnowledgeRepository {
     docId: string,
     spaceId: string,
   ): Promise<StorageFileKnowledgeRow | null> {
-    if (!this.prisma.storageFile?.findFirst) return null;
-    return this.prisma.storageFile
+    if (!this.prisma.fileNode?.findFirst) return null;
+    return this.prisma.fileNode
       .findFirst({
         where: {
           spaceId,

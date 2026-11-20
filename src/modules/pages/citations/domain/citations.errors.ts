@@ -1,17 +1,19 @@
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+
 /**
  * citations/domain/exceptions/identifier-not-found.exception.ts
  * Thrown when an academic DOI or arXiv ID cannot be resolved by external catalogs.
  */
 
-export class IdentifierNotFoundException extends Error {
-  public readonly statusCode = 404;
-
+export class IdentifierNotFoundException extends PagesDomainError {
   constructor(public readonly identifier: string) {
     super(
       `Academic identifier '${identifier}' could not be resolved from CrossRef or arXiv`,
+      {
+        code: 'CITATION_IDENTIFIER_NOT_FOUND',
+        statusCode: 404,
+      },
     );
-    this.name = 'IdentifierNotFoundException';
-    Object.setPrototypeOf(this, IdentifierNotFoundException.prototype);
   }
 }
 
@@ -20,14 +22,13 @@ export class IdentifierNotFoundException extends Error {
  * Thrown when raw BibTeX text has syntax errors or malformed structure.
  */
 
-export class InvalidBibtexException extends Error {
-  public readonly statusCode = 400;
-
+export class InvalidBibtexException extends PagesDomainError {
   constructor(
     message = 'The provided BibTeX content contains syntax errors or unclosed delimiters',
   ) {
-    super(message);
-    this.name = 'InvalidBibtexException';
-    Object.setPrototypeOf(this, InvalidBibtexException.prototype);
+    super(message, {
+      code: 'INVALID_BIBTEX',
+      statusCode: 400,
+    });
   }
 }

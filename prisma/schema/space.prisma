@@ -22,7 +22,6 @@ model Space {
   // Pages Domain Relations
   pages             Page[]
   customWords       CustomDictionaryWord[]
-  pageNotifications PageNotification[]
   pageDocReviews    PageDocReview[]
 
   // Library Domain Relations
@@ -41,18 +40,20 @@ model Space {
   tombstones           Tombstone[]
   outboxEvents         OutboxEvent[]
 
-  // Storage & Labs Domain Relations
-  storageFiles   StorageFile[]
-  uploadSessions UploadSession[]
-  storageQuota   StorageQuota?
+  // Files & Labs Domain Relations
+  fileNodes    FileNode[]
+  fileUploads  FileUpload[]
+  spaceQuota   SpaceQuota?
+  fileBlobRefs FileBlobRef[]
 
   // AI & Intelligence Domain Relations
   aiChats AiChat[]
 
-  // Work-Item Drafts & Labels Relations
-  workItemDrafts WorkItemDraft[]
-  spaceLabels    SpaceLabel[]
-  activityEvents ActivityEvent[]
+  // Work-Item Drafts, Attachments & Labels Relations
+  workItemDrafts    WorkItemDraft[]
+  entityAttachments EntityAttachment[]
+  spaceLabels       SpaceLabel[]
+  activityEvents    ActivityEvent[]
 
   @@index([type], map: "idx_spaces_type")
   @@map("spaces")

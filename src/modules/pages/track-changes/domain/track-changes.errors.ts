@@ -1,15 +1,16 @@
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+
 /**
  * track-changes/core/domain/exceptions/change-not-found.exception.ts
  * Thrown when a targeted track change mutation ID does not exist in the project or document.
  */
 
-export class ChangeNotFoundException extends Error {
-  public readonly statusCode = 404;
-  public readonly code = 'TRACK_CHANGE_NOT_FOUND';
-
+export class ChangeNotFoundException extends PagesDomainError {
   constructor(public readonly changeId: string) {
-    super(`Track change '${changeId}' was not found.`);
-    this.name = 'ChangeNotFoundException';
+    super(`Track change '${changeId}' was not found.`, {
+      code: 'TRACK_CHANGE_NOT_FOUND',
+      statusCode: 404,
+    });
   }
 }
 
@@ -18,15 +19,15 @@ export class ChangeNotFoundException extends Error {
  * Thrown when a track change's target text no longer matches its recorded line/column coordinates.
  */
 
-export class StaleTrackChangeAnchorException extends Error {
-  public readonly statusCode = 409;
-  public readonly code = 'STALE_TRACK_CHANGE_ANCHOR';
-
+export class StaleTrackChangeAnchorException extends PagesDomainError {
   constructor(public readonly changeId: string) {
     super(
       `Track change '${changeId}' can no longer be applied cleanly because the surrounding text was modified.`,
+      {
+        code: 'STALE_TRACK_CHANGE_ANCHOR',
+        statusCode: 409,
+      },
     );
-    this.name = 'StaleTrackChangeAnchorException';
   }
 }
 
@@ -35,15 +36,15 @@ export class StaleTrackChangeAnchorException extends Error {
  * Thrown when trying to reply to or modify a comment thread that has already been resolved.
  */
 
-export class ResolvedThreadException extends Error {
-  public readonly statusCode = 409;
-  public readonly code = 'COMMENT_THREAD_RESOLVED';
-
+export class ResolvedThreadException extends PagesDomainError {
   constructor(public readonly threadId: string) {
     super(
       `Cannot reply or mutate comment thread '${threadId}' because it has already been resolved.`,
+      {
+        code: 'COMMENT_THREAD_RESOLVED',
+        statusCode: 409,
+      },
     );
-    this.name = 'ResolvedThreadException';
   }
 }
 
@@ -52,12 +53,20 @@ export class ResolvedThreadException extends Error {
  * Thrown when a targeted comment thread ID does not exist in the project or document.
  */
 
-export class ThreadNotFoundException extends Error {
-  public readonly statusCode = 404;
-  public readonly code = 'COMMENT_THREAD_NOT_FOUND';
-
+export class ThreadNotFoundException extends PagesDomainError {
   constructor(public readonly threadId: string) {
-    super(`Comment thread '${threadId}' was not found.`);
-    this.name = 'ThreadNotFoundException';
+    super(`Comment thread '${threadId}' was not found.`, {
+      code: 'COMMENT_THREAD_NOT_FOUND',
+      statusCode: 404,
+    });
+  }
+}
+
+export class TrackChangePatchConflictException extends PagesDomainError {
+  constructor(public readonly docId: string) {
+    super(`Failed to patch document ${docId} after retries.`, {
+      code: 'TRACK_CHANGE_PATCH_CONFLICT',
+      statusCode: 409,
+    });
   }
 }

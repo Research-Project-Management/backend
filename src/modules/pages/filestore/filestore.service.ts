@@ -9,7 +9,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { isUuid } from '@/core';
-import { FILES_PORT, type IFilesPort } from '@/modules/files';
+import { BlobStatus, FILES_PORT, type IFilesPort } from '@/modules/files';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { FilestoreRepository } from './filestore.repository';
 import {
@@ -200,8 +200,8 @@ export class FilestoreService {
         const casHit = await this.filesPort
           .findBlobByHash(sha256Hex)
           .catch(() => null);
-        if (casHit?.isReady()) {
-          storageKey = StorageKey.fromRawKey(casHit.s3Key.value());
+        if (casHit?.status === BlobStatus.READY) {
+          storageKey = StorageKey.fromRawKey(casHit.s3Key);
           blobExists = true;
         }
       }
@@ -247,7 +247,7 @@ export class FilestoreService {
             acquiredNewBlobId = casResult.blob.id;
           }
           if (casResult?.blob?.s3Key) {
-            storageKey = StorageKey.fromRawKey(casResult.blob.s3Key.value());
+            storageKey = StorageKey.fromRawKey(casResult.blob.s3Key);
           }
         } catch (err) {
           this.logger.warn(

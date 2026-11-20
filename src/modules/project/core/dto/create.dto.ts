@@ -87,13 +87,6 @@ export class CreateProjectDto {
   labelIds?: string[];
 
   @ApiPropertyOptional({
-    description: 'Optional ProjectTemplate ID used to spawn this project',
-  })
-  @IsUUID('4')
-  @IsOptional()
-  templateId?: string;
-
-  @ApiPropertyOptional({
     description: 'Project avatar image URL or emoji icon',
     example: '🧬',
   })

@@ -26,6 +26,7 @@ import { CitationsService } from './citations/citations.service';
 import { ExportImportService } from './export-import/export-import.service';
 import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
 import { PageDomainEventBus } from './core/events/event-bus.service';
+import { PagesServiceUnavailableError } from './core/domain/pages-domain.error';
 import {
   EditorBootstrapService,
   type BootstrapEditorParams,
@@ -65,7 +66,9 @@ export class PagesFacade {
     params: BootstrapEditorParams,
   ): Promise<EditorBootstrapResponseDto> {
     if (!this.editorBootstrap) {
-      throw new Error('EditorBootstrapService is not available');
+      throw new PagesServiceUnavailableError(
+        'EditorBootstrapService is not available',
+      );
     }
     return this.editorBootstrap.bootstrapEditor(params);
   }

@@ -48,7 +48,7 @@ async function main() {
     await prisma.libraryCollection.deleteMany();
     await prisma.projectLabel.deleteMany();
     await prisma.spaceLabel.deleteMany();
-    await prisma.storageFile.deleteMany();
+    await prisma.fileNode.deleteMany();
     await prisma.projectMember.deleteMany();
     await prisma.projectState.deleteMany();
     await prisma.project.deleteMany();

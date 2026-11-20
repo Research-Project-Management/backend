@@ -7,6 +7,7 @@
 // circular barrel evaluation when RealtimeModule -> LiveCollaborationProvider extends LiveCollaborationPort.
 export * from './config/pages.config';
 export * from './domain/workspace-file.interface';
+export * from './domain/pages-domain.error';
 export * from './domain/ssrf-guard';
 export * from './domain/latex-escape';
 export * from './domain/text-extensions';

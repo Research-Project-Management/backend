@@ -12,7 +12,7 @@
 --      `page_track_changes`, and `page_comment_threads`.
 --   4. Migrates legacy `page_nodes.is_root_doc` (if present) into `pages.root_doc_id`
 --      and normalizes `page_nodes` path/name/depth invariants & deduplication.
---   5. Links `page_files.blob_id` to `storage_blobs.id` where matching CAS blobs exist.
+--   5. Links `page_files.blob_id` to `file_blobs.id` where matching CAS blobs exist.
 -- =============================================================================
 
 -- 1. Rename legacy columns safely if running prior to `prisma db push`
@@ -269,15 +269,13 @@ DELETE FROM "page_nodes" WHERE trim(both '/' from COALESCE("path", '')) = '';
 UPDATE "page_nodes" n
 SET
   "path" = '/' || trim(both '/' from regexp_replace(replace(n."path", chr(92), '/'), '/+', '/', 'g')),
-  "name" = CASE
-    WHEN n."name" IN ('', '.', '..') OR position('/' in n."name") > 0 OR position(chr(92) in n."name") > 0
-      THEN regexp_replace(trim(both '/' from regexp_replace(replace(n."path", chr(92), '/'), '/+', '/', 'g')), '^.*/', '')
-    ELSE n."name"
-  END
+  "name" = regexp_replace(trim(both '/' from regexp_replace(replace(n."path", chr(92), '/'), '/+', '/', 'g')), '^.*/', '')
 WHERE n."path" !~ '^/[^/]+(/[^/]+)*$'
    OR n."name" IN ('', '.', '..')
    OR position('/' in n."name") > 0
-   OR position(chr(92) in n."name") > 0;
+   OR position(chr(92) in n."name") > 0
+   OR right(n."path", char_length(n."name") + 1) <> '/' || n."name"
+   OR (n."parent_id" IS NULL AND n."path" <> '/' || n."name");
 
 UPDATE "page_nodes" n
 SET "depth" = GREATEST(1, LEAST(32, cardinality(string_to_array(trim(both '/' from n."path"), '/'))))
@@ -294,7 +292,7 @@ WITH ranked_paths AS (
 DELETE FROM "page_nodes"
 WHERE "id" IN (SELECT "id" FROM ranked_paths WHERE rn > 1);
 
--- 7. Backfill page_files.blob_id from storage_blobs CAS ledger (when column exists)
+-- 7. Backfill page_files.blob_id from file_blobs CAS ledger (when column exists)
 DO $$
 BEGIN
   IF EXISTS (
@@ -303,10 +301,10 @@ BEGIN
   ) THEN
     UPDATE "page_files" f
     SET "blob_id" = sb."id"
-    FROM "storage_blobs" sb
+    FROM "file_blobs" sb
     WHERE f."blob_id" IS NULL
       AND (
-        sb."s3_key" = f."storage_key"
+        sb."storage_key" = f."storage_key"
         OR (
           f."hash" ~ '^[0-9a-fA-F]{64}$'
           AND sb."content_hash" = decode(lower(f."hash"), 'hex')

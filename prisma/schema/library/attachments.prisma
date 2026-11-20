@@ -150,8 +150,6 @@ model FullTextIndex {
 model AttachmentStructure {
   attachmentId     String     @id @map("attachment_id") @db.Uuid
   attachment       Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade, map: "fk_attachment_structures_attachment_id")
-  isScanned        Boolean    @default(false) @map("is_scanned")
-  ocrStatus        String?    @map("ocr_status") @db.VarChar(32)
   qualityScore     Float?     @map("quality_score") @db.Real
   engineUsed       String?    @map("engine_used") @db.VarChar(64)
   pageCount        Int        @default(0) @map("page_count")

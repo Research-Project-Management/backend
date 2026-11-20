@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { shouldRunWorkerConsumers } from '@/core';
 import { VerifiedEmailGuard } from '@/modules/identity/auth';
+import { ExperimentsModule } from '@/modules/experiments';
 import { LibraryModule } from '@/modules/library';
 import { AI_KNOWLEDGE_QUEUE } from '../ai.constant';
 import { AccessModule } from '../access/access.module';
@@ -22,6 +23,7 @@ const workerProviders = shouldRunWorkerConsumers()
   imports: [
     EngineModule,
     AccessModule,
+    ExperimentsModule,
     LibraryModule,
     BullModule.registerQueue({
       name: AI_KNOWLEDGE_QUEUE,

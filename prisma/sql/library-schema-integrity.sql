@@ -109,12 +109,14 @@ CREATE INDEX IF NOT EXISTS "library_items_retracted_active_partial_idx"
   ON "library_items" ("space_id")
   WHERE "deleted_at" IS NULL AND "is_retracted" = true;
 
--- 2. Functional GIN index on full_text_indexes for PDF page FTS
-CREATE INDEX IF NOT EXISTS "full_text_indexes_tsv_gin_idx"
-  ON "full_text_indexes"
-  USING GIN (to_tsvector('english', COALESCE("text_content", '')));
+-- 2. Drop duplicate functional GIN index on full_text_indexes
+--    (managed via search_vector column + trg_full_text_indexes_search_vector + Prisma GIN index)
+DROP INDEX IF EXISTS "full_text_indexes_tsv_gin_idx";
 
 -- 3. Space-scoped Unique Indexes (where soft-delete or case-insensitivity applies)
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_space_labels_space_type_parent_name"
+  ON "space_labels" ("space_id", "type", COALESCE("parent_id", '00000000-0000-0000-0000-000000000000'::uuid), LOWER("name"));
+
 CREATE UNIQUE INDEX IF NOT EXISTS "library_tags_space_lower_name_uq"
   ON "library_tags" ("space_id", LOWER("name"));
 

@@ -20,6 +20,8 @@ import {
   SemaphoreWaitTimeoutError,
   SemaphoreAbortedError,
   CompileRateLimitExceededError,
+  AutoCompileShedError,
+  CompileSupersededError,
 } from '../domain/fair-semaphore';
 
 export interface InFlightCompileSession {
@@ -37,6 +39,9 @@ export interface CompileQueueConfig {
   maxQueueLength?: number;
   maxQueueWaitMs?: number;
   supersedeGraceMs?: number;
+  autoShedThreshold?: number;
+  logChunkFlushIntervalMs?: number;
+  maxLogChunkBytes?: number;
 }
 
 @Injectable()
@@ -49,20 +54,29 @@ export class CompileQueueService implements OnModuleDestroy {
   private readonly maxPerMinute: number;
   private readonly minIntervalMs: number;
   private readonly supersedeGraceMs: number;
+  private readonly autoShedThreshold: number;
+  private readonly logChunkFlushIntervalMs: number;
+  private readonly maxLogChunkBytes: number;
 
   constructor(@Optional() config?: CompileQueueConfig) {
     this.maxPerMinute = config?.maxCompilesPerMinute ?? 20;
     this.minIntervalMs = config?.minIntervalBetweenCompilesMs ?? 400;
     this.supersedeGraceMs = config?.supersedeGraceMs ?? 3000;
+    this.logChunkFlushIntervalMs = config?.logChunkFlushIntervalMs ?? 300;
+    this.maxLogChunkBytes = config?.maxLogChunkBytes ?? 4096;
 
     const cpus = typeof os.cpus === 'function' ? os.cpus().length : 2;
     const capacity = Math.max(
       1,
       Math.floor(config?.maxConcurrentCompiles ?? Math.max(2, cpus - 1)),
     );
+    const maxQueueLength = config?.maxQueueLength ?? 64;
+    this.autoShedThreshold =
+      config?.autoShedThreshold ??
+      Math.min(40, Math.floor(maxQueueLength * 0.75));
     this.slots = new FairSemaphore(
       capacity,
-      config?.maxQueueLength ?? 64,
+      maxQueueLength,
       config?.maxQueueWaitMs ?? 90_000,
     );
   }
@@ -92,11 +106,15 @@ export class CompileQueueService implements OnModuleDestroy {
     ) => Promise<T>,
     options?: { priority?: 'manual' | 'auto' },
   ): Promise<T> {
-    // Load shedding: when queue is over 75% full, drop auto-compiles gracefully to preserve slots for manual compiles
-    if (options?.priority === 'auto' && this.slots.stats().waiting > 40) {
-      throw new HttpException(
-        'Auto-compilation shed under high queue contention to prioritize manual builds',
-        HttpStatus.TOO_MANY_REQUESTS,
+    // Load shedding: shed auto-compiles under high queue contention to preserve slots for manual builds
+    const waitingCount = this.slots.stats().waiting;
+    if (
+      options?.priority === 'auto' &&
+      waitingCount >= this.autoShedThreshold
+    ) {
+      throw this.toHttpException(
+        new AutoCompileShedError(waitingCount, this.autoShedThreshold),
+        projectId,
       );
     }
     this.checkRateLimit(projectId);
@@ -115,6 +133,32 @@ export class CompileQueueService implements OnModuleDestroy {
     this.inFlightCompiles.set(projectId, session);
 
     let release: (() => void) | undefined;
+    let pendingLogBuffer = '';
+    let flushTimer: NodeJS.Timeout | undefined;
+    const clearFlushTimer = () => {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = undefined;
+      }
+      pendingLogBuffer = '';
+    };
+    const flushLogChunks = () => {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = undefined;
+      }
+      if (!pendingLogBuffer || abortController.signal.aborted) {
+        pendingLogBuffer = '';
+        return;
+      }
+      const payload = pendingLogBuffer;
+      pendingLogBuffer = '';
+      realtimeService?.broadcastCompileProgress(projectId, {
+        status: 'compiling',
+        logs: [payload],
+      });
+    };
+
     try {
       if (existing) {
         this.logger.log(
@@ -151,11 +195,16 @@ export class CompileQueueService implements OnModuleDestroy {
       }
 
       const onLogChunk = (chunk: string) => {
-        if (abortController.signal.aborted) return;
-        realtimeService?.broadcastCompileProgress(projectId, {
-          status: 'compiling',
-          logs: [chunk],
-        });
+        if (abortController.signal.aborted || !chunk) return;
+        const combined = pendingLogBuffer + chunk;
+        pendingLogBuffer =
+          combined.length > this.maxLogChunkBytes
+            ? combined.slice(combined.length - this.maxLogChunkBytes)
+            : combined;
+        if (!flushTimer) {
+          flushTimer = setTimeout(flushLogChunks, this.logChunkFlushIntervalMs);
+          flushTimer.unref?.();
+        }
       };
 
       realtimeService?.broadcastCompileProgress(projectId, {
@@ -165,6 +214,7 @@ export class CompileQueueService implements OnModuleDestroy {
 
       return await executeFn(abortController.signal, onLogChunk);
     } finally {
+      clearFlushTimer();
       release?.();
       if (this.inFlightCompiles.get(projectId) === session) {
         this.inFlightCompiles.delete(projectId);
@@ -210,24 +260,53 @@ export class CompileQueueService implements OnModuleDestroy {
         `[Backpressure] Compile queue full (${err.maxQueue}) – rejecting project "${projectId}"`,
       );
       return new HttpException(
-        'Compilation queue is currently at capacity. Please try again in a moment.',
+        {
+          code: err.code,
+          message:
+            'Compilation queue is currently at capacity. Please try again in a moment.',
+        },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
     if (err instanceof SemaphoreWaitTimeoutError) {
       return new HttpException(
-        'Compilation request timed out waiting in queue. Please try again.',
-        HttpStatus.SERVICE_UNAVAILABLE,
+        {
+          code: err.code,
+          message:
+            'Compilation request timed out waiting in queue. Please try again.',
+        },
+        HttpStatus.GATEWAY_TIMEOUT,
       );
     }
-    if (err instanceof SemaphoreAbortedError) {
+    if (
+      err instanceof SemaphoreAbortedError ||
+      err instanceof CompileSupersededError
+    ) {
       return new HttpException(
-        'Compilation superseded by a newer request',
+        {
+          code: 'COMPILE_SUPERSEDED',
+          message: 'Compilation superseded by a newer request',
+        },
         HttpStatus.CONFLICT,
       );
     }
     if (err instanceof CompileRateLimitExceededError) {
-      return new HttpException(err.message, HttpStatus.TOO_MANY_REQUESTS);
+      return new HttpException(
+        {
+          code: err.code,
+          message: err.message,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    if (err instanceof AutoCompileShedError) {
+      return new HttpException(
+        {
+          code: err.code,
+          message: err.message,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
     return err instanceof Error ? err : new Error(String(err));
   }

@@ -107,17 +107,18 @@ export class AttachmentService {
     const contentType =
       dto.contentType || dto.mimeType || 'application/octet-stream';
 
-    if (this.filesPort?.getPresignedUploadUrl) {
-      const presigned = await this.filesPort.getPresignedUploadUrl({
+    if (this.filesPort?.presignUpload) {
+      const presigned = await this.filesPort.presignUpload({
         userId,
         filename: cleanName,
         mimeType: contentType,
         sizeBytes: dto.size || 0,
       });
-      const fileUrl = presigned.url || getFileContentPath(presigned.fileUuid);
+      const resolvedFileId = presigned.fileUuid || presigned.blob?.id || '';
+      const fileUrl = presigned.url || getFileContentPath(resolvedFileId);
       return {
-        signedUrl: presigned.uploadUrl,
-        uploadUrl: presigned.uploadUrl,
+        signedUrl: presigned.uploadUrl || '',
+        uploadUrl: presigned.uploadUrl || '',
         storageKey: presigned.storageKey,
         fileUrl,
         publicUrl: fileUrl,
@@ -190,7 +191,6 @@ export class AttachmentService {
       buffer,
       mimeType,
       spaceId: resolvedProjectId ?? authorId,
-      source: 'work-item',
     });
     const url = uploadRes.url;
     const finalKey = uploadRes.path;

@@ -266,7 +266,6 @@ export class CoreService {
       startDate: dto.startDate ? new Date(dto.startDate) : null,
       targetDate: dto.targetDate ? new Date(dto.targetDate) : null,
       labelIds: dto.labelIds,
-      templateId: dto.templateId || null,
       modules: sanitizeModules(dto.modules),
     });
 

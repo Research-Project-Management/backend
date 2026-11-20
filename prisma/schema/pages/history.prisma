@@ -12,7 +12,7 @@ model PageSnapshot {
   summary     String?  @db.VarChar(500)
   createdById String?  @map("created_by_id") @db.Uuid
   isAutomatic Boolean  @default(false) @map("is_automatic")
-  files       Json     @default("{}")
+  files       Json     @default("{}") @db.JsonB
   sizeBytes   Int      @default(0) @map("size_bytes")
   inStorage   Boolean  @default(false) @map("in_storage")
   storageKey  String?  @map("storage_key") @db.VarChar(512)

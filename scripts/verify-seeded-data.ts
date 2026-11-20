@@ -35,7 +35,7 @@ async function verify() {
       where: { file: { authorId: user.id } },
       include: { user: { select: { email: true } }, file: { select: { filename: true } } },
     });
-    const quota = await prisma.storageQuota.findFirst({
+    const quota = await prisma.spaceQuota.findFirst({
       where: { userId: user.id },
     });
 

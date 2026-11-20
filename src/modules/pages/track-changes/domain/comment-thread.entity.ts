@@ -4,6 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 import { TextRangeVo } from './text-range';
 import { CommentReply } from './comment-reply.entity';
 
@@ -24,13 +25,12 @@ export interface CreateCommentThreadProps {
   updatedAt?: Date;
 }
 
-export class CommentThreadDomainException extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'INVALID_COMMENT_THREAD';
-
+export class CommentThreadDomainException extends PagesDomainError {
   constructor(message: string) {
-    super(message);
-    this.name = 'CommentThreadDomainException';
+    super(message, {
+      code: 'INVALID_COMMENT_THREAD',
+      statusCode: 400,
+    });
   }
 }
 

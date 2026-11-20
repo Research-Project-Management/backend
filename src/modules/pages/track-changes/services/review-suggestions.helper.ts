@@ -1,7 +1,6 @@
 /**
  * modules/pages/track-changes/services/review-suggestions.helper.ts
- * Domain payload formatters, suggestion creation notifications, and batch resolution executor
- * supporting ReviewSuggestionsService.
+ * Domain payload formatters and batch resolution executor supporting ReviewSuggestionsService.
  */
 
 import { ConflictException } from '@nestjs/common';
@@ -21,7 +20,6 @@ import {
   StaleTrackChangeAnchorException,
 } from '../domain';
 import { ReviewScopeRepository } from '../repositories/review-scope.repository';
-import { ReviewNotificationDispatcher } from './review-notification.dispatcher';
 import {
   broadcastReviewProjectEvent,
   type ResolvedUserMap,
@@ -59,61 +57,6 @@ export function formatDomainSuggestionItem(
     resolvedBy: s.resolvedById ? { id: s.resolvedById } : null,
     resolvedById: s.resolvedById,
   };
-}
-
-export async function dispatchSuggestionCreatedNotifications(params: {
-  dispatcher: ReviewNotificationDispatcher;
-  resolvedProj: string;
-  resolvedPageId?: string | null;
-  targetDocId: string;
-  userId: string;
-  authorName: string;
-  changeId: string;
-  changeType: 'delete' | 'insert';
-  text: string;
-  line: number;
-}): Promise<void> {
-  await params.dispatcher.dispatchReviewNotificationSafe(
-    'createSuggestion',
-    async (notifications) => {
-      const ctx = await params.dispatcher.resolveSpaceNotificationContext(
-        params.resolvedProj,
-        params.resolvedPageId,
-        params.targetDocId,
-      );
-      if (ctx.fallbackOwnerId && ctx.fallbackOwnerId !== params.userId) {
-        await notifications.notifyReviewSuggestion({
-          recipientUserId: ctx.fallbackOwnerId,
-          actorId: params.userId,
-          actorName: params.authorName,
-          spaceId: ctx.spaceId,
-          projectId: ctx.projectId,
-          projectName: ctx.projectName,
-          pageId: ctx.pageId,
-          docId: params.targetDocId,
-          changeId: params.changeId,
-          changeType: params.changeType,
-          snippet: params.text,
-          line: params.line,
-          isPersonalSpace: ctx.isPersonalSpace,
-        });
-      }
-      if (params.text && params.text.includes('@')) {
-        await notifications.parseAndNotifyMentions({
-          text: params.text,
-          actorId: params.userId,
-          actorName: params.authorName,
-          spaceId: ctx.spaceId,
-          projectId: ctx.projectId,
-          projectName: ctx.projectName,
-          pageId: ctx.pageId,
-          docId: params.targetDocId,
-          isPersonalSpace: ctx.isPersonalSpace,
-          collaboratorMap: ctx.collaboratorMap,
-        });
-      }
-    },
-  );
 }
 
 export async function executeBatchResolveSuggestions(params: {

@@ -118,7 +118,7 @@ async function run() {
   await prisma.file.deleteMany({
     where: { authorId: userThanh.id },
   });
-  await prisma.storageQuota.deleteMany({
+  await prisma.spaceQuota.deleteMany({
     where: { userId: userThanh.id },
   });
 
@@ -157,7 +157,7 @@ async function run() {
   // 3.1 Storage Quota
   const totalUsedBytes = BigInt(1845600000); // ~1.84 GB used
   const maxQuotaBytes = BigInt(21474836480); // 20 GB quota
-  await prisma.storageQuota.create({
+  await prisma.spaceQuota.create({
     data: {
       userId: userThanh.id,
       usedBytes: totalUsedBytes,
@@ -165,16 +165,16 @@ async function run() {
     },
   });
 
-  // Helper to create a dummy StorageBlob
+  // Helper to create a dummy FileBlob
   async function createBlob(name: string, size: bigint) {
     const hash = crypto.createHash('sha256').update(`${name}-${Date.now()}-${Math.random()}`).digest();
-    return prisma.storageBlob.create({
+    return prisma.fileBlob.create({
       data: {
         contentHash: hash,
         hashAlgorithm: 'SHA256',
         sizeBytes: size,
-        s3Key: `blobs/${hash.toString('hex')}`,
-        s3Bucket: 'flux',
+        storageKey: `blobs/${hash.toString('hex')}`,
+        bucket: 'flux',
         storageClass: 'STANDARD',
         refCount: 1,
         status: BlobStatus.READY,

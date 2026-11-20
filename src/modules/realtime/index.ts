@@ -7,14 +7,7 @@
 export { RealtimeModule } from './realtime.module';
 export { RealtimeFacade } from './realtime.facade';
 export { RealtimeCoreModule, CoreModule } from './core/core.module';
-export {
-  RealtimePagesModule,
-  PagesModule,
-} from './pages/pages.module';
-export {
-  RealtimeNotificationsModule,
-  NotificationsModule,
-} from './notifications/notifications.module';
+export { RealtimePagesModule, PagesModule } from './pages/pages.module';
 export { YjsUpdateValidator } from './pages/yjs-update-validator';
 export { WsAuthService, type WsUserSession } from './core/ws-auth.guard';
 export { createWsConnectionMiddleware } from './core/ws-connection.middleware';

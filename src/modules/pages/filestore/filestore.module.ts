@@ -27,13 +27,19 @@ import { IBinaryStoragePort } from './filestore.types';
     PlatformBinaryStorageAdapter,
     {
       provide: IBinaryStoragePort,
-      useFactory: (filesPort?: IFilesPort) => {
-        if (filesPort) {
-          return new PlatformBinaryStorageAdapter(filesPort);
+      useFactory: (
+        filesPort?: IFilesPort,
+        platformAdapter?: PlatformBinaryStorageAdapter,
+      ) => {
+        if (filesPort && platformAdapter) {
+          return platformAdapter;
         }
         return new LocalDiskBinaryStorageAdapter();
       },
-      inject: [{ token: FILES_PORT, optional: true }],
+      inject: [
+        { token: FILES_PORT, optional: true },
+        { token: PlatformBinaryStorageAdapter, optional: true },
+      ],
     },
     FilestoreRepository,
     FilestoreService,

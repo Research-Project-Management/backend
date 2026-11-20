@@ -12,7 +12,6 @@ export * from './controllers/review-suggestions.controller';
 export * from './controllers/review-status.controller';
 export * from './services/review-comments.service';
 export * from './services/review-suggestions.service';
-export * from './services/review-notification.dispatcher';
 export * from './repositories/review-scope.repository';
 export * from './dto/review-status.dto';
 export * from './adapters/track-changes.adapters';

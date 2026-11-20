@@ -317,7 +317,7 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       const registerUploadedObject = jest.fn().mockResolvedValue({
         blob: {
           id: BLOB_ID,
-          s3Key: { value: () => 'blobs/cas/diagram' },
+          s3Key: 'blobs/cas/diagram',
         },
       });
       const releaseBlob = jest.fn().mockResolvedValue(undefined);

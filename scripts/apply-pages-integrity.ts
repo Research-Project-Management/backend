@@ -4,10 +4,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 async function main() {
-  const databaseUrl =
-    process.env.DIRECT_URL ||
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:Thanh26102006@127.0.0.1:5433/flux-db?schema=public';
+  const databaseUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('DIRECT_URL or DATABASE_URL is required in environment');
+  }
 
   const args = new Set(process.argv.slice(2));
   const backfillOnly = args.has('--backfill-only');

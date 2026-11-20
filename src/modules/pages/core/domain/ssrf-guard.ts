@@ -8,11 +8,14 @@
 
 import { lookup } from 'dns/promises';
 import { isIP } from 'net';
+import { PagesDomainError } from './pages-domain.error';
 
-export class SsrfSecurityException extends Error {
+export class SsrfSecurityException extends PagesDomainError {
   constructor(message: string) {
-    super(`SSRF Protection: ${message}`);
-    this.name = 'SsrfSecurityException';
+    super(`SSRF Protection: ${message}`, {
+      code: 'SSRF_SECURITY_VIOLATION',
+      statusCode: 403,
+    });
   }
 }
 

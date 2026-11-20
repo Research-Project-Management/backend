@@ -5,9 +5,8 @@
  * - RealtimeNotifierAdapter (Port: IRealtimeNotifierPort)
  */
 
-import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '@/core';
 import {
   LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
@@ -15,7 +14,6 @@ import {
   PageDomainEventBus,
 } from '@/modules/pages/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { NotificationsService } from '@/modules/notifications/notifications.service';
 import {
   IDocstorePatcherPort,
   IRealtimeNotifierPort,
@@ -25,6 +23,7 @@ import {
   CommentReply,
   LinePatcher,
   LinePatchComputation,
+  TrackChangePatchConflictException,
 } from '../domain';
 
 @Injectable()
@@ -105,7 +104,7 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
     }
 
     if (!updated) {
-      throw new Error(`Failed to patch document ${docId} after retries.`);
+      throw new TrackChangePatchConflictException(docId);
     }
 
     if (this.domainEventBus) {
@@ -184,91 +183,8 @@ export class DocstorePatcherAdapter extends IDocstorePatcherPort {
 
 @Injectable()
 export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
-  private readonly logger = new Logger(RealtimeNotifierAdapter.name);
-
-  constructor(
-    @Optional() private readonly eventEmitter?: EventEmitter2,
-    @Optional() private readonly notificationsService?: NotificationsService,
-    @Optional() private readonly prisma?: PrismaService,
-  ) {
+  constructor(@Optional() private readonly eventEmitter?: EventEmitter2) {
     super();
-  }
-
-  private async getCollaboratorContext(
-    projectId: string,
-    actorId?: string | null,
-  ): Promise<{
-    collaboratorMap: Record<string, string>;
-    projectName: string;
-    actorName: string;
-  }> {
-    const collaboratorMap: Record<string, string> = {};
-    let projectName = 'Manuscript';
-    let actorName = 'Collaborator';
-
-    if (!this.prisma) return { collaboratorMap, projectName, actorName };
-
-    try {
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        include: {
-          createdBy: {
-            select: {
-              id: true,
-              email: true,
-              profile: { select: { name: true } },
-            },
-          },
-          members: {
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  email: true,
-                  profile: { select: { name: true } },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      if (project) {
-        projectName = project.name || projectName;
-        const owner = project.createdBy;
-        if (owner) {
-          collaboratorMap[owner.email.toLowerCase()] = owner.id;
-          const ownerName = owner.profile?.name;
-          if (ownerName) {
-            collaboratorMap[ownerName.toLowerCase().replace(/\s+/g, '')] =
-              owner.id;
-          }
-          if (actorId && owner.id === actorId && ownerName) {
-            actorName = ownerName;
-          }
-        }
-        for (const member of project.members || []) {
-          if (member.user) {
-            collaboratorMap[member.user.email.toLowerCase()] = member.user.id;
-            const memberName = member.user.profile?.name;
-            if (memberName) {
-              collaboratorMap[memberName.toLowerCase().replace(/\s+/g, '')] =
-                member.user.id;
-            }
-            if (actorId && member.user.id === actorId && memberName) {
-              actorName = memberName;
-            }
-          }
-        }
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.debug(
-        `Could not resolve project collaborator map for ${projectId}: ${msg}`,
-      );
-    }
-
-    return { collaboratorMap, projectName, actorName };
   }
 
   private emitEvent(projectId: string, eventName: string, data: unknown): void {
@@ -311,34 +227,6 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       docId,
       thread: thread.toJSON(),
     });
-
-    if (
-      this.notificationsService?.pages &&
-      thread.replies &&
-      thread.replies.length > 0
-    ) {
-      const firstReply = thread.replies[0];
-      const pagesNotifications = this.notificationsService.pages;
-      this.getCollaboratorContext(projectId, thread.createdById)
-        .then(async (ctx) => {
-          await pagesNotifications.parseAndNotifyMentions({
-            text: firstReply.content,
-            actorId: thread.createdById || 'anonymous',
-            actorName: ctx.actorName,
-            projectId,
-            projectName: ctx.projectName,
-            docId,
-            threadId: thread.id,
-            commentId: firstReply.id,
-            collaboratorMap: ctx.collaboratorMap,
-          });
-        })
-        .catch((err) => {
-          this.logger.debug(
-            `Failed to dispatch mention notifications: ${err?.message}`,
-          );
-        });
-    }
   }
 
   public notifyCommentReplied(
@@ -346,62 +234,13 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
     docId: string,
     threadId: string,
     reply: CommentReply,
-    threadOwnerId?: string | null,
+    _threadOwnerId?: string | null,
   ): void {
     this.emitEvent(projectId, 'comment:replied', {
       docId,
       threadId,
       reply: reply.toJSON(),
     });
-
-    if (this.notificationsService?.pages) {
-      const pagesNotifications = this.notificationsService.pages;
-      this.getCollaboratorContext(projectId, reply.createdById)
-        .then(async (ctx) => {
-          if (threadOwnerId && threadOwnerId !== reply.createdById) {
-            await pagesNotifications.notifyCommentReply({
-              recipientUserId: threadOwnerId,
-              actorId: reply.createdById || 'anonymous',
-              actorName: ctx.actorName,
-              projectId,
-              projectName: ctx.projectName,
-              docId,
-              threadId,
-              replyId: reply.id,
-              snippet: reply.content.slice(0, 140),
-            });
-          }
-
-          const mentionCollaborators: Record<string, string> = {};
-          for (const [k, userId] of Object.entries(ctx.collaboratorMap)) {
-            if (
-              threadOwnerId &&
-              threadOwnerId !== reply.createdById &&
-              userId === threadOwnerId
-            ) {
-              continue;
-            }
-            mentionCollaborators[k] = userId;
-          }
-
-          await pagesNotifications.parseAndNotifyMentions({
-            text: reply.content,
-            actorId: reply.createdById || 'anonymous',
-            actorName: ctx.actorName,
-            projectId,
-            projectName: ctx.projectName,
-            docId,
-            threadId,
-            commentId: reply.id,
-            collaboratorMap: mentionCollaborators,
-          });
-        })
-        .catch((err) => {
-          this.logger.debug(
-            `Failed to dispatch reply notifications: ${err?.message}`,
-          );
-        });
-    }
   }
 
   public notifyCommentResolved(
@@ -413,38 +252,5 @@ export class RealtimeNotifierAdapter extends IRealtimeNotifierPort {
       docId,
       thread: thread.toJSON(),
     });
-
-    if (!thread.isResolved) {
-      return;
-    }
-
-    if (this.notificationsService?.pages) {
-      const pagesNotifications = this.notificationsService.pages;
-      this.getCollaboratorContext(projectId, thread.resolvedById)
-        .then(async (ctx) => {
-          await pagesNotifications.dismissThreadNotifications(thread.id);
-
-          if (
-            thread.createdById &&
-            thread.createdById !== thread.resolvedById
-          ) {
-            await pagesNotifications.notifyThreadResolved({
-              recipientUserId: thread.createdById,
-              actorId: thread.resolvedById || 'anonymous',
-              actorName: ctx.actorName,
-              projectId,
-              projectName: ctx.projectName,
-              docId,
-              threadId: thread.id,
-              quote: thread.quote ?? undefined,
-            });
-          }
-        })
-        .catch((err) => {
-          this.logger.debug(
-            `Failed to dispatch thread-resolved notification: ${err?.message}`,
-          );
-        });
-    }
   }
 }

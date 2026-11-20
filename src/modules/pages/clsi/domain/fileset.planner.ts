@@ -115,6 +115,35 @@ export function fingerprintFileSet(
   return sha256(lines.join('\n'));
 }
 
+const PREAMBLE_FILENAME_REGEX =
+  /(?:^|\/)(?:preamble|macros?|settings|setup|config)\.tex$/i;
+
+function pickFallbackNonEmptyTexFile(
+  files: Map<string, FileSource>,
+): string | null {
+  const candidates: string[] = [];
+  for (const [filePath, src] of files.entries()) {
+    if (filePath.toLowerCase().endsWith('.tex') && !isEmpty(src)) {
+      candidates.push(filePath);
+    }
+  }
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  candidates.sort((a, b) => {
+    const aPreamble = PREAMBLE_FILENAME_REGEX.test(a) ? 1 : 0;
+    const bPreamble = PREAMBLE_FILENAME_REGEX.test(b) ? 1 : 0;
+    if (aPreamble !== bPreamble) return aPreamble - bPreamble;
+
+    const aDepth = a.split('/').length;
+    const bDepth = b.split('/').length;
+    if (aDepth !== bDepth) return aDepth - bDepth;
+
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  return candidates[0];
+}
+
 function detectDocumentClassFromInline(
   files: Map<string, FileSource>,
 ): string | null {
@@ -176,22 +205,28 @@ export function planDbFileSet(input: FileSetInput): PlannedFileSet {
   }
 
   const inlineRootPath = detectDocumentClassFromInline(files);
+  const hasValidExplicit =
+    Boolean(explicitMainFile) &&
+    files.has(explicitMainFile!) &&
+    !isEmpty(files.get(explicitMainFile!));
+  const hasValidMainTex = !isEmpty(files.get('main.tex'));
+  const fallbackNonEmptyTex = pickFallbackNonEmptyTexFile(files);
 
   let mainFile = 'main.tex';
-  if (
-    explicitMainFile &&
-    files.has(explicitMainFile) &&
-    !isEmpty(files.get(explicitMainFile))
-  ) {
-    mainFile = explicitMainFile;
+  if (hasValidExplicit) {
+    mainFile = explicitMainFile!;
   } else if (detectedRootPath) {
+    // Authoritative Page.rootDocId always wins over a stale/missing client explicitMainFile.
+    // Also preserves validation-problems when the designated root doc itself is empty (0 bytes).
     mainFile = detectedRootPath;
   } else if (inlineRootPath) {
     mainFile = inlineRootPath;
+  } else if (hasValidMainTex) {
+    mainFile = 'main.tex';
+  } else if (fallbackNonEmptyTex) {
+    mainFile = fallbackNonEmptyTex;
   } else if (explicitMainFile) {
     mainFile = explicitMainFile;
-  } else if (!isEmpty(files.get('main.tex'))) {
-    mainFile = 'main.tex';
   }
 
   const mainWasEmpty = isEmpty(files.get(mainFile));
@@ -327,7 +362,27 @@ export function planInlineFileSet(input: {
     ? sanitizeRelativePath(input.mainFile)
     : undefined;
   const detectedMain = detectDocumentClassFromInline(files);
-  const cleanMain = explicitMain || detectedMain || 'main.tex';
+  const hasValidExplicit =
+    Boolean(explicitMain) &&
+    files.has(explicitMain!) &&
+    !isEmpty(files.get(explicitMain!));
+  const hasValidMainTex = !isEmpty(files.get('main.tex'));
+  const fallbackNonEmptyTex = pickFallbackNonEmptyTexFile(files);
+
+  let cleanMain = 'main.tex';
+  if (hasValidExplicit) {
+    cleanMain = explicitMain!;
+  } else if (input.source && explicitMain && files.size === 0) {
+    cleanMain = explicitMain;
+  } else if (detectedMain) {
+    cleanMain = detectedMain;
+  } else if (hasValidMainTex) {
+    cleanMain = 'main.tex';
+  } else if (fallbackNonEmptyTex) {
+    cleanMain = fallbackNonEmptyTex;
+  } else if (explicitMain) {
+    cleanMain = explicitMain;
+  }
   if (input.source && isEmpty(files.get(cleanMain))) {
     files.set(cleanMain, inlineSource(input.source));
   }

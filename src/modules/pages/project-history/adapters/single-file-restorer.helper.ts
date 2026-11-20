@@ -17,7 +17,12 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
 import { ProjectHistoryRepository } from '../project-history.repository';
-import { FileSnapshotVo, RestoreSingleFileResult, Snapshot } from '../domain';
+import {
+  FileSnapshotVo,
+  RestoreSingleFileResult,
+  Snapshot,
+  SnapshotFileNotFoundException,
+} from '../domain';
 
 export interface RestorerDeps {
   structureService: StructureService;
@@ -282,9 +287,7 @@ export async function restoreSingleFileToStateHelper(
     null;
 
   if (!fileVo) {
-    throw new Error(
-      `File '${pathname}' was not found in version ${snapshot.version} snapshot.`,
-    );
+    throw new SnapshotFileNotFoundException(pathname, snapshot.version);
   }
 
   const targetPath = fileVo.path;

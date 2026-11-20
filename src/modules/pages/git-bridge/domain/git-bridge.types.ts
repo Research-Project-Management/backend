@@ -25,16 +25,17 @@ export function parseRepoName(repo: string): string | null {
   return UUID_RE.test(id) ? id.toLowerCase() : null;
 }
 
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 import { TEXT_EXTENSIONS, isTextPath } from '@/modules/pages/core';
 
 export { TEXT_EXTENSIONS, isTextPath };
 
-export class GitBridgeDomainError extends Error {
-  public readonly statusCode = 400;
-
+export class GitBridgeDomainError extends PagesDomainError {
   constructor(message: string) {
-    super(message);
-    this.name = 'GitBridgeDomainError';
+    super(message, {
+      code: 'GIT_BRIDGE_ERROR',
+      statusCode: 400,
+    });
   }
 }
 

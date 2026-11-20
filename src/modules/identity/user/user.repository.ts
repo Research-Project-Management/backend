@@ -537,7 +537,7 @@ export class UserRepository implements IUserRepository {
     }>
   > {
     try {
-      const files = await this.prisma.storageFile.findMany({
+      const files = await this.prisma.fileNode.findMany({
         where: {
           spaceId: userId,
           deletedAt: null,

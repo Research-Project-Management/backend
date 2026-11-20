@@ -9,10 +9,10 @@ model PageDoc {
   pageId        String    @map("page_id") @db.Uuid
   page          Page      @relation(fields: [pageId, spaceId], references: [id, spaceId], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_docs_page_space")
   lastKnownPath String    @map("last_known_path") @db.VarChar(1000)
-  lines         Json      @default("[]")
+  lines         Json      @default("[]") @db.JsonB
   rev           Int       @default(0)
   version       Int       @default(0)
-  ranges        Json?     @default("{}")
+  ranges        Json?     @default("{}") @db.JsonB
   hash          String?   @db.VarChar(64)
   sizeBytes     Int       @default(0) @map("size_bytes")
   inStorage     Boolean   @default(false) @map("in_storage")
@@ -25,7 +25,6 @@ model PageDoc {
   rootForPages   Page[]              @relation("PageRootDoc")
   trackChanges   PageTrackChange[]
   commentThreads PageCommentThread[]
-  notifications  PageNotification[]
   docReview      PageDocReview?
 
   @@unique([id, pageId], map: "uq_page_docs_id_page")

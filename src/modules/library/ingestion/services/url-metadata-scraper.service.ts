@@ -332,7 +332,6 @@ export class UrlMetadataScraperService {
             filename: effectiveFilename,
             buffer,
             mimeType: 'application/pdf',
-            source: 'url_pdf_download',
           });
           fileId = uploadRes?.fileId;
           this.logger.log(

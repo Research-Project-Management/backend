@@ -3,20 +3,18 @@
  * Domain errors matching Overleaf Docstore specifications.
  */
 
-export class DocNotFoundError extends Error {
-  public readonly statusCode = 404;
-  public readonly code = 'DOC_NOT_FOUND';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 
+export class DocNotFoundError extends PagesDomainError {
   constructor(message: string = 'Document not found') {
-    super(message);
-    this.name = 'DocNotFoundError';
+    super(message, {
+      code: 'DOC_NOT_FOUND',
+      statusCode: 404,
+    });
   }
 }
 
-export class DocModifiedError extends Error {
-  public readonly statusCode = 409;
-  public readonly code = 'DOC_VERSION_CONFLICT';
-
+export class DocModifiedError extends PagesDomainError {
   constructor(
     message: string = 'Document has been modified by another process',
     public readonly details?: {
@@ -25,42 +23,41 @@ export class DocModifiedError extends Error {
       currentRev: number;
     },
   ) {
-    super(message);
-    this.name = 'DocModifiedError';
+    super(message, {
+      code: 'DOC_VERSION_CONFLICT',
+      statusCode: 409,
+      details,
+    });
   }
 }
 
-export class DocTooLargeError extends Error {
-  public readonly statusCode = 413;
-  public readonly code = 'DOC_TOO_LARGE';
-
+export class DocTooLargeError extends PagesDomainError {
   constructor(
     public readonly currentSize: number,
     public readonly maxSize: number,
   ) {
     super(
       `Document body length (${currentSize} bytes) exceeds maximum limit (${maxSize} bytes)`,
+      {
+        code: 'DOC_TOO_LARGE',
+        statusCode: 413,
+      },
     );
-    this.name = 'DocTooLargeError';
   }
 }
 
-export class NullByteDetectedError extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'INVALID_DOC_CONTENT';
-
+export class NullByteDetectedError extends PagesDomainError {
   constructor(
     message: string = 'Null byte (\\u0000) detected in document text',
   ) {
-    super(message);
-    this.name = 'NullByteDetectedError';
+    super(message, {
+      code: 'INVALID_DOC_CONTENT',
+      statusCode: 400,
+    });
   }
 }
 
-export class Md5MismatchError extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'MD5_MISMATCH';
-
+export class Md5MismatchError extends PagesDomainError {
   constructor(
     message: string = 'MD5 hash mismatch during document transfer',
     public readonly details?: {
@@ -69,27 +66,41 @@ export class Md5MismatchError extends Error {
       actualMd5: string;
     },
   ) {
-    super(message);
-    this.name = 'Md5MismatchError';
+    super(message, {
+      code: 'MD5_MISMATCH',
+      statusCode: 400,
+      details,
+    });
   }
 }
 
-export class InvalidSearchPatternError extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'INVALID_SEARCH_PATTERN';
-
+export class InvalidSearchPatternError extends PagesDomainError {
   constructor(message: string) {
-    super(message);
-    this.name = 'InvalidSearchPatternError';
+    super(message, {
+      code: 'INVALID_SEARCH_PATTERN',
+      statusCode: 400,
+    });
   }
 }
 
-export class ArchiveObjectNotFoundError extends Error {
-  public readonly statusCode = 404;
-  public readonly code = 'ARCHIVE_OBJECT_NOT_FOUND';
-
+export class ArchiveObjectNotFoundError extends PagesDomainError {
   constructor(key: string) {
-    super(`Archive object not found: ${key}`);
-    this.name = 'ArchiveObjectNotFoundError';
+    super(`Archive object not found: ${key}`, {
+      code: 'ARCHIVE_OBJECT_NOT_FOUND',
+      statusCode: 404,
+    });
+  }
+}
+
+export class ArchiveWriteFailedError extends PagesDomainError {
+  constructor(
+    public readonly key: string,
+    reason: string,
+  ) {
+    super(`Durable cold-tier archive write failed for "${key}": ${reason}`, {
+      code: 'ARCHIVE_WRITE_FAILED',
+      statusCode: 503,
+      internalReason: reason,
+    });
   }
 }

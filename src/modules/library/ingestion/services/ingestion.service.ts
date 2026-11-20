@@ -263,7 +263,6 @@ export class IngestionService {
           filename: `ingest_${envelope.payload.format.toLowerCase()}_${randomUUID().slice(0, 8)}.json.gz`,
           buffer: compressed,
           mimeType: 'application/gzip',
-          source: 'ingestion.claim_check',
         });
 
         if (uploadResult?.fileId) {

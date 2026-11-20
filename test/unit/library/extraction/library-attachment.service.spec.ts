@@ -62,17 +62,15 @@ describe('Library Attachments & Storage Integration Suite', () => {
         buffer: Buffer.from('%PDF-1.4 sample content'),
       }),
       deleteFile: jest.fn().mockResolvedValue(undefined),
-      linkFile: jest.fn().mockResolvedValue(undefined),
-      getPresignedUploadUrl: jest.fn().mockResolvedValue({
+      presignUpload: jest.fn().mockResolvedValue({
         uploadUrl: 'https://r2.cloudflarestorage.com/upload-url',
         storageKey: 'uploads/file-uuid',
         fileUuid: 'file-uuid-777',
+        cleanFilename: 'big_dataset.pdf',
+        deduplicated: false,
         expiresIn: 3600,
       }),
-      uploadBuffer: jest.fn().mockResolvedValue({
-        path: 'snapshots/web.html',
-        url: '/api/v1/files/objects/snapshots/web.html',
-      }),
+      putObject: jest.fn().mockResolvedValue(undefined),
     });
 
     mockPrisma = {
@@ -435,7 +433,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
           spaceId: projId,
           filename: 'thesis.pdf',
           mimeType: 'application/pdf',
-          source: 'library',
         }),
       );
     });
@@ -454,14 +451,13 @@ describe('Library Attachments & Storage Integration Suite', () => {
 
       expect(res.uploadUrl).toBe('https://r2.cloudflarestorage.com/upload-url');
       expect(res.fileUuid).toBe('file-uuid-777');
-      expect(mockStoragePort.getPresignedUploadUrl).toHaveBeenCalledWith({
+      expect(mockStoragePort.presignUpload).toHaveBeenCalledWith({
         userId: 'user-1',
         spaceId: projId,
         filename: 'big_dataset.pdf',
         mimeType: 'application/pdf',
         sizeBytes: 50000000,
         contentHash: undefined,
-        scope: 'library',
       });
     });
 
@@ -639,7 +635,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
         filename: expect.stringMatching(/Snapshot_arxiv-paper-snapshot/),
         buffer: expect.any(Buffer),
         mimeType: 'text/html; charset=utf-8',
-        source: 'library_snapshot',
       });
       expect(mockAttachmentsService.createAttachment).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -827,7 +822,6 @@ describe('Library Attachments & Storage Integration Suite', () => {
           userId: creatorId,
           spaceId,
           mimeType: 'application/gzip',
-          source: 'reader.pdf_fulltext',
         }),
       );
       expect(mockStoragePort.deleteFile).toHaveBeenCalledWith(

@@ -19,6 +19,7 @@ import {
 import { CompilePageDto } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { AuxFileInfo, SyncPoint, ReverseSyncPoint } from '../domain/clsi.ports';
+import { RemoteClsiClientError } from '../domain/sandbox.errors';
 
 export interface RemoteCompileRequest {
   projectId: string;
@@ -64,7 +65,7 @@ export class RemoteClsiClientAdapter {
 
   private async runWithRemoteCircuitBreaker<T>(
     action: (baseUrl: string) => Promise<T | null>,
-    options: { bypassBackoff?: boolean } = {},
+    options: { bypassBackoff?: boolean; signal?: AbortSignal } = {},
   ): Promise<T | null> {
     const baseUrl = this.getRemoteUrl();
     if (!baseUrl) {
@@ -79,21 +80,24 @@ export class RemoteClsiClientAdapter {
       const result = await action(baseUrl);
       if (result !== null) {
         this.remoteClsiBackoffUntil = 0;
-        return result;
       }
+      return result;
     } catch (err: unknown) {
-      if ((err as { name?: string })?.name === 'AbortError') {
+      if (
+        (err as { name?: string })?.name === 'AbortError' ||
+        options.signal?.aborted ||
+        err instanceof RemoteClsiClientError
+      ) {
         throw err;
       }
       this.logger.warn(
         `Remote CLSI (${baseUrl}) unreachable: ${(err as Error)?.message}`,
       );
+      if (!options.bypassBackoff) {
+        this.remoteClsiBackoffUntil = Date.now() + 10_000;
+      }
+      return null;
     }
-
-    if (!options.bypassBackoff) {
-      this.remoteClsiBackoffUntil = Date.now() + 10_000;
-    }
-    return null;
   }
 
   private async postRemoteJson<TResponse>(
@@ -102,6 +106,7 @@ export class RemoteClsiClientAdapter {
     options: {
       timeoutMs?: number;
       bypassBackoff?: boolean;
+      propagateClientErrors?: boolean;
       signal?: AbortSignal;
     } = {},
   ): Promise<TResponse | null> {
@@ -120,6 +125,54 @@ export class RemoteClsiClientAdapter {
       });
 
       if (!res.ok) {
+        let parsedBody: Record<string, unknown> | null = null;
+        try {
+          parsedBody = (await res.json()) as Record<string, unknown>;
+        } catch {
+          parsedBody = null;
+        }
+        const errorObj =
+          parsedBody &&
+          typeof parsedBody.error === 'object' &&
+          parsedBody.error !== null
+            ? (parsedBody.error as Record<string, unknown>)
+            : null;
+        const remoteCode =
+          typeof errorObj?.code === 'string'
+            ? errorObj.code
+            : typeof parsedBody?.code === 'string'
+              ? parsedBody.code
+              : undefined;
+        const remoteMessage =
+          typeof errorObj?.message === 'string'
+            ? errorObj.message
+            : typeof parsedBody?.message === 'string'
+              ? parsedBody.message
+              : `Remote CLSI failed with HTTP ${res.status}`;
+        const remoteDetails =
+          errorObj?.details !== undefined
+            ? errorObj.details
+            : parsedBody?.details;
+        const isStructuredBackpressure =
+          res.status === 503 &&
+          (remoteCode === 'COMPILE_QUEUE_FULL' ||
+            remoteCode === 'COMPILE_QUEUE_TIMEOUT');
+
+        if (
+          (res.status >= 400 && res.status < 500) ||
+          isStructuredBackpressure
+        ) {
+          if (options.propagateClientErrors) {
+            throw new RemoteClsiClientError(
+              remoteMessage,
+              res.status,
+              remoteCode || 'REMOTE_CLSI_CLIENT_ERROR',
+              remoteDetails,
+            );
+          }
+          return null;
+        }
+
         throw new Error(`HTTP ${res.status}`);
       }
       return (await res.json()) as TResponse;
@@ -184,11 +237,13 @@ export class RemoteClsiClientAdapter {
         syntaxOnly: dto.syntaxOnly ?? false,
         forceClean: dto.forceClean ?? false,
         stopOnFirstError: dto.stopOnFirstError ?? false,
+        priority: dto.priority ?? 'manual',
         timeoutMs: effectiveTimeoutMs,
         files: filesPayload,
       },
       {
         timeoutMs: effectiveTimeoutMs + 5000,
+        propagateClientErrors: true,
         signal,
       },
     );

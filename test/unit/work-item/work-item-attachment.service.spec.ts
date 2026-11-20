@@ -92,7 +92,6 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
         buffer: mockBuffer,
         mimeType: 'application/pdf',
         spaceId: 'proj-uuid-1',
-        source: 'work-item',
       });
 
       expect(mockRepo.create).toHaveBeenCalledWith(
@@ -254,11 +253,13 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
   });
 
   describe('generatePresignedUpload', () => {
-    it('should generate presigned upload URL via storagePort.getPresignedUploadUrl', async () => {
-      mockFilesPort.getPresignedUploadUrl = jest.fn().mockResolvedValue({
+    it('should generate presigned upload URL via storagePort.presignUpload', async () => {
+      mockFilesPort.presignUpload = jest.fn().mockResolvedValue({
         uploadUrl: 'https://storage-port.example.com/upload',
         storageKey: 'cas-keys/blob-1',
         fileUuid: 'file-uuid-777',
+        cleanFilename: 'dataset.csv',
+        deduplicated: false,
         expiresIn: 3600,
       });
 
@@ -273,13 +274,13 @@ describe('Work-Item AttachmentService & Storage Integration', () => {
         'user-1',
       );
 
-      expect(mockFilesPort.getPresignedUploadUrl).toHaveBeenCalled();
+      expect(mockFilesPort.presignUpload).toHaveBeenCalled();
       expect(res.signedUrl).toBe('https://storage-port.example.com/upload');
       expect(res.fileUrl).toBe('/api/v1/files/file-uuid-777/content');
     });
 
     it('should throw BadRequestException when storagePort is not configured for presign', async () => {
-      delete mockFilesPort.getPresignedUploadUrl;
+      delete mockFilesPort.presignUpload;
 
       await expect(
         service.generatePresignedUpload(

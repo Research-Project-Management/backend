@@ -22,7 +22,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { FilesBatchPartUrlsDto, IFilesPort, FILES_PORT } from '@/modules/files';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import {
   PresignUploadDto,
@@ -139,7 +139,6 @@ export class AttachmentStorageController {
       filename,
       mimeType,
       buffer,
-      source: 'library',
     });
 
     return {
@@ -159,22 +158,39 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.filesPort?.getPresignedUploadUrl) {
+    if (!this.filesPort?.presignUpload) {
       throw new BadRequestException('Direct presigned upload unavailable');
     }
 
     const projectId = paramProjectId || queryProjectId || dto.spaceId;
     const spaceId = projectId || userId;
+    const mimeType = dto.mimeType || 'application/octet-stream';
 
-    return this.filesPort.getPresignedUploadUrl({
+    const res = await this.filesPort.presignUpload({
       userId,
       spaceId,
       filename: dto.filename,
-      mimeType: dto.mimeType || 'application/octet-stream',
+      mimeType,
       sizeBytes: dto.sizeBytes ?? dto.size ?? 0,
-      scope: 'library',
       contentHash: dto.contentHash,
     });
+
+    return {
+      uploadUrl: res.uploadUrl || '',
+      storageKey: res.storageKey,
+      fileUuid: res.fileUuid || res.blob?.id || '',
+      expiresIn: res.expiresIn,
+      deduplicated: res.deduplicated,
+      ...(res.blob
+        ? {
+            fileId: res.fileId || res.blob.id,
+            url: res.url,
+            filename: res.filename || res.cleanFilename,
+            size: res.size ?? Number(res.blob.sizeBytes),
+            mimeType: res.mimeType || mimeType,
+          }
+        : {}),
+    };
   }
 
   @Post('attachments/presign/complete')
@@ -229,22 +245,37 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.filesPort?.initiateMultipartUpload) {
+    if (!this.filesPort?.initiateMultipart) {
       throw new BadRequestException('Multipart upload unavailable');
     }
 
     const projectId = paramProjectId || queryProjectId || dto.spaceId;
     const spaceId = projectId || userId;
 
-    return this.filesPort.initiateMultipartUpload({
+    const res = await this.filesPort.initiateMultipart({
       userId,
       spaceId,
       filename: dto.filename || 'document.bin',
       mimeType: dto.mimeType || 'application/octet-stream',
       totalSize: dto.totalSize,
-      scope: 'library',
       expectedHash: dto.expectedHash,
     });
+
+    return {
+      sessionId: res.sessionId,
+      uploadId: res.uploadId,
+      partSize: res.partSize,
+      totalParts: res.totalParts,
+      deduplicated: res.deduplicated,
+      ...(res.blob
+        ? {
+            fileId: res.fileId || res.blob.id,
+            url: res.url,
+            filename: res.filename || res.cleanFilename,
+            size: res.size ?? Number(res.blob.sizeBytes),
+          }
+        : {}),
+    };
   }
 
   @Get('attachments/multipart/:sessionId/part-url')
@@ -279,6 +310,33 @@ export class AttachmentStorageController {
     return { partNumber, partUrl, uploadUrl: partUrl };
   }
 
+  @Post('attachments/multipart/:sessionId/part-urls')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Batch generate presigned URLs for multiple S3 multipart chunks',
+  })
+  async batchMultipartPartUrls(
+    @CurrentUser('id') userId: string,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: FilesBatchPartUrlsDto,
+    @Param('spaceId', new ParseUUIDPipe({ optional: true }))
+    paramProjectId?: string,
+    @Query('spaceId') queryProjectId?: string,
+  ) {
+    if (!this.filesPort?.presignMultipartParts) {
+      throw new BadRequestException('Batch multipart part URL unavailable');
+    }
+    const projectId = paramProjectId || queryProjectId;
+    const spaceId = projectId || userId;
+    const parts = await this.filesPort.presignMultipartParts(
+      sessionId,
+      dto.partNumbers,
+      { userId, spaceId },
+    );
+    return { parts };
+  }
+
   @Post('attachments/multipart/complete')
   @ProjectRoles('owner', 'coordinator', 'contributor')
   @HttpCode(HttpStatus.OK)
@@ -290,18 +348,27 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.filesPort?.completeMultipartUpload) {
+    if (!this.filesPort?.completeMultipart) {
       throw new BadRequestException('Multipart completion unavailable');
     }
 
     const projectId = paramProjectId || queryProjectId;
     const spaceId = projectId || userId;
 
-    return this.filesPort.completeMultipartUpload({
+    const res = await this.filesPort.completeMultipart({
       sessionId: dto.sessionId,
       parts: dto.parts,
       actor: { userId, spaceId },
     });
+
+    return {
+      fileId: res.fileId,
+      blobId: res.blobId,
+      url: res.url,
+      filename: res.filename,
+      size: res.size,
+      mimeType: res.mimeType,
+    };
   }
 
   @Delete('attachments/multipart/:sessionId')
@@ -314,14 +381,14 @@ export class AttachmentStorageController {
     paramProjectId?: string,
     @Query('spaceId') queryProjectId?: string,
   ) {
-    if (!this.filesPort?.abortMultipartUpload) {
+    if (!this.filesPort?.abortMultipart) {
       throw new NotImplementedException(
         'Multipart upload abort is not supported by the active storage adapter',
       );
     }
     const projectId = paramProjectId || queryProjectId;
     const spaceId = projectId || userId;
-    await this.filesPort.abortMultipartUpload(sessionId, {
+    await this.filesPort.abortMultipart(sessionId, {
       userId,
       spaceId,
     });

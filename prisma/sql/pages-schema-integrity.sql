@@ -398,7 +398,7 @@ BEGIN
       AND "space_id" = p_space_id;
   END IF;
 
-  -- 4. Map and set-based clone all active PageFile rows + increment StorageBlob CAS ref_count
+  -- 4. Map and set-based clone all active PageFile rows + increment FileBlob CAS ref_count
   SELECT COALESCE(
     jsonb_object_agg(f."id"::text, to_jsonb(gen_random_uuid()::text)),
     '{}'::jsonb
@@ -434,7 +434,7 @@ BEGIN
     AND f."page_id" = p_source_page_id
     AND f."deleted_at" IS NULL;
 
-  UPDATE "storage_blobs" b
+  UPDATE "file_blobs" b
   SET "ref_count" = b."ref_count" + sub.cnt,
       "tombstone_at" = NULL
   FROM (

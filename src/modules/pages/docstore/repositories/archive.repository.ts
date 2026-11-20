@@ -15,6 +15,7 @@ import {
   IDocPersistor,
   Md5MismatchError,
   ArchiveObjectNotFoundError,
+  ArchiveWriteFailedError,
   computeContentMd5,
 } from '../domain';
 
@@ -298,9 +299,7 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
           this.isDurableStorageConfigured() &&
           !this.diskFallback.isDurableStorageConfigured()
         ) {
-          throw new Error(
-            `Durable cold-tier archive write failed for "${key}": ${msg}`,
-          );
+          throw new ArchiveWriteFailedError(key, msg);
         }
         this.logger.warn(
           `IBinaryStoragePort upload failed for "${key}", falling back to disk archive: ${msg}`,

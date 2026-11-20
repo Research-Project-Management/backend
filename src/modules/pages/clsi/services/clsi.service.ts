@@ -20,6 +20,7 @@ import { ConfigService } from '@nestjs/config';
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import { PrismaService, RedisCacheService } from '@/core';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import {
@@ -56,6 +57,7 @@ import {
   ClsiHealthCheck,
 } from './compile-pipeline.service';
 import { CompileQueueService } from './compile-queue.service';
+import { ClsiQueueUnavailableError } from '../domain/sandbox.errors';
 import { ClsiMetrics } from '../domain/clsi.metrics';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { RemoteClsiClientAdapter } from './remote-clsi.client';
@@ -227,7 +229,7 @@ export class ClsiService implements OnModuleDestroy {
     authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
     if (!this.compileQueue) {
-      throw new Error('CLSI compile queue is not initialized');
+      throw new ClsiQueueUnavailableError();
     }
     return await dispatchAndAwaitQueueCompileHelper({
       compileQueue: this.compileQueue,
@@ -246,7 +248,7 @@ export class ClsiService implements OnModuleDestroy {
     authorizedProjectId?: string,
   ): Promise<{ jobId: string }> {
     if (!this.compileQueue) {
-      throw new Error('CLSI compile queue is not initialized');
+      throw new ClsiQueueUnavailableError();
     }
     const projectId = authorizedProjectId || dto.spaceId || 'default';
     const compileTargetId = dto.pageId || projectId;
@@ -273,6 +275,7 @@ export class ClsiService implements OnModuleDestroy {
       } catch (err: unknown) {
         if (
           err instanceof HttpException ||
+          err instanceof PagesDomainError ||
           (err as { isWorkerExecutionError?: boolean })?.isWorkerExecutionError
         ) {
           throw err;
@@ -416,6 +419,7 @@ export class ClsiService implements OnModuleDestroy {
           manuscriptPageId,
         );
       },
+      { priority: dto.priority ?? 'manual' },
     );
   }
 
@@ -522,10 +526,39 @@ export class ClsiService implements OnModuleDestroy {
       await this.cache.set(cacheKey, finalResult, 300);
     }
 
+    const formatted = await formatCompileResultForClient({
+      result: finalResult,
+      responseMode: dto.responseMode,
+      projectId,
+      pageId: manuscriptPageId,
+      scratchWorkspaceId,
+      workspace: this.workspace,
+    });
+
     if (!projectId.startsWith('adhoc-')) {
+      const summary = finalResult.diagnosticsSummary
+        ? {
+            totalErrors: finalResult.diagnosticsSummary.totalErrors,
+            totalWarnings: finalResult.diagnosticsSummary.totalWarnings,
+            totalBadboxes: finalResult.diagnosticsSummary.totalBadboxes,
+          }
+        : undefined;
+      const summaryLine = finalResult.success
+        ? `[CLSI] Compilation succeeded in ${finalResult.durationMs}ms`
+        : `[CLSI] Compilation failed: ${finalResult.error || 'See compiler logs'}`;
+
+      const pdfUrl =
+        formatted.success && 'pdfArtifactUrl' in formatted
+          ? formatted.pdfArtifactUrl
+          : undefined;
+      const logArtifactUrl = formatted.logMeta?.logArtifactUrl;
+
       this.realtimeService?.broadcastCompileProgress(projectId, {
         status: finalResult.success ? 'success' : 'failed',
-        logs: finalResult.logs ? [finalResult.logs] : [],
+        logs: [summaryLine],
+        ...(pdfUrl ? { pdfUrl } : {}),
+        ...(summary ? { summary } : {}),
+        ...(logArtifactUrl ? { logArtifactUrl } : {}),
       });
 
       if (finalResult.success) {
@@ -540,14 +573,7 @@ export class ClsiService implements OnModuleDestroy {
       }
     }
 
-    return await formatCompileResultForClient({
-      result: finalResult,
-      responseMode: dto.responseMode,
-      projectId,
-      pageId: manuscriptPageId,
-      scratchWorkspaceId,
-      workspace: this.workspace,
-    });
+    return formatted;
   }
 
   public cancelCompile(projectId: string): boolean {

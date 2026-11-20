@@ -4,6 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 
 export interface CreateCommentReplyProps {
   id?: string;
@@ -14,13 +15,12 @@ export interface CreateCommentReplyProps {
   updatedAt?: Date;
 }
 
-export class InvalidCommentReplyException extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'INVALID_COMMENT_REPLY';
-
+export class InvalidCommentReplyException extends PagesDomainError {
   constructor(message: string = 'Reply content cannot be empty.') {
-    super(message);
-    this.name = 'InvalidCommentReplyException';
+    super(message, {
+      code: 'INVALID_COMMENT_REPLY',
+      statusCode: 400,
+    });
   }
 }
 

@@ -138,8 +138,8 @@ export class AccessRepository {
   async findStorageFilesMetadata(
     ids: string[],
   ): Promise<Array<{ id: string; metadata: unknown }>> {
-    if (!ids.length || !this.prisma.storageFile?.findMany) return [];
-    const rows = await this.prisma.storageFile
+    if (!ids.length || !this.prisma.fileNode?.findMany) return [];
+    const rows = await this.prisma.fileNode
       .findMany({
         where: { id: { in: ids } },
         select: { id: true, metadata: true },
@@ -149,8 +149,8 @@ export class AccessRepository {
   }
 
   async findStorageFileMetadata(fileId: string): Promise<unknown> {
-    if (!this.prisma.storageFile?.findUnique) return null;
-    const row = await this.prisma.storageFile
+    if (!this.prisma.fileNode?.findUnique) return null;
+    const row = await this.prisma.fileNode
       .findUnique({
         where: { id: fileId },
         select: { metadata: true },
@@ -192,8 +192,8 @@ export class AccessRepository {
   }
 
   async findStorageFileDetail(fileId: string, userId: string) {
-    if (!this.prisma.storageFile?.findFirst) return null;
-    return this.prisma.storageFile
+    if (!this.prisma.fileNode?.findFirst) return null;
+    return this.prisma.fileNode
       .findFirst({
         where: { id: fileId, deletedAt: null },
         include: {

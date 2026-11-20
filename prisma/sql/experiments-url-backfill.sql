@@ -22,7 +22,6 @@ BEGIN
       ('user_profiles', 'avatar_url'),
       ('user_profiles', 'cover_image_url'),
       ('projects', 'avatar'),
-      ('project_templates', 'avatar'),
       ('conversations', 'avatar'),
       ('pages', 'pdf_thumbnail')
     ) AS v(tbl, col)
@@ -40,7 +39,7 @@ BEGIN
   FOR rec IN
     SELECT v.tbl, v.col
     FROM (VALUES
-      ('storage_files', 'metadata'),
+      ('file_nodes', 'metadata'),
       ('attachments', 'metadata'),
       ('library_items', 'metadata'),
       ('entity_attachments', 'metadata'),

@@ -220,7 +220,7 @@ export class ActivityRepository implements IActivityRepository {
           })
         : [],
       validFileIds.length
-        ? this.prisma.storageFile.findMany({
+        ? this.prisma.fileNode.findMany({
             where: { id: { in: validFileIds }, deletedAt: null },
             select: { id: true, filename: true },
           })

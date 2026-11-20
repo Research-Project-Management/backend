@@ -57,9 +57,30 @@ export class LocalProcessRunner implements ISandboxRunner {
     });
 
     return new Promise((resolve) => {
-      let stdout = '';
-      let stderr = '';
-      const maxOutputBytes = options.maxOutputBytes ?? 10 * 1024 * 1024;
+      const stdoutChunks: Buffer[] = [];
+      let stdoutBytes = 0;
+      const stderrChunks: Buffer[] = [];
+      let stderrBytes = 0;
+      const maxOutputBytes = options.maxOutputBytes ?? 2 * 1024 * 1024;
+
+      const recordStreamChunk = (
+        raw: unknown,
+        chunks: Buffer[],
+        currentBytes: number,
+      ): number => {
+        const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw));
+        const remaining = maxOutputBytes - currentBytes;
+        if (remaining <= 0) {
+          return currentBytes;
+        }
+        const bounded =
+          buf.byteLength > remaining ? buf.subarray(0, remaining) : buf;
+        chunks.push(bounded);
+        if (options.onLogChunk) {
+          options.onLogChunk(bounded.toString('utf8'));
+        }
+        return currentBytes + bounded.byteLength;
+      };
 
       const child = spawn(command, args, {
         cwd: options.cwd,
@@ -74,24 +95,18 @@ export class LocalProcessRunner implements ISandboxRunner {
       watchdog.arm(options.signal);
 
       child.stdout?.on('data', (data) => {
-        const str = data.toString();
-        if (stdout.length < maxOutputBytes) {
-          stdout += str.slice(0, maxOutputBytes - stdout.length);
-        }
-        options.onLogChunk?.(str);
+        stdoutBytes = recordStreamChunk(data, stdoutChunks, stdoutBytes);
       });
 
       child.stderr?.on('data', (data) => {
-        const str = data.toString();
-        if (stderr.length < maxOutputBytes) {
-          stderr += str.slice(0, maxOutputBytes - stderr.length);
-        }
-        options.onLogChunk?.(str);
+        stderrBytes = recordStreamChunk(data, stderrChunks, stderrBytes);
       });
 
       child.on('error', (err) => {
         LocalProcessRunner.activeChildProcesses.delete(child);
         watchdog.disarm();
+        const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+        const stderr = Buffer.concat(stderrChunks).toString('utf8');
         resolve({
           exitCode: 1,
           stdout,
@@ -102,6 +117,8 @@ export class LocalProcessRunner implements ISandboxRunner {
       child.on('close', (code) => {
         LocalProcessRunner.activeChildProcesses.delete(child);
         watchdog.disarm();
+        const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+        const stderr = Buffer.concat(stderrChunks).toString('utf8');
         if (watchdog.isAborted()) {
           const isTimeout = watchdog.getAbortReason() === 'TIMEOUT';
           if (isTimeout) {

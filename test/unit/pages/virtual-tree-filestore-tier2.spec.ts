@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { PrismaService } from '@/core';
 import {
@@ -29,13 +30,15 @@ import { findPageRecordWithNode } from '@/modules/pages/docstore/services/doc-oc
 import { applyPageMetadataAndTitleUpdates } from '@/modules/pages/core/services/page-query-metadata.helper';
 import {
   type IFilesPort,
-  BlobService,
-  StorageBlob,
   BlobStatus,
+  StorageBlobRecord,
+} from '@/modules/files';
+import {
   ContentHash as PlatformContentHash,
   StorageKey as PlatformStorageKey,
-  type IBlobRepository,
-} from '@/modules/files';
+} from '@/modules/files/domain/storage-vo';
+import { BlobRepository } from '@/modules/files/repositories/blob.repository';
+import { BlobService } from '@/modules/files/services/blob.service';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
 const PAGE_B_ID = '22222222-2222-4222-8222-222222222222';
@@ -44,7 +47,10 @@ const FILE_ID = '44444444-4444-4444-8444-444444444444';
 const BLOB_OLD_ID = '55555555-5555-4555-8555-555555555555';
 const BLOB_NEW_ID = '66666666-6666-4666-8666-666666666666';
 const SHA1_HEX = 'a'.repeat(40);
-const SHA256_OLD_HEX = 'b'.repeat(64);
+const SHA256_OLD_HEX = crypto
+  .createHash('sha256')
+  .update('hello-cas')
+  .digest('hex');
 const SHA256_NEW_HEX = 'c'.repeat(64);
 
 describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isolation', () => {
@@ -425,16 +431,22 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
     });
 
     it('re-hydrates tombstoned CAS blob physical key during registerUploadedObject when previously deleted', async () => {
-      const deletedBlob = new StorageBlob({
+      const deletedBlob: StorageBlobRecord = {
         id: BLOB_OLD_ID,
-        contentHash: PlatformContentHash.fromHex(SHA256_OLD_HEX),
+        contentHashHex: PlatformContentHash.fromHex(SHA256_OLD_HEX).toHex(),
+        hashAlgorithm: 'SHA256',
         sizeBytes: 12n,
-        s3Key: PlatformStorageKey.fromString('blobs/canonical-sha256'),
+        mimeType: 'application/octet-stream',
+        checksumVerified: true,
+        s3Key: PlatformStorageKey.fromString('blobs/canonical-sha256').value(),
         s3Bucket: 'flux',
+        storageClass: 'STANDARD',
         status: BlobStatus.DELETED,
         refCount: 0,
+        createdAt: new Date(),
         tombstoneAt: new Date(Date.now() + 3600_000),
-      });
+        claimedAt: null,
+      };
 
       const driver = {
         stat: jest.fn().mockRejectedValue(new Error('NoSuchKey')),
@@ -445,15 +457,14 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         put: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn().mockResolvedValue(undefined),
       };
-      const blobRepo: jest.Mocked<IBlobRepository> = {
+      const blobRepo = {
         findById: jest.fn(),
         findByHash: jest.fn().mockResolvedValue(deletedBlob),
         create: jest.fn(),
         delete: jest.fn(),
-        findTombstonedBlobs: jest.fn(),
         incrementRefCount: jest.fn().mockResolvedValue(deletedBlob),
         decrementRefCount: jest.fn(),
-      };
+      } as unknown as jest.Mocked<BlobRepository>;
 
       const blobService = new BlobService(driver as never, blobRepo);
       const res = await blobService.registerUploadedObject({

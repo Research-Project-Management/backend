@@ -30,7 +30,7 @@ describe('ProjectResourceResolver', () => {
       pageFile: {
         findUnique: jest.fn(),
       },
-      storageFile: {
+      fileNode: {
         findUnique: jest.fn(),
       },
       workItem: {

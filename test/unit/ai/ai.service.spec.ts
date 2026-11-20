@@ -59,7 +59,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
     project: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
     page: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
     pageDoc: { findFirst: jest.Mock<Promise<unknown>, [unknown?]> };
-    storageFile: {
+    fileNode: {
       findMany: jest.Mock<Promise<unknown[]>, [unknown?]>;
       findFirst: jest.Mock<Promise<unknown>, [unknown?]>;
     };
@@ -164,7 +164,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       pageDoc: {
         findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },
-      storageFile: {
+      fileNode: {
         findMany: jest.fn<Promise<unknown[]>, [unknown?]>(async () => []),
         findFirst: jest.fn<Promise<unknown>, [unknown?]>(async () => null),
       },

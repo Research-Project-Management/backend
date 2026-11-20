@@ -28,7 +28,6 @@ import { TrackChangesService } from '../track-changes.service';
 import { TrackChangesRepository } from '../track-changes.repository';
 import { TrackChange, TextRangeVo } from '../domain';
 import { ReviewScopeRepository } from '../repositories/review-scope.repository';
-import { ReviewNotificationDispatcher } from './review-notification.dispatcher';
 import {
   broadcastReviewProjectEvent,
   resolveReviewDocAndProject,
@@ -37,7 +36,6 @@ import {
 } from './review.helpers';
 import {
   formatDomainSuggestionItem,
-  dispatchSuggestionCreatedNotifications,
   executeBatchResolveSuggestions,
   applySingleSuggestionDocPatch,
 } from './review-suggestions.helper';
@@ -65,7 +63,6 @@ export class ReviewSuggestionsService {
     private readonly pageScopeRepo: ScopeRepository,
     private readonly userResolver: UserResolverService,
     private readonly pageService: PageService,
-    private readonly notificationDispatcher: ReviewNotificationDispatcher,
     @Optional() private readonly trackChangesService?: TrackChangesService,
     @Optional() private readonly trackChangesRepo?: TrackChangesRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
@@ -240,21 +237,6 @@ export class ReviewSuggestionsService {
       'track-changes:created',
       { docId: targetDocId, suggestion: suggestionPayload },
     );
-
-    if (userId && isUuid(userId)) {
-      await dispatchSuggestionCreatedNotifications({
-        dispatcher: this.notificationDispatcher,
-        resolvedProj,
-        resolvedPageId,
-        targetDocId,
-        userId,
-        authorName,
-        changeId: saved.id,
-        changeType: saved.type === 'delete' ? 'delete' : 'insert',
-        text,
-        line: saved.range.startLine + 1,
-      });
-    }
 
     return { suggestion: suggestionPayload };
   }

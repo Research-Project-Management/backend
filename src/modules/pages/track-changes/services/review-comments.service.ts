@@ -1,7 +1,7 @@
 /**
  * modules/pages/track-changes/services/review-comments.service.ts
  * Application service encapsulating inline comment threads, replies, resolution,
- * real-time event emission, and non-blocking mention/reply notifications.
+ * and real-time event emission.
  */
 
 import {
@@ -24,7 +24,6 @@ import { UserResolverService } from '@/modules/pages/core/services/user-resolver
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 import { TrackChangesRepository } from '../track-changes.repository';
 import { ReviewScopeRepository } from '../repositories/review-scope.repository';
-import { ReviewNotificationDispatcher } from './review-notification.dispatcher';
 import {
   broadcastReviewProjectEvent,
   resolveReviewDocAndProject,
@@ -34,7 +33,6 @@ import {
   formatDomainCommentThread,
   reloadFormattedThread,
   executeCreateComment,
-  dispatchCommentResolvedNotification,
 } from './review-comments.helper';
 import {
   executeAddCommentReply,
@@ -49,7 +47,6 @@ export class ReviewCommentsService {
     private readonly pageScopeRepo: ScopeRepository,
     private readonly userResolver: UserResolverService,
     private readonly pageService: PageService,
-    private readonly notificationDispatcher: ReviewNotificationDispatcher,
     @Optional() private readonly trackChangesRepo?: TrackChangesRepository,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
@@ -192,7 +189,6 @@ export class ReviewCommentsService {
     return executeCreateComment({
       trackChangesRepo: this.trackChangesRepo,
       userResolver: this.userResolver,
-      notificationDispatcher: this.notificationDispatcher,
       eventEmitter: this.eventEmitter,
       resolvedProj,
       resolvedPageId,
@@ -215,7 +211,6 @@ export class ReviewCommentsService {
     authorizedProjectId?: string | { id: string } | null,
     role?: Role,
   ) {
-    const userId = req?.user?.id || req?.user?.sub;
     const { thread } = await this.loadThreadOrThrow(
       pageId,
       commentId,
@@ -264,11 +259,7 @@ export class ReviewCommentsService {
       { quote, isResolved },
     );
 
-    const {
-      thread: updated,
-      userMap,
-      commentPayload,
-    } = await reloadFormattedThread({
+    const { thread: updated, commentPayload } = await reloadFormattedThread({
       reviewScopeRepo: this.reviewScopeRepo,
       userResolver: this.userResolver,
       projectId: threadProjectId,
@@ -282,23 +273,6 @@ export class ReviewCommentsService {
       'comment:updated',
       { docId: updated!.docId, comment: commentPayload },
     );
-
-    if (
-      userId &&
-      isUuid(userId) &&
-      (body.resolved !== undefined || body.status !== undefined) &&
-      isResolved !== thread.isResolved
-    ) {
-      await dispatchCommentResolvedNotification({
-        dispatcher: this.notificationDispatcher,
-        label: 'updateComment:resolved',
-        thread: updated!,
-        isResolved,
-        actorId: userId,
-        fallbackProjectId: threadProjectId,
-        userMap,
-      });
-    }
 
     return { comment: commentPayload };
   }
@@ -354,7 +328,6 @@ export class ReviewCommentsService {
     return executeAddCommentReply({
       reviewScopeRepo: this.reviewScopeRepo,
       userResolver: this.userResolver,
-      notificationDispatcher: this.notificationDispatcher,
       trackChangesRepo: this.trackChangesRepo,
       eventEmitter: this.eventEmitter,
       targetProjectId,
@@ -438,11 +411,7 @@ export class ReviewCommentsService {
       { isResolved },
     );
 
-    const {
-      thread: updated,
-      userMap,
-      commentPayload,
-    } = await reloadFormattedThread({
+    const { thread: updated, commentPayload } = await reloadFormattedThread({
       reviewScopeRepo: this.reviewScopeRepo,
       userResolver: this.userResolver,
       projectId: targetProjectId,
@@ -462,16 +431,6 @@ export class ReviewCommentsService {
         comment: commentPayload,
       },
     );
-
-    await dispatchCommentResolvedNotification({
-      dispatcher: this.notificationDispatcher,
-      label: 'resolveComment',
-      thread: updated!,
-      isResolved,
-      actorId: currentUserId,
-      fallbackProjectId: targetProjectId,
-      userMap,
-    });
 
     return { comment: commentPayload };
   }

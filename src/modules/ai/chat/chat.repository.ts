@@ -186,10 +186,10 @@ export class ChatRepository {
   async findFirstDocumentFilename(
     documentIds: string[],
   ): Promise<string | null> {
-    if (!documentIds.length || !this.prisma.storageFile?.findFirst) {
+    if (!documentIds.length || !this.prisma.fileNode?.findFirst) {
       return null;
     }
-    const file = await this.prisma.storageFile
+    const file = await this.prisma.fileNode
       .findFirst({
         where: { id: { in: documentIds } },
         select: { filename: true },

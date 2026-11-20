@@ -270,7 +270,7 @@ export class WorkspacePlannerService {
             name: n.name,
             type: n.type,
             isRootDoc: Boolean(
-              nCompat.page?.rootDocId !== undefined
+              nCompat.page?.rootDocId
                 ? n.docId && n.docId === nCompat.page.rootDocId
                 : (n.docId && rootDocIds.has(n.docId)) || nCompat.isRootDoc,
             ),

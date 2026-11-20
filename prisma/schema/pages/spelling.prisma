@@ -12,6 +12,5 @@ model CustomDictionaryWord {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([spaceId, word], map: "uq_custom_dictionary_words_space_word")
-  @@index([spaceId], map: "idx_custom_dictionary_words_space")
   @@map("custom_dictionary_words")
 }

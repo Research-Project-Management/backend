@@ -1,6 +1,5 @@
 export const REALTIME_NAMESPACES = {
   MANUSCRIPTS: '/manuscripts',
-  NOTIFICATIONS: '/notifications',
   CHAT: '/chat',
 } as const;
 

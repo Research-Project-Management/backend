@@ -14,7 +14,6 @@ import { ReviewStatusController } from './controllers/review-status.controller';
 import { TrackChangesService } from './track-changes.service';
 import { TrackChangesRepository } from './track-changes.repository';
 import { ReviewScopeRepository } from './repositories/review-scope.repository';
-import { ReviewNotificationDispatcher } from './services/review-notification.dispatcher';
 import { ReviewCommentsService } from './services/review-comments.service';
 import { ReviewSuggestionsService } from './services/review-suggestions.service';
 import {
@@ -34,7 +33,6 @@ import {
     TrackChangesService,
     TrackChangesRepository,
     ReviewScopeRepository,
-    ReviewNotificationDispatcher,
     ReviewCommentsService,
     ReviewSuggestionsService,
     DocstorePatcherAdapter,
@@ -44,7 +42,6 @@ import {
     TrackChangesService,
     TrackChangesRepository,
     ReviewScopeRepository,
-    ReviewNotificationDispatcher,
     ReviewCommentsService,
     ReviewSuggestionsService,
     DocstorePatcherAdapter,

@@ -311,7 +311,7 @@ export async function buildProjectReviewOverview(params: {
       isRootDoc?: boolean;
     };
     const isRootDoc = Boolean(
-      nodeCompat.page?.rootDocId !== undefined
+      nodeCompat.page?.rootDocId
         ? node.docId && node.docId === nodeCompat.page.rootDocId
         : nodeCompat.isRootDoc,
     );

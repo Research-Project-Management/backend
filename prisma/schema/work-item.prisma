@@ -57,7 +57,7 @@ model WorkItem {
   createdBy        User             @relation("WorkItemCreator", fields: [createdById], references: [id], onDelete: Restrict)
   assigneeId       String?          @map("assignee_id") @db.Uuid
   assignee         User?            @relation("WorkItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  subscriberIds    Json             @default("[]") @map("subscriber_ids")
+  subscriberIds    Json             @default("[]") @map("subscriber_ids") @db.JsonB
   parentWorkItemId String?          @map("parent_work_item_id") @db.Uuid
   parentWorkItem   WorkItem?        @relation("WorkItemHierarchy", fields: [parentWorkItemId], references: [id], onDelete: Cascade)
   childWorkItems   WorkItem[]       @relation("WorkItemHierarchy")
@@ -80,9 +80,7 @@ model WorkItem {
   @@index([projectId, parentWorkItemId, rank])
   @@index([projectId, completed, deletedAt])
   @@index([projectId, identifier])
-  @@index([assigneeId, deletedAt])
   @@index([assigneeId, deletedAt, archivedAt, updatedAt(sort: Desc)])
-  @@index([createdById])
   @@index([createdById, deletedAt, updatedAt(sort: Desc)])
   @@map("work_items")
 }
@@ -95,9 +93,9 @@ model WorkItemComment {
   createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
   content     String
   isEdited    Boolean  @default(false) @map("is_edited")
-  reactions   Json?    @default("[]")
-  replies     Json?    @default("[]")
-  attachments Json?    @default("[]")
+  reactions   Json?    @default("[]") @db.JsonB
+  replies     Json?    @default("[]") @db.JsonB
+  attachments Json?    @default("[]") @db.JsonB
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -120,7 +118,7 @@ model WorkItemDraft {
   dueDate     DateTime?        @map("due_date") @db.Timestamptz(6)
   labels      String[]         @default([])
   assigneeId  String?          @map("assignee_id") @db.Uuid
-  assigneeIds Json             @default("[]") @map("assignee_ids")
+  assigneeIds Json             @default("[]") @map("assignee_ids") @db.JsonB
   metadata    Json?            @default("{}") @db.JsonB
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -135,6 +133,7 @@ model EntityAttachment {
   entityType  EntityType @map("entity_type")
   entityId    String     @map("entity_id")
   spaceId     String?    @map("space_id") @db.Uuid
+  space       Space?     @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_entity_attachments_space_id")
   filename    String
   url         String
   storageKey  String?    @map("storage_key")
@@ -171,8 +170,9 @@ model SpaceLabel {
   createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([spaceId, type, parentId, name], map: "uq_space_labels_space_type_parent_name")
-  @@index([spaceId, type, sortOrder])
+  // NULL-safe, case-insensitive uniqueness (`uq_space_labels_space_type_parent_name`)
+  // is enforced via PostgreSQL functional unique index in prisma/sql/library-schema-integrity.sql.
+  @@index([spaceId, type, sortOrder], map: "idx_space_labels_type_sort")
   @@index([spaceId, sortOrder])
   @@index([spaceId, parentId])
   @@index([createdById])

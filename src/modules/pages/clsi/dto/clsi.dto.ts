@@ -138,6 +138,16 @@ export class CompilePageDto {
   @IsOptional()
   @IsIn(['inline', 'artifact'])
   responseMode?: 'inline' | 'artifact';
+
+  @ApiPropertyOptional({
+    description:
+      'Compilation priority: "manual" user-triggered compiles take precedence over background "auto" compiles under queue contention',
+    enum: ['manual', 'auto'],
+    default: 'manual',
+  })
+  @IsOptional()
+  @IsIn(['manual', 'auto'])
+  priority?: 'manual' | 'auto';
 }
 
 export class ClsiWordCountDto {

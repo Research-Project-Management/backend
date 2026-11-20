@@ -18,6 +18,5 @@ enum EntityType {
   collection
   project
   work_item
-  worklog
   item
 }

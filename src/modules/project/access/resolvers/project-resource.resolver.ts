@@ -171,7 +171,7 @@ export class ProjectResourceResolver {
           ? request.params.assetId
           : undefined;
       if (assetId && isUUID(assetId)) {
-        const file = await this.prisma.storageFile.findUnique({
+        const file = await this.prisma.fileNode.findUnique({
           where: { id: assetId },
           select: { spaceId: true, linkedToId: true },
         });

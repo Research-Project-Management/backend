@@ -61,17 +61,17 @@ model User {
   auditLogs          AuditLog[]          @relation("AuditActor")
 
   // Collaborative Project Relations
-  createdProjects       Project[]         @relation("ProjectCreator")
-  projectMembers        ProjectMember[]   @relation("UserProjectMemberships")
-  projectFavorites      ProjectFavorite[] @relation("UserProjectFavorites")
-  assignedProjectLabels ProjectLabel[]    @relation("ProjectLabelAssigner")
-  projectTemplates      ProjectTemplate[] @relation("UserProjectTemplates")
-  projectUpdates        ProjectUpdate[]   @relation("UserProjectUpdates")
+  createdProjects  Project[]         @relation("ProjectCreator")
+  projectMembers   ProjectMember[]   @relation("UserProjectMemberships")
+  projectFavorites ProjectFavorite[] @relation("UserProjectFavorites")
+  projectUpdates   ProjectUpdate[]   @relation("UserProjectUpdates")
 
-  // Storage Relations
-  createdFiles StorageFile[]      @relation("UserFiles")
-  starredFiles StorageFileStar[]  @relation("UserStarredFiles")
-  sharedFiles  StorageFileShare[] @relation("UserSharedFiles")
+  // Files Relations
+  createdFiles        FileNode[]    @relation("UserFileNodes")
+  starredFiles        FileStar[]    @relation("UserStarredFiles")
+  sharedFiles         FileShare[]   @relation("UserSharedFiles")
+  createdFileVersions FileVersion[] @relation("UserFileVersions")
+  fileUploads         FileUpload[]  @relation("UserFileUploads")
 
   // Work-Item & Space Label Relations
   userActivityEvents    ActivityEvent[]    @relation("UserActivityEvents")
@@ -124,9 +124,9 @@ model UserSettings {
   theme         ThemePreference @default(system)
   locale        String          @default("en") @db.VarChar(10)
   timezone      String?         @default("UTC") @db.VarChar(50)
-  editorConfig  Json            @default("{}") @map("editor_config")
-  preferences   Json            @default("{}")
-  notifications Json            @default("{}")
+  editorConfig  Json            @default("{}") @map("editor_config") @db.JsonB
+  preferences   Json            @default("{}") @db.JsonB
+  notifications Json            @default("{}") @db.JsonB
   createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -140,7 +140,7 @@ model UserAccount {
   provider          AuthProvider
   providerSubjectId String       @map("provider_subject_id") @db.VarChar(255)
   email             String?      @db.VarChar(255)
-  profileData       Json?        @map("profile_data")
+  profileData       Json?        @map("profile_data") @db.JsonB
   createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -182,18 +182,16 @@ model AuditLog {
   action         String        @db.VarChar(100)
   outcome        AuditOutcome  @default(success)
   severity       AuditSeverity @default(info)
-  spaceId        String?       @map("space_id") @db.Uuid
   projectId      String?       @map("project_id") @db.Uuid
   targetType     String?       @map("target_type") @db.VarChar(50)
   targetId       String?       @map("target_id") @db.VarChar(100)
   ipAddress      String?       @map("ip_address") @db.VarChar(45)
   userAgent      String?       @map("user_agent")
   traceId        String?       @map("trace_id") @db.VarChar(64)
-  metadata       Json?         @default("{}")
+  metadata       Json?         @default("{}") @db.JsonB
   occurredAt     DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
 
   @@index([actorId, occurredAt(sort: Desc)])
-  @@index([spaceId, occurredAt(sort: Desc)])
   @@index([projectId, occurredAt(sort: Desc)])
   @@index([action, occurredAt(sort: Desc)])
   @@index([severity, occurredAt(sort: Desc)])
@@ -211,6 +209,6 @@ model VerificationToken {
   expiresAt DateTime              @map("expires_at") @db.Timestamptz(6)
   createdAt DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([userId, type])
+  @@index([userId, type, expiresAt], map: "idx_verification_tokens_active")
   @@map("verification_tokens")
 }

@@ -103,7 +103,7 @@ model Message {
   senderId       String      @map("sender_id") @db.Uuid
   type           MessageType @default(text)
   content        String      @db.Text
-  attachments    Json?       @default("[]") // Danh sách file/ảnh trỏ tới S3
+  attachments    Json?       @default("[]") @db.JsonB // Danh sách file/ảnh trỏ tới S3
   replyToId      String?     @map("reply_to_id") @db.Uuid
   replyTo        Message?    @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies        Message[]   @relation("MessageReplies")

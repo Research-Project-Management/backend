@@ -1,18 +1,15 @@
 /**
  * modules/pages/track-changes/services/review-comments.helper.ts
- * Domain payload builders, thread reload/broadcast helpers, and notification dispatchers
- * supporting ReviewCommentsService.
+ * Domain payload builders and thread reload/broadcast helpers supporting ReviewCommentsService.
  */
 
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthenticatedRequest, isUuid } from '@/core';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
-import { getRecordSpaceId } from '@/modules/pages/core/page-scope.helper';
 import { TrackChangesRepository } from '../track-changes.repository';
 import { CommentThread, TextRangeVo } from '../domain';
 import { ReviewScopeRepository } from '../repositories/review-scope.repository';
-import { ReviewNotificationDispatcher } from './review-notification.dispatcher';
 import {
   broadcastReviewProjectEvent,
   formatCommentThreadDto,
@@ -96,143 +93,6 @@ export async function reloadFormattedThread(params: {
   return { thread: updated, userMap, commentPayload };
 }
 
-export async function dispatchCommentCreatedMentions(params: {
-  dispatcher: ReviewNotificationDispatcher;
-  content: string;
-  userId: string;
-  authorName: string;
-  projectId: string;
-  pageId?: string | null;
-  docId: string;
-  threadId: string;
-}): Promise<void> {
-  await params.dispatcher.dispatchReviewNotificationSafe(
-    'createComment:mentions',
-    async (notifications) => {
-      const ctx = await params.dispatcher.resolveSpaceNotificationContext(
-        params.projectId,
-        params.pageId,
-        params.docId,
-      );
-      await notifications.parseAndNotifyMentions({
-        text: params.content,
-        actorId: params.userId,
-        actorName: params.authorName,
-        spaceId: ctx.spaceId,
-        projectId: ctx.projectId,
-        projectName: ctx.projectName,
-        pageId: ctx.pageId,
-        docId: params.docId,
-        threadId: params.threadId,
-        isPersonalSpace: ctx.isPersonalSpace,
-        collaboratorMap: ctx.collaboratorMap,
-      });
-    },
-  );
-}
-
-export async function dispatchCommentResolvedNotification(params: {
-  dispatcher: ReviewNotificationDispatcher;
-  label: string;
-  thread: ThreadWithReplies;
-  isResolved: boolean;
-  actorId: string | undefined;
-  fallbackProjectId: string;
-  userMap: ResolvedUserMap;
-}): Promise<void> {
-  const { dispatcher, thread, isResolved, actorId, userMap } = params;
-  await dispatcher.dispatchReviewNotificationSafe(
-    params.label,
-    async (notifications) => {
-      if (!isResolved) {
-        await notifications.dismissThreadResolved(thread.id);
-        return;
-      }
-      if (
-        actorId &&
-        isUuid(actorId) &&
-        thread.createdById &&
-        thread.createdById !== actorId
-      ) {
-        const ctx = await dispatcher.resolveSpaceNotificationContext(
-          getRecordSpaceId(thread) || params.fallbackProjectId,
-          (thread as { pageId?: string | null }).pageId,
-          thread.docId,
-        );
-        await notifications.notifyThreadResolved({
-          recipientUserId: thread.createdById,
-          actorId,
-          actorName: userMap.get(actorId)?.name || 'Collaborator',
-          spaceId: ctx.spaceId,
-          projectId: ctx.projectId,
-          projectName: ctx.projectName,
-          pageId: ctx.pageId,
-          docId: thread.docId,
-          threadId: thread.id,
-          quote: thread.quote || undefined,
-          isPersonalSpace: ctx.isPersonalSpace,
-        });
-      }
-    },
-  );
-}
-
-export async function dispatchCommentReplyNotifications(params: {
-  dispatcher: ReviewNotificationDispatcher;
-  userResolver: UserResolverService;
-  thread: ThreadWithReplies;
-  fallbackProjectId: string;
-  userId: string;
-  replyId: string;
-  content: string;
-}): Promise<void> {
-  const { dispatcher, thread, userId, replyId, content } = params;
-  await dispatcher.dispatchReviewNotificationSafe(
-    'addCommentReply',
-    async (notifications) => {
-      const ctx = await dispatcher.resolveSpaceNotificationContext(
-        getRecordSpaceId(thread) || params.fallbackProjectId,
-        (thread as { pageId?: string | null }).pageId,
-        thread.docId,
-      );
-      const replyActor = await params.userResolver.resolveUserNames([userId]);
-      const actorName = replyActor.get(userId)?.name || 'Collaborator';
-
-      if (thread.createdById && thread.createdById !== userId) {
-        await notifications.notifyCommentReply({
-          recipientUserId: thread.createdById,
-          actorId: userId,
-          actorName,
-          spaceId: ctx.spaceId,
-          projectId: ctx.projectId,
-          projectName: ctx.projectName,
-          pageId: ctx.pageId,
-          docId: thread.docId,
-          threadId: thread.id,
-          replyId,
-          snippet: content,
-          isPersonalSpace: ctx.isPersonalSpace,
-        });
-      }
-
-      await notifications.parseAndNotifyMentions({
-        text: content,
-        actorId: userId,
-        actorName,
-        spaceId: ctx.spaceId,
-        projectId: ctx.projectId,
-        projectName: ctx.projectName,
-        pageId: ctx.pageId,
-        docId: thread.docId,
-        threadId: thread.id,
-        commentId: replyId,
-        isPersonalSpace: ctx.isPersonalSpace,
-        collaboratorMap: ctx.collaboratorMap,
-      });
-    },
-  );
-}
-
 export function emitCommentProjectEvent(
   eventEmitter: EventEmitter2 | undefined,
   projectId: string | null | undefined,
@@ -245,7 +105,6 @@ export function emitCommentProjectEvent(
 export async function executeCreateComment(params: {
   trackChangesRepo?: TrackChangesRepository;
   userResolver: UserResolverService;
-  notificationDispatcher: ReviewNotificationDispatcher;
   eventEmitter?: EventEmitter2;
   resolvedProj?: string | null;
   resolvedPageId?: string | null;
@@ -256,7 +115,6 @@ export async function executeCreateComment(params: {
   const {
     trackChangesRepo,
     userResolver,
-    notificationDispatcher,
     eventEmitter,
     resolvedProj,
     resolvedPageId,
@@ -317,19 +175,6 @@ export async function executeCreateComment(params: {
     docId: targetDocId,
     comment: commentPayload,
   });
-
-  if (userId && isUuid(userId)) {
-    await dispatchCommentCreatedMentions({
-      dispatcher: notificationDispatcher,
-      content: body.content,
-      userId,
-      authorName,
-      projectId: resolvedProj,
-      pageId: resolvedPageId,
-      docId: targetDocId,
-      threadId: saved.id,
-    });
-  }
 
   return { comment: commentPayload };
 }

@@ -12,6 +12,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 import { createZipStream, ZipEntry } from '../../core/utils/zip-builder';
 import { IOutputFileFinder, DiscoveredOutputFile } from '../domain';
 
@@ -64,7 +65,7 @@ export class ProjectLockManager {
 
     while (Date.now() - startTime < maxWait) {
       if (signal?.aborted) {
-        throw new Error(`Project lock acquisition aborted for "${projectId}"`);
+        throw new ProjectLockAbortedError(projectId);
       }
 
       try {
@@ -121,14 +122,24 @@ export class ProjectLockManager {
   }
 }
 
-export class ProjectLockTimeoutError extends Error {
-  public readonly statusCode = 409;
+export class ProjectLockAbortedError extends PagesDomainError {
+  constructor(public readonly projectId: string) {
+    super(`Project lock acquisition aborted for "${projectId}"`, {
+      code: 'PROJECT_LOCK_ABORTED',
+      statusCode: 499,
+    });
+  }
+}
 
+export class ProjectLockTimeoutError extends PagesDomainError {
   constructor(projectId: string, maxWait: number) {
     super(
       `Project compilation lock timed out after ${maxWait}ms for project "${projectId}". Another compilation is currently in progress.`,
+      {
+        code: 'PROJECT_LOCK_TIMEOUT',
+        statusCode: 409,
+      },
     );
-    this.name = 'ProjectLockTimeoutError';
   }
 }
 

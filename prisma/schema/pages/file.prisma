@@ -10,7 +10,7 @@ model PageFile {
   page    Page   @relation(fields: [pageId, spaceId], references: [id, spaceId], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_files_page_space")
 
   blobId        String?      @map("blob_id") @db.Uuid
-  blob          StorageBlob? @relation(fields: [blobId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_page_files_blob_id")
+  blob          FileBlob?    @relation(fields: [blobId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_page_files_blob_id")
   lastKnownPath String       @map("last_known_path") @db.VarChar(1000)
   mimeType      String       @default("application/octet-stream") @map("mime_type") @db.VarChar(128)
   sizeBytes     Int          @default(0) @map("size_bytes")

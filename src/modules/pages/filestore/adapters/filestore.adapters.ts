@@ -291,7 +291,12 @@ export class PlatformBinaryStorageAdapter extends IBinaryStoragePort {
     key: string,
   ): Promise<boolean> {
     const physicalKey = this.resolveStorageKey(bucket, key);
-    return await this.port.objectExists(physicalKey);
+    try {
+      await this.port.statObject(physicalKey);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   public async deleteObject(bucket: string, key: string): Promise<void> {

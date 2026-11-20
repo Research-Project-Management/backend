@@ -3,7 +3,6 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { RoomStore } from './pages/room.store';
 import { YjsService } from './pages/yjs.service';
 import { PagesGateway } from './pages/pages.gateway';
-import { NotificationGateway } from './notifications/notifications.gateway';
 import { CoreService, RealtimeStats } from './core/core.service';
 import { UserPresence } from './pages/types/presence.type';
 import { REALTIME_EVENTS } from './core/realtime.constant';
@@ -17,7 +16,6 @@ export class RealtimeFacade {
     @Optional() private readonly coreService?: CoreService,
     @Optional() private readonly yjs?: YjsService,
     @Optional() private readonly PagesGateway?: PagesGateway,
-    @Optional() private readonly notificationGateway?: NotificationGateway,
   ) {}
 
   /**
@@ -73,6 +71,12 @@ export class RealtimeFacade {
       status: 'queued' | 'compiling' | 'success' | 'failed';
       logs?: string[];
       pdfUrl?: string;
+      summary?: {
+        totalErrors: number;
+        totalWarnings: number;
+        totalBadboxes: number;
+      };
+      logArtifactUrl?: string;
     },
   ): void {
     this.broadcastEvent(projectId, REALTIME_EVENTS.COMPILE_PROGRESS, progress);
@@ -107,26 +111,6 @@ export class RealtimeFacade {
   ): void {
     if (this.PagesGateway) {
       this.PagesGateway.broadcastToProject(projectId, event, payload);
-    }
-  }
-
-  /**
-   * User Notification Dispatch:
-   * Sends real-time notification or unread count to a specific user room.
-   */
-  public notifyUser(userId: string, event: string, payload: unknown): void {
-    if (this.notificationGateway) {
-      this.notificationGateway.sendToUser(userId, event, payload);
-    }
-  }
-
-  /**
-   * Global System Broadcast:
-   * Emits system-wide alert to all connected sockets.
-   */
-  public broadcastSystem(event: string, payload: unknown): void {
-    if (this.notificationGateway) {
-      this.notificationGateway.broadcastSystem(event, payload);
     }
   }
 

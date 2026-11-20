@@ -164,7 +164,6 @@ export class ExtractionMetadataSynchronizer {
               filename: `pdf_fulltext_${attachment.itemId}_${attachment.id}.json.gz`,
               buffer: compressed,
               mimeType: 'application/gzip',
-              source: 'reader.pdf_fulltext',
             });
 
             if (uploadResult?.fileId) {

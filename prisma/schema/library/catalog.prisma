@@ -209,6 +209,5 @@ model CitationStyle {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([spaceId, slug])
-  @@index([spaceId])
   @@map("citation_styles")
 }

@@ -4,6 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 import { TextRangeVo } from './text-range';
 
 export type ChangeType = 'insert' | 'delete';
@@ -26,13 +27,12 @@ export interface CreateTrackChangeProps {
   updatedAt?: Date;
 }
 
-export class TrackChangeDomainException extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'INVALID_TRACK_CHANGE';
-
+export class TrackChangeDomainException extends PagesDomainError {
   constructor(message: string) {
-    super(message);
-    this.name = 'TrackChangeDomainException';
+    super(message, {
+      code: 'INVALID_TRACK_CHANGE',
+      statusCode: 400,
+    });
   }
 }
 

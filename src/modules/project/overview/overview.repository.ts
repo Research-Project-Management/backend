@@ -189,7 +189,7 @@ export class OverviewRepository {
       this.prisma.libraryItem.count({
         where: { spaceId: { in: spaceIds }, deletedAt: null },
       }),
-      this.prisma.storageFile.count({
+      this.prisma.fileNode.count({
         where: {
           spaceId: { in: spaceIds },
           deletedAt: null,

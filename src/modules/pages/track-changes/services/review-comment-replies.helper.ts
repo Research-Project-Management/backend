@@ -16,20 +16,15 @@ import { UserResolverService } from '@/modules/pages/core/services/user-resolver
 import { TrackChangesRepository } from '../track-changes.repository';
 import { CommentReply } from '../domain';
 import { ReviewScopeRepository } from '../repositories/review-scope.repository';
-import { ReviewNotificationDispatcher } from './review-notification.dispatcher';
 import {
   assertCanModifyReviewItem,
   broadcastReviewProjectEvent,
 } from './review.helpers';
-import {
-  reloadFormattedThread,
-  dispatchCommentReplyNotifications,
-} from './review-comments.helper';
+import { reloadFormattedThread } from './review-comments.helper';
 
 export async function executeAddCommentReply(params: {
   reviewScopeRepo: ReviewScopeRepository;
   userResolver: UserResolverService;
-  notificationDispatcher: ReviewNotificationDispatcher;
   trackChangesRepo?: TrackChangesRepository;
   eventEmitter?: EventEmitter2;
   targetProjectId?: string;
@@ -41,7 +36,6 @@ export async function executeAddCommentReply(params: {
   const {
     reviewScopeRepo,
     userResolver,
-    notificationDispatcher,
     trackChangesRepo,
     eventEmitter,
     targetProjectId,
@@ -93,22 +87,6 @@ export async function executeAddCommentReply(params: {
     'comment:reply-added',
     { docId: thread!.docId, commentId: thread!.id, comment: commentPayload },
   );
-
-  if (userId && isUuid(userId)) {
-    const lastReply =
-      thread!.replies && thread!.replies.length > 0
-        ? thread!.replies[thread!.replies.length - 1]
-        : null;
-    await dispatchCommentReplyNotifications({
-      dispatcher: notificationDispatcher,
-      userResolver,
-      thread: thread!,
-      fallbackProjectId: targetProjectId,
-      userId,
-      replyId: lastReply?.id || replyEntity.id,
-      content: body.content,
-    });
-  }
 
   return { comment: commentPayload };
 }

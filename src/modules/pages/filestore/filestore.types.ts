@@ -4,6 +4,7 @@
  */
 
 import { Readable } from 'node:stream';
+import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB (Overleaf Parity)
 
@@ -11,25 +12,22 @@ export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB (Overleaf Parity)
 // EXCEPTIONS
 // ============================================================================
 
-export class FileNotFoundException extends Error {
-  public readonly statusCode = 404;
-  public readonly code = 'FILE_NOT_FOUND';
-
+export class FileNotFoundException extends PagesDomainError {
   constructor(
     public readonly fileId: string,
     public readonly projectId?: string,
   ) {
     super(
       `Binary asset '${fileId}' was not found in space '${projectId ?? 'unknown'}'.`,
+      {
+        code: 'FILE_NOT_FOUND',
+        statusCode: 404,
+      },
     );
-    this.name = 'FileNotFoundException';
   }
 }
 
-export class InvalidByteRangeException extends Error {
-  public readonly statusCode = 416;
-  public readonly code = 'INVALID_BYTE_RANGE';
-
+export class InvalidByteRangeException extends PagesDomainError {
   constructor(
     public readonly rangeHeader: string,
     public readonly totalSizeBytes: number,
@@ -38,48 +36,50 @@ export class InvalidByteRangeException extends Error {
     super(
       message ??
         `Requested byte range '${rangeHeader}' is unsatisfiable for object of size ${totalSizeBytes} bytes (RFC 7233).`,
+      {
+        code: 'INVALID_BYTE_RANGE',
+        statusCode: 416,
+      },
     );
-    this.name = 'InvalidByteRangeException';
   }
 }
 
-export class DuplicateFileException extends Error {
-  public readonly statusCode = 409;
-  public readonly code = 'DUPLICATE_FILE';
-
+export class DuplicateFileException extends PagesDomainError {
   constructor(
     public readonly filename: string,
     public readonly projectId: string,
   ) {
     super(
       `A binary asset or node at '${filename}' already exists in space '${projectId}'.`,
+      {
+        code: 'DUPLICATE_FILE',
+        statusCode: 409,
+      },
     );
-    this.name = 'DuplicateFileException';
   }
 }
 
-export class StorageQuotaExceededException extends Error {
-  public readonly statusCode = 413;
-  public readonly code = 'STORAGE_QUOTA_EXCEEDED';
-
+export class StorageQuotaExceededException extends PagesDomainError {
   constructor(
     public readonly attemptedSizeBytes: number,
     public readonly maxAllowedSizeBytes: number,
   ) {
     super(
       `File size (${attemptedSizeBytes} bytes) exceeds maximum permissible storage limit (${maxAllowedSizeBytes} bytes).`,
+      {
+        code: 'STORAGE_QUOTA_EXCEEDED',
+        statusCode: 413,
+      },
     );
-    this.name = 'StorageQuotaExceededException';
   }
 }
 
-export class FilestoreValidationException extends Error {
-  public readonly statusCode = 400;
-  public readonly code = 'FILESTORE_VALIDATION_ERROR';
-
+export class FilestoreValidationException extends PagesDomainError {
   constructor(message: string) {
-    super(message);
-    this.name = 'FilestoreValidationException';
+    super(message, {
+      code: 'FILESTORE_VALIDATION_ERROR',
+      statusCode: 400,
+    });
   }
 }
 

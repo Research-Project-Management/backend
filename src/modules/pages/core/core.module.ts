@@ -9,7 +9,6 @@
 import { Global, Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { IdentityModule } from '@/modules/identity/identity.module';
-import { NotificationsModule } from '@/modules/notifications/notifications.module';
 import { RealtimeModule } from '@/modules/realtime/realtime.module';
 import { PagesConfigService } from './config/pages.config';
 import { WorkspaceCollectorService } from './services/workspace-collector.service';
@@ -25,7 +24,7 @@ import { CleanupListener } from './services/cleanup.listener';
 
 @Global()
 @Module({
-  imports: [PrismaModule, IdentityModule, NotificationsModule, RealtimeModule],
+  imports: [PrismaModule, IdentityModule, RealtimeModule],
   providers: [
     PagesConfigService,
     WorkspaceCollectorService,
@@ -45,7 +44,6 @@ import { CleanupListener } from './services/cleanup.listener';
     UserResolverService,
     IDistributedLockPort,
     RedisLockAdapter,
-    NotificationsModule,
     RealtimeModule,
   ],
 })

@@ -68,7 +68,7 @@ export class AnalyticsRepository {
       this.prisma.pageDoc.count({
         where: { spaceId: canonicalProjectId, deletedAt: null },
       }),
-      this.prisma.storageFile.count({
+      this.prisma.fileNode.count({
         where: {
           spaceId: canonicalProjectId,
           deletedAt: null,

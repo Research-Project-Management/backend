@@ -16,6 +16,7 @@ import {
   Logger,
   Module,
   NotFoundException,
+  OnModuleDestroy,
   Param,
   Post,
   Res,
@@ -23,7 +24,14 @@ import {
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { FastifyReply } from 'fastify';
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
+import {
+  FairSemaphore,
+  AutoCompileShedError,
+  CompileSupersededError,
+  SemaphoreAbortedError,
+} from './modules/pages/clsi/domain/fair-semaphore';
 import {
   CompilePageDto,
   ClsiWordCountDto,
@@ -49,8 +57,13 @@ import { SyncTexProcessor } from './modules/pages/clsi/domain/synctex.parser';
 import { TexWordCounter } from './modules/pages/clsi/domain/tex-word.counter';
 import { ClsiMetrics } from './modules/pages/clsi/domain/clsi.metrics';
 
+interface ClsiContainerInFlightSession {
+  abortController: AbortController;
+  settled: Promise<void>;
+}
+
 @Injectable()
-export class ClsiService {
+export class ClsiService implements OnModuleDestroy {
   private readonly logger = new Logger(ClsiService.name);
   private readonly workspace: WorkspaceRepository;
   private readonly pipeline: CompilePipeline;
@@ -59,6 +72,13 @@ export class ClsiService {
   private readonly diskUsageCleaner: DiskUsageCleaner;
   private readonly healthCheck: ClsiHealthCheck;
   private readonly metrics: ClsiMetrics = ClsiMetrics.getInstance();
+  private readonly slots: FairSemaphore;
+  private readonly autoShedThreshold: number;
+  private readonly supersedeGraceMs = 3000;
+  private readonly inFlightCompiles = new Map<
+    string,
+    ClsiContainerInFlightSession
+  >();
 
   constructor() {
     const scratchDir =
@@ -66,6 +86,26 @@ export class ClsiService {
       process.env.SCRATCH_DIR ||
       '/tmp/clsi-scratch';
     const latexmkBin = process.env.LATEXMK_BIN || 'latexmk';
+
+    const maxConcurrentEnv = Number(process.env.CLSI_MAX_CONCURRENT_COMPILES);
+    const cpuCount = typeof os.cpus === 'function' ? os.cpus().length : 2;
+    const capacity =
+      Number.isFinite(maxConcurrentEnv) && maxConcurrentEnv >= 1
+        ? Math.floor(maxConcurrentEnv)
+        : Math.max(2, cpuCount - 1);
+    const maxQueue = Math.max(
+      1,
+      Number(process.env.CLSI_MAX_QUEUE_LENGTH || 64),
+    );
+    const maxWaitMs = Math.max(
+      1000,
+      Number(process.env.CLSI_MAX_QUEUE_WAIT_MS || 90_000),
+    );
+    this.autoShedThreshold = Math.max(
+      1,
+      Math.min(40, Math.floor(maxQueue * 0.75)),
+    );
+    this.slots = new FairSemaphore(capacity, maxQueue, maxWaitMs);
 
     this.workspace = new WorkspaceRepository(scratchDir);
     const runner = new LocalProcessRunner();
@@ -83,6 +123,43 @@ export class ClsiService {
     );
   }
 
+  public onModuleDestroy(): void {
+    for (const session of this.inFlightCompiles.values()) {
+      session.abortController.abort();
+    }
+    this.inFlightCompiles.clear();
+  }
+
+  private async waitSettled(
+    settled: Promise<void>,
+    graceMs: number,
+  ): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        settled,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, graceMs);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  public cancelCompile(projectId: string): boolean {
+    const session = this.inFlightCompiles.get(projectId);
+    if (session) {
+      session.abortController.abort();
+      this.logger.log(
+        `Cancelled in-flight compilation for project "${projectId}"`,
+      );
+      return true;
+    }
+    return false;
+  }
+
   public async compile(dto: CompilePageDto) {
     const projectId = dto.pageId || dto.spaceId || 'default';
     const mainFile = dto.mainFile || 'main.tex';
@@ -91,40 +168,95 @@ export class ClsiService {
     const engine = dto.engine || 'pdflatex';
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
-    if (dto.forceClean) {
-      await this.pipeline.runWithProjectLock(projectId, () =>
-        this.workspace.cleanScratch(projectId),
-      );
+    const waitingCount = this.slots.stats().waiting;
+    if (dto.priority === 'auto' && waitingCount >= this.autoShedThreshold) {
+      throw new AutoCompileShedError(waitingCount, this.autoShedThreshold);
     }
 
-    this.logger.log(`Compiling project ${projectId} using engine ${engine}`);
-
-    const pipelineResult = await this.pipeline.execute({
-      projectId,
-      mainFile,
-      engine,
-      texLiveVersion: dto.texLiveVersion || '2025',
-      draft: dto.draft,
-      syntaxOnly: dto.syntaxOnly,
-      force: dto.forceClean,
-      stopOnFirstError: dto.stopOnFirstError ?? false,
-      timeoutMs: effectiveTimeoutMs,
-      source,
-      files,
+    const existing = this.inFlightCompiles.get(projectId);
+    const abortController = new AbortController();
+    let markSettled!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      markSettled = resolve;
     });
+    const session: ClsiContainerInFlightSession = {
+      abortController,
+      settled,
+    };
+    this.inFlightCompiles.set(projectId, session);
 
-    this.metrics.record({
-      engine,
-      durationMs: pipelineResult.durationMs,
-      success: pipelineResult.success,
-      isCached: false,
-      isTimeout: Boolean(pipelineResult.timedOut),
-      pdfSizeBytes: pipelineResult.pdf
-        ? Buffer.byteLength(pipelineResult.pdf, 'base64')
-        : 0,
-    });
+    let release: (() => void) | undefined;
+    try {
+      if (existing) {
+        existing.abortController.abort();
+        await this.waitSettled(existing.settled, this.supersedeGraceMs);
+      }
 
-    return pipelineResult;
+      const fast = this.slots.tryAcquire();
+      if (fast) {
+        release = fast;
+      } else {
+        try {
+          release = await this.slots.acquire(
+            dto.spaceId || projectId,
+            abortController.signal,
+          );
+        } catch (err) {
+          if (err instanceof SemaphoreAbortedError) {
+            throw new CompileSupersededError();
+          }
+          throw err;
+        }
+      }
+
+      if (abortController.signal.aborted) {
+        throw new CompileSupersededError();
+      }
+
+      if (dto.forceClean) {
+        await this.pipeline.runWithProjectLock(
+          projectId,
+          () => this.workspace.cleanScratch(projectId),
+          abortController.signal,
+        );
+      }
+
+      this.logger.log(`Compiling project ${projectId} using engine ${engine}`);
+
+      const pipelineResult = await this.pipeline.execute({
+        projectId,
+        mainFile,
+        engine,
+        texLiveVersion: dto.texLiveVersion || '2025',
+        draft: dto.draft,
+        syntaxOnly: dto.syntaxOnly,
+        force: dto.forceClean,
+        stopOnFirstError: dto.stopOnFirstError ?? false,
+        timeoutMs: effectiveTimeoutMs,
+        source,
+        files,
+        signal: abortController.signal,
+      });
+
+      this.metrics.record({
+        engine,
+        durationMs: pipelineResult.durationMs,
+        success: pipelineResult.success,
+        isCached: false,
+        isTimeout: Boolean(pipelineResult.timedOut),
+        pdfSizeBytes: pipelineResult.pdf
+          ? Buffer.byteLength(pipelineResult.pdf, 'base64')
+          : 0,
+      });
+
+      return pipelineResult;
+    } finally {
+      release?.();
+      if (this.inFlightCompiles.get(projectId) === session) {
+        this.inFlightCompiles.delete(projectId);
+      }
+      markSettled();
+    }
   }
 
   private async loadSynctexContent(
@@ -371,7 +503,14 @@ export class ClsiService {
   }
 
   public async getHealthReport() {
-    return this.healthCheck.checkHealth();
+    const report = await this.healthCheck.checkHealth();
+    return {
+      ...report,
+      queue: {
+        ...this.slots.stats(),
+        inFlightProjects: this.inFlightCompiles.size,
+      },
+    };
   }
 
   public getMetricsSummary() {
@@ -405,6 +544,16 @@ export class ClsiController {
   })
   public async compile(@Body() dto: CompilePageDto) {
     return this.clsiService.compile(dto);
+  }
+
+  @Post('cancel/:projectId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancel an ongoing compilation for a project',
+  })
+  public cancelCompile(@Param('projectId') projectId: string) {
+    const cancelled = this.clsiService.cancelCompile(projectId);
+    return { success: true, cancelled };
   }
 
   @Post('word-count')

@@ -28,7 +28,7 @@ describe('Library OCC (Optimistic Concurrency Control) Pattern', () => {
         item: itemMock,
         libraryItem: itemMock,
         file: fileMock,
-        storageFile: fileMock,
+        fileNode: fileMock,
       };
 
       const module: TestingModule = await Test.createTestingModule({

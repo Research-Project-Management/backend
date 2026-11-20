@@ -13,6 +13,7 @@ import {
   IDistributedLockHandle,
   InMemoryDistributedLockAdapter,
 } from '../ports/distributed-lock.port';
+import { DistributedLockTimeoutError } from '../domain/pages-domain.error';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -126,9 +127,7 @@ export class RedisLockAdapter extends IDistributedLockPort {
 
     while (!handle) {
       if (Date.now() - startTime >= maxWaitMs) {
-        throw new Error(
-          `Failed to acquire distributed lock for resource "${resource}" within ${maxWaitMs}ms`,
-        );
+        throw new DistributedLockTimeoutError(resource, maxWaitMs);
       }
       // Exponential jittered backoff between 50ms and 200ms
       const delay = Math.floor(50 + Math.random() * 150);

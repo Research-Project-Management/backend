@@ -3,7 +3,7 @@
  * Cached artifact synchronization, auxiliary file download, ZIP packaging, and build summary helpers.
  */
 
-import { HttpException, Logger, NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import type { Queue } from 'bullmq';
 import * as crypto from 'crypto';
@@ -12,6 +12,8 @@ import * as path from 'path';
 import type { CompilePageDto } from '../dto/clsi.dto';
 import type { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { CompilerDiagnostic } from '../domain/clsi.ports';
+import { CompileSupersededError } from '../domain/fair-semaphore';
+import { ClsiWorkerExecutionError } from '../domain/sandbox.errors';
 import {
   WorkspaceRepository,
   createZipStreamFromDisk,
@@ -461,7 +463,7 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
   try {
     while (Date.now() - startTime < effectiveTimeoutMs) {
       if (activeQueueJobIds.get(compileTargetId) !== jobId) {
-        throw new HttpException('Compilation superseded or cancelled', 409);
+        throw new CompileSupersededError('Compilation superseded or cancelled');
       }
       const state = await job.getState();
       if (state === 'completed') {
@@ -472,20 +474,16 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
         const freshJob = await compileQueue.getJob(job.id!);
         const reason =
           freshJob?.failedReason || 'Job execution failed in CLSI worker';
-        const workerErr = new Error(reason) as Error & {
-          isWorkerExecutionError?: boolean;
-        };
-        workerErr.isWorkerExecutionError = true;
-        throw workerErr;
+        throw new ClsiWorkerExecutionError(reason, 503, 'CLSI_WORKER_FAILED');
       }
       await new Promise((r) => setTimeout(r, pollIntervalMs));
     }
 
-    const timeoutErr = new Error(
+    throw new ClsiWorkerExecutionError(
       `CLSI compile job ${job.id} timed out after ${effectiveTimeoutMs}ms in queue`,
-    ) as Error & { isWorkerExecutionError?: boolean };
-    timeoutErr.isWorkerExecutionError = true;
-    throw timeoutErr;
+      504,
+      'COMPILE_QUEUE_TIMEOUT',
+    );
   } finally {
     if (activeQueueJobIds.get(compileTargetId) === jobId) {
       activeQueueJobIds.delete(compileTargetId);

@@ -17,7 +17,7 @@ model Page {
   texLiveVersion     String  @default("2024") @map("tex_live_version") @db.VarChar(16)
   spellCheckLanguage String  @default("en_US") @map("spell_check_language") @db.VarChar(16)
   pdfThumbnail       String? @map("pdf_thumbnail") @db.Text
-  settings           Json    @default("{}")
+  settings           Json    @default("{}") @db.JsonB
 
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdById String?   @map("created_by_id") @db.Uuid
