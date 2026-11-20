@@ -266,7 +266,7 @@ export async function updatePageContentHelper(
 
   if (ctx.eventEmitter && recordProjectId) {
     try {
-      ctx.eventEmitter.emit('manuscripts.project.event', {
+      ctx.eventEmitter.emit('pages.project.event', {
         projectId: recordProjectId,
         event: 'doc:content-updated',
         payload: {
@@ -437,12 +437,12 @@ export async function deletePageHelper(
         }
 
         if (aggregateSpaceId) {
-          ctx.eventEmitter?.emit('manuscripts.page.deleted', {
+          ctx.eventEmitter?.emit('pages.page.deleted', {
             projectId: aggregateSpaceId,
             pageId: pageRow.id,
             deletedFiles: activeFiles || [],
           });
-          ctx.eventEmitter?.emit('manuscripts.file-tree.change', {
+          ctx.eventEmitter?.emit('pages.file-tree.change', {
             projectId: aggregateSpaceId,
             pageId: pageRow.id,
             change: {
@@ -526,7 +526,7 @@ export async function deletePageHelper(
           occurredAt: Date.now(),
         });
 
-        ctx.eventEmitter?.emit('manuscripts.file-tree.change', {
+        ctx.eventEmitter?.emit('pages.file-tree.change', {
           projectId: docProjectId,
           change: {
             action: 'delete',

@@ -1,5 +1,4 @@
 /**
- * track-changes/core/domain/value-objects/text-range.ts
  * Value Object describing starting and ending coordinates of a text change span or comment selection.
  */
 
@@ -10,7 +9,7 @@ export interface TextRangeProps {
   endCol: number;
 }
 
-export class TextRangeVo {
+export class TextRange {
   public readonly startLine: number;
   public readonly startCol: number;
   public readonly endLine: number;
@@ -20,22 +19,21 @@ export class TextRangeVo {
     this.startLine = Math.max(0, Math.floor(props.startLine));
     this.startCol = Math.max(0, Math.floor(props.startCol));
     this.endLine = Math.max(this.startLine, Math.floor(props.endLine));
-    if (this.startLine === this.endLine) {
-      this.endCol = Math.max(this.startCol, Math.floor(props.endCol));
-    } else {
-      this.endCol = Math.max(0, Math.floor(props.endCol));
-    }
+    this.endCol =
+      this.startLine === this.endLine
+        ? Math.max(this.startCol, Math.floor(props.endCol))
+        : Math.max(0, Math.floor(props.endCol));
   }
 
-  public static create(props: TextRangeProps): TextRangeVo {
-    return new TextRangeVo(props);
+  public static create(props: TextRangeProps): TextRange {
+    return new TextRange(props);
   }
 
   public isMultiline(): boolean {
     return this.endLine > this.startLine;
   }
 
-  public overlaps(other: TextRangeVo): boolean {
+  public overlaps(other: TextRange): boolean {
     if (this.endLine < other.startLine || this.startLine > other.endLine) {
       return false;
     }
@@ -48,7 +46,7 @@ export class TextRangeVo {
     return true;
   }
 
-  public contains(other: TextRangeVo): boolean {
+  public contains(other: TextRange): boolean {
     const startAfter =
       this.startLine < other.startLine ||
       (this.startLine === other.startLine && this.startCol <= other.startCol);

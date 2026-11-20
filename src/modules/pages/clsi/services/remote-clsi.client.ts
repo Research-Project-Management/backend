@@ -231,7 +231,7 @@ export class RemoteClsiClientAdapter {
         pageId: pageId || dto.pageId || projectId,
         mainFile,
         source,
-        engine: engine || dto.engine || 'pdflatex',
+        ...(engine || dto.engine ? { engine: engine || dto.engine } : {}),
         texLiveVersion: dto.texLiveVersion || '2025',
         draft: dto.draft ?? false,
         syntaxOnly: dto.syntaxOnly ?? false,

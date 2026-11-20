@@ -5,7 +5,10 @@ import * as zlib from 'zlib';
 import { HttpException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { RealtimeFacade } from '@/modules/realtime/realtime.facade';
-import { CompilePipeline } from '@/modules/pages/clsi/services/compile-pipeline.service';
+import {
+  CompilePipeline,
+  LatexmkEngine,
+} from '@/modules/pages/clsi/services/compile-pipeline.service';
 import { ClsiService } from '@/modules/pages/clsi/services/clsi.service';
 import { CompileQueueService } from '@/modules/pages/clsi/services/compile-queue.service';
 import { RemoteClsiClientError } from '@/modules/pages/clsi/domain/sandbox.errors';
@@ -18,7 +21,10 @@ import {
   validatePlannedFileSet,
 } from '@/modules/pages/clsi/domain/fileset.planner';
 import { buildSandboxEnv } from '@/modules/pages/clsi/domain/sandbox-env.builder';
-import type { ILatexEngine } from '@/modules/pages/clsi/domain/clsi.ports';
+import type {
+  ILatexEngine,
+  ISandboxRunner,
+} from '@/modules/pages/clsi/domain/clsi.ports';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
 const PAGE_ID = '22222222-2222-4222-8222-222222222222';
@@ -977,6 +983,205 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
       expect(plan.nodes?.[0]?.isRootDoc).toBe(true);
       expect(plan.mainFile).toBe('personal-notes.tex');
       expect(plan.hasMainContent).toBe(true);
+    });
+
+    it('forces latexmk (-g via force: true) and skips cache hit when recompiling unchanged source after a failed build', async () => {
+      const tmpRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'clsi-failed-retry-'),
+      );
+      try {
+        const workspace = new WorkspaceRepository(tmpRoot);
+        const mockEngine: jest.Mocked<ILatexEngine> = {
+          name: 'latexmk',
+          isAvailable: jest.fn().mockResolvedValue(true),
+          compile: jest.fn().mockImplementation(async (opts) => {
+            await fs.writeFile(
+              path.join(opts.cwd, 'output.log'),
+              '(./main.tex\n./main.tex:5: LaTeX Error: Unicode character ấ (U+1EA5)\n               not set up for use with LaTeX.\nl.5 \\author{Tấn Thành}\n',
+            );
+            return {
+              exitCode: 1,
+              stdout: '',
+              stderr: '',
+              durationMs: 15,
+              pdfGenerated: false,
+              synctexGenerated: false,
+            };
+          }),
+        };
+
+        const pipeline = new CompilePipeline(workspace, mockEngine);
+        const req = {
+          projectId: 'proj-failed-retry',
+          mainFile: 'main.tex',
+          source:
+            '\\documentclass{article}\n\\author{Tấn Thành}\n\\begin{document}\nHi\n\\end{document}',
+        };
+
+        const first = await pipeline.execute(req);
+        expect(first.success).toBe(false);
+        expect(first.diagnosticsSummary?.totalErrors).toBe(1);
+        expect(mockEngine.compile).toHaveBeenCalledTimes(1);
+
+        const second = await pipeline.execute(req);
+        expect(second.success).toBe(false);
+        expect(second.diagnosticsSummary?.totalErrors).toBe(1);
+        expect(mockEngine.compile).toHaveBeenCalledTimes(2);
+        expect(mockEngine.compile.mock.calls[1][0].force).toBe(true);
+      } finally {
+        await fs.rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('purges stale aux build cache and passes force: true when switching compiler engine', async () => {
+      const tmpRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'clsi-engine-switch-'),
+      );
+      try {
+        const workspace = new WorkspaceRepository(tmpRoot);
+        const scratchDir = workspace.getScratchDir('proj-engine-switch');
+        const mockEngine: jest.Mocked<ILatexEngine> = {
+          name: 'latexmk',
+          isAvailable: jest.fn().mockResolvedValue(true),
+          compile: jest.fn().mockImplementation(async (opts) => {
+            await fs.writeFile(path.join(opts.cwd, 'output.pdf'), '%PDF-1.5');
+            await fs.writeFile(path.join(opts.cwd, 'output.aux'), '\\relax');
+            await fs.writeFile(
+              path.join(opts.cwd, 'output.fdb_latexmk'),
+              'fdb',
+            );
+            await fs.writeFile(
+              path.join(opts.cwd, 'output.log'),
+              'Output written on output.pdf (1 page).',
+            );
+            return {
+              exitCode: 0,
+              stdout: 'ok',
+              stderr: '',
+              durationMs: 20,
+              pdfGenerated: true,
+              synctexGenerated: false,
+            };
+          }),
+        };
+
+        const pipeline = new CompilePipeline(workspace, mockEngine);
+        const source =
+          '\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}';
+
+        const first = await pipeline.execute({
+          projectId: 'proj-engine-switch',
+          mainFile: 'main.tex',
+          engine: 'pdflatex',
+          source,
+        });
+        expect(first.success).toBe(true);
+        await expect(
+          fs.access(path.join(scratchDir, 'output.aux')),
+        ).resolves.toBeUndefined();
+
+        let auxExistedDuringSecondCompile = false;
+        mockEngine.compile.mockImplementationOnce(async (opts) => {
+          auxExistedDuringSecondCompile = await fs
+            .access(path.join(opts.cwd, 'output.aux'))
+            .then(() => true)
+            .catch(() => false);
+          await fs.writeFile(path.join(opts.cwd, 'output.pdf'), '%PDF-1.5');
+          await fs.writeFile(
+            path.join(opts.cwd, 'output.log'),
+            'Output written on output.pdf (1 page).',
+          );
+          return {
+            exitCode: 0,
+            stdout: 'ok',
+            stderr: '',
+            durationMs: 20,
+            pdfGenerated: true,
+            synctexGenerated: false,
+          };
+        });
+
+        const second = await pipeline.execute({
+          projectId: 'proj-engine-switch',
+          mainFile: 'main.tex',
+          engine: 'xelatex',
+          source,
+        });
+        expect(second.success).toBe(true);
+        expect(auxExistedDuringSecondCompile).toBe(false);
+        expect(mockEngine.compile.mock.calls[1][0].force).toBe(true);
+        await expect(
+          fs.access(path.join(scratchDir, 'main.tex')),
+        ).resolves.toBeUndefined();
+      } finally {
+        await fs.rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('LatexmkEngine includes -g flag only when force is true', async () => {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'latexmk-g-'));
+      try {
+        const mockRunner: jest.Mocked<ISandboxRunner> = {
+          name: 'local-process',
+          run: jest.fn().mockResolvedValue({
+            exitCode: 0,
+            stdout: '',
+            stderr: '',
+          }),
+        };
+        const engine = new LatexmkEngine(mockRunner, 'latexmk', 'pdflatex');
+
+        await engine.compile({
+          cwd: tmpDir,
+          mainFile: 'main.tex',
+        });
+        expect(mockRunner.run.mock.calls[0][1]).not.toContain('-g');
+
+        await engine.compile({
+          cwd: tmpDir,
+          mainFile: 'main.tex',
+          force: true,
+        });
+        expect(mockRunner.run.mock.calls[1][1]).toContain('-g');
+      } finally {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('RemoteClsiClientAdapter omits engine when neither engine nor dto.engine is provided', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          status: 'success',
+          pdf: Buffer.from('%PDF-1.5 remote').toString('base64'),
+          logs: 'ok',
+          durationMs: 15,
+        }),
+      } as unknown as Response);
+
+      const config = {
+        get: jest.fn((key: string) =>
+          key === 'CLSI_URL' ? 'http://localhost:3013' : undefined,
+        ),
+      } as unknown as ConfigService;
+
+      const client = new RemoteClsiClientAdapter(config);
+      await client.tryRemoteClsiCompile({
+        projectId: PAGE_ID,
+        spaceId: SPACE_ID,
+        pageId: PAGE_ID,
+        mainFile: 'main.tex',
+        source: '% !TEX program = xelatex\n\\documentclass{article}',
+        mergedFiles: { 'main.tex': '\\documentclass{article}' },
+        dto: {},
+        cacheKey: 'k-auto',
+      });
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string) as {
+        engine?: string;
+      };
+      expect(body.engine).toBeUndefined();
     });
   });
 });

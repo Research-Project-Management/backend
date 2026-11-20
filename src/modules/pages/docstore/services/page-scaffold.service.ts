@@ -13,6 +13,7 @@ import {
   type PageScopeDbClient,
 } from '@/modules/pages/core/page-scope.helper';
 import { escapeLatex } from '@/modules/pages/core/domain/latex-escape';
+import { resolveUnicodePreamblePackages } from '@/modules/pages/core/domain/latex-preamble';
 import { DocstoreService } from '../docstore.service';
 import { resolveProjectLabels } from '@/modules/pages/core/services/page-query-metadata.helper';
 
@@ -118,9 +119,15 @@ export class PageScaffoldService {
   ): Promise<string> {
     const { docTitle, authorName, dateStr } =
       await this.resolveProjectAndAuthorMetadata(projectId, title, userId);
+    const unicodePreamble = resolveUnicodePreamblePackages([
+      docTitle,
+      authorName,
+    ]);
 
     return [
+      ...unicodePreamble.magicComments,
       '\\documentclass{article}',
+      ...unicodePreamble.packages,
       '\\usepackage{graphicx} % Required for inserting images',
       '',
       `\\title{${docTitle}}`,
@@ -149,9 +156,15 @@ export class PageScaffoldService {
   ): Promise<string> {
     const { docTitle, authorName, dateStr } =
       await this.resolveProjectAndAuthorMetadata(projectId, title, userId);
+    const unicodePreamble = resolveUnicodePreamblePackages([
+      docTitle,
+      authorName,
+    ]);
 
     return [
+      ...unicodePreamble.magicComments,
       '\\documentclass{article}',
+      ...unicodePreamble.packages,
       '\\usepackage{graphicx} % Required for inserting images',
       '\\usepackage{amsmath,amssymb}',
       '\\usepackage{cite}',

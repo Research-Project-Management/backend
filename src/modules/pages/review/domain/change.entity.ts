@@ -1,25 +1,20 @@
-/**
- * track-changes/core/domain/entities/track-change.entity.ts
- * Domain Aggregate Entity representing a proposed text modification (insert or delete).
- */
-
 import * as crypto from 'node:crypto';
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
-import { TextRangeVo } from './text-range';
+import { InvalidChangeError } from './errors';
+import { TextRange } from './text-range';
 
 export type ChangeType = 'insert' | 'delete';
 export type ChangeStatus = 'pending' | 'accepted' | 'rejected';
 
-export interface CreateTrackChangeProps {
+export interface TrackChangeProps {
   id?: string;
-  projectId: string;
   spaceId?: string;
+  projectId?: string;
   pageId?: string | null;
   docId: string;
   type: ChangeType;
   status?: ChangeStatus;
   text: string;
-  range: TextRangeVo;
+  range: TextRange;
   createdById?: string | null;
   resolvedById?: string | null;
   resolvedAt?: Date | null;
@@ -27,43 +22,32 @@ export interface CreateTrackChangeProps {
   updatedAt?: Date;
 }
 
-export class TrackChangeDomainException extends PagesDomainError {
-  constructor(message: string) {
-    super(message, {
-      code: 'INVALID_TRACK_CHANGE',
-      statusCode: 400,
-    });
-  }
-}
-
 export class TrackChange {
   private readonly _id: string;
-  private readonly _projectId: string;
   private readonly _spaceId: string;
   private readonly _pageId: string | null;
   private readonly _docId: string;
   private readonly _type: ChangeType;
   private _status: ChangeStatus;
   private readonly _text: string;
-  private readonly _range: TextRangeVo;
+  private readonly _range: TextRange;
   private readonly _createdById: string | null;
   private _resolvedById: string | null;
   private _resolvedAt: Date | null;
   private readonly _createdAt: Date;
   private _updatedAt: Date;
 
-  public constructor(props: CreateTrackChangeProps) {
-    const resolvedSpaceId = props.spaceId ?? props.projectId;
-    if (!resolvedSpaceId || !resolvedSpaceId.trim()) {
-      throw new TrackChangeDomainException('Project ID cannot be empty.');
+  public constructor(props: TrackChangeProps) {
+    const spaceId = props.spaceId ?? props.projectId;
+    if (!spaceId || !spaceId.trim()) {
+      throw new InvalidChangeError('Space ID cannot be empty.');
     }
     if (!props.docId || !props.docId.trim()) {
-      throw new TrackChangeDomainException('Document ID cannot be empty.');
+      throw new InvalidChangeError('Document ID cannot be empty.');
     }
 
     this._id = props.id ?? crypto.randomUUID();
-    this._projectId = resolvedSpaceId;
-    this._spaceId = resolvedSpaceId;
+    this._spaceId = spaceId;
     this._pageId = props.pageId ?? null;
     this._docId = props.docId;
     this._type = props.type;
@@ -77,15 +61,12 @@ export class TrackChange {
     this._updatedAt = props.updatedAt ?? new Date();
   }
 
-  public static create(props: CreateTrackChangeProps): TrackChange {
+  public static create(props: TrackChangeProps): TrackChange {
     return new TrackChange(props);
   }
 
   public get id(): string {
     return this._id;
-  }
-  public get projectId(): string {
-    return this._projectId;
   }
   public get spaceId(): string {
     return this._spaceId;
@@ -105,7 +86,7 @@ export class TrackChange {
   public get text(): string {
     return this._text;
   }
-  public get range(): TextRangeVo {
+  public get range(): TextRange {
     return this._range;
   }
   public get createdById(): string | null {
@@ -130,7 +111,7 @@ export class TrackChange {
 
   public accept(resolvedBy?: string | null): void {
     if (!this.isPending()) {
-      throw new TrackChangeDomainException(
+      throw new InvalidChangeError(
         `Change '${this._id}' has already been ${this._status}.`,
       );
     }
@@ -142,7 +123,7 @@ export class TrackChange {
 
   public reject(resolvedBy?: string | null): void {
     if (!this.isPending()) {
-      throw new TrackChangeDomainException(
+      throw new InvalidChangeError(
         `Change '${this._id}' has already been ${this._status}.`,
       );
     }
@@ -162,7 +143,7 @@ export class TrackChange {
   public toJSON(): Record<string, unknown> {
     return {
       id: this._id,
-      projectId: this._projectId,
+      spaceId: this._spaceId,
       docId: this._docId,
       type: this._type,
       status: this._status,

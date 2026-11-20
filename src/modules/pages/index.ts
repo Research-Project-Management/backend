@@ -18,7 +18,7 @@ export * from './diagnostics';
 export * from './clsi';
 
 // Subsystem 4: Review & Versioning
-export * from './track-changes';
+export * from './review';
 export * from './project-history';
 
 // Subsystem 5: Academic Authoring & Packaging

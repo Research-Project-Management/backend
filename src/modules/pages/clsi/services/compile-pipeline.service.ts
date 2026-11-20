@@ -62,6 +62,14 @@ import {
   boundInlineLogText,
 } from './clsi-log.helper';
 
+export interface BuildStateRecord {
+  success: boolean;
+  mainFile: string;
+  engine: string;
+  draft: boolean;
+  timestamp: number;
+}
+
 export interface CompilePipelineRequest {
   projectId?: string;
   mainFile?: string;
@@ -310,61 +318,82 @@ export class CompilePipeline {
             '.clsi-build-state.json',
           );
 
+          let prevBuildState: BuildStateRecord | null = null;
+          try {
+            const stateRaw = await fs.readFile(buildStatePath, 'utf8');
+            prevBuildState = JSON.parse(stateRaw) as BuildStateRecord;
+          } catch {
+            prevBuildState = null;
+          }
+
           if (
             syncStats.written === 0 &&
             syncStats.deleted === 0 &&
             !dto.syntaxOnly &&
-            !dto.force
+            !dto.force &&
+            prevBuildState?.success === true &&
+            prevBuildState.mainFile === mainFile &&
+            prevBuildState.engine === resolvedEngine &&
+            prevBuildState.draft === (dto.draft ?? false)
           ) {
             try {
-              const stateRaw = await fs.readFile(buildStatePath, 'utf8');
-              const buildState = JSON.parse(stateRaw);
-              if (
-                buildState.success &&
-                buildState.mainFile === mainFile &&
-                buildState.engine === resolvedEngine &&
-                buildState.draft === (dto.draft ?? false)
-              ) {
-                const pdfStat = await fs.stat(pdfPath);
-                if (pdfStat.size > 0) {
-                  const harvested = await this.harvestCompileArtifacts({
-                    scratchDir,
-                    projectId,
-                    mainFile,
-                    inputFiles,
-                    stopOnFirstError: dto.stopOnFirstError ?? false,
-                    fallbackLogs:
-                      '[CLSI Cache] Build up to date: workspace unchanged.',
-                  });
+              const pdfStat = await fs.stat(pdfPath);
+              if (pdfStat.size > 0) {
+                const harvested = await this.harvestCompileArtifacts({
+                  scratchDir,
+                  projectId,
+                  mainFile,
+                  inputFiles,
+                  stopOnFirstError: dto.stopOnFirstError ?? false,
+                  fallbackLogs:
+                    '[CLSI Cache] Build up to date: workspace unchanged.',
+                });
 
-                  if (harvested.pdfBase64) {
-                    dto.onLogChunk?.(
-                      '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
-                    );
+                if (harvested.pdfBase64) {
+                  dto.onLogChunk?.(
+                    '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
+                  );
 
-                    return {
-                      success: true,
-                      status: 'success',
-                      outcome: 'success',
-                      pdf: harvested.pdfBase64,
-                      synctex: harvested.synctexBase64 || undefined,
-                      logs: harvested.logs,
-                      logMeta: harvested.logMeta,
-                      diagnostics:
-                        harvested.diagnostics.length > 0
-                          ? harvested.diagnostics
-                          : undefined,
-                      diagnosticsSummary: harvested.summary,
-                      outputFiles: harvested.discoveredFiles,
-                      durationMs: Date.now() - startTime,
-                    };
-                  }
+                  return {
+                    success: true,
+                    status: 'success',
+                    outcome: 'success',
+                    pdf: harvested.pdfBase64,
+                    synctex: harvested.synctexBase64 || undefined,
+                    logs: harvested.logs,
+                    logMeta: harvested.logMeta,
+                    diagnostics:
+                      harvested.diagnostics.length > 0
+                        ? harvested.diagnostics
+                        : undefined,
+                    diagnosticsSummary: harvested.summary,
+                    outputFiles: harvested.discoveredFiles,
+                    durationMs: Date.now() - startTime,
+                  };
                 }
               }
             } catch {
               // Cache miss or missing file: proceed to standard compile
             }
           }
+
+          if (
+            prevBuildState &&
+            (prevBuildState.engine !== resolvedEngine ||
+              prevBuildState.mainFile !== mainFile)
+          ) {
+            await this.workspace.cleanAuxBuildCache?.(projectId);
+          }
+
+          const shouldForceLatexmk = Boolean(
+            dto.force ||
+            dto.syntaxOnly ||
+            !prevBuildState?.success ||
+            prevBuildState.engine !== resolvedEngine ||
+            prevBuildState.mainFile !== mainFile ||
+            prevBuildState.draft !== (dto.draft ?? false) ||
+            (syncStats.written === 0 && syncStats.deleted === 0),
+          );
 
           await this.workspace.purgeExtraneousFiles(projectId, inputFiles);
 
@@ -419,6 +448,7 @@ export class CompilePipeline {
               stopOnFirstError,
               draft: dto.draft ?? false,
               syntaxOnly: dto.syntaxOnly ?? false,
+              force: shouldForceLatexmk,
               compilerOverride: compilerFlag,
               signal: dto.signal,
               onLogChunk: dto.onLogChunk,
@@ -453,27 +483,27 @@ export class CompilePipeline {
             shellEscapeAdvisories,
           });
 
+          const writeBuildState = async (success: boolean) => {
+            try {
+              await fs.writeFile(
+                buildStatePath,
+                JSON.stringify({
+                  success,
+                  mainFile,
+                  engine: resolvedEngine,
+                  draft: dto.draft ?? false,
+                  timestamp: Date.now(),
+                } satisfies BuildStateRecord),
+                'utf8',
+              );
+            } catch {
+              // Build state cache write failure is non-fatal
+            }
+          };
+
           if (engineResult.pdfGenerated && harvested.pdfBase64) {
             const hasErrors = harvested.summary.totalErrors > 0;
-            if (!hasErrors) {
-              try {
-                await fs.writeFile(
-                  buildStatePath,
-                  JSON.stringify({
-                    success: true,
-                    mainFile,
-                    engine: resolvedEngine,
-                    draft: dto.draft ?? false,
-                    timestamp: Date.now(),
-                  }),
-                  'utf8',
-                );
-              } catch {}
-            } else {
-              try {
-                await fs.unlink(buildStatePath);
-              } catch {}
-            }
+            await writeBuildState(!hasErrors);
 
             if (hasErrors) {
               return {
@@ -515,10 +545,6 @@ export class CompilePipeline {
             };
           }
 
-          try {
-            await fs.unlink(buildStatePath);
-          } catch {}
-
           const outcome: CompileOutcome = engineResult.timedOut
             ? 'timedout'
             : (engineResult as { aborted?: boolean }).aborted ||
@@ -527,6 +553,10 @@ export class CompilePipeline {
               : stopOnFirstError && engineResult.exitCode !== 0
                 ? 'stopped-on-first-error'
                 : 'failure';
+
+          if (outcome !== 'terminated') {
+            await writeBuildState(false);
+          }
 
           return {
             success: false,

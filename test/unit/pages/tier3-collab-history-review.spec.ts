@@ -1,16 +1,19 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { DocModifiedError } from '@/modules/pages/docstore/domain/doc.errors';
 import {
+  toSuggestionDto,
   validateSuggestionRange,
-  formatSuggestionItemDto,
-} from '@/modules/pages/track-changes/services/review.helpers';
-import { YjsUpdateValidator } from '@/modules/realtime/pages/yjs/yjs-update.validator';
-import { YjsService } from '@/modules/realtime/pages/yjs/yjs.service';
-import { RealtimeValidationFailedException } from '@/modules/realtime/core/ws-errors';
-import type { RealtimeConfigService } from '@/modules/realtime/core/realtime.config';
+} from '@/modules/pages/review/services/scope.helper';
+import { YjsUpdateValidator } from '@/modules/realtime/channels/pages/yjs/sync';
+import { YjsService } from '@/modules/realtime/channels/pages/yjs/engine';
+import { RealtimeValidationFailedException } from '@/modules/realtime/core/errors';
+import {
+  PAGES_REALTIME_DEFAULTS,
+  PagesRealtimeConfigService,
+} from '@/modules/realtime/channels/pages/config';
 import {
   Snapshot,
   VersionLabel,
@@ -31,19 +34,18 @@ import type {
   PageSnapshotRestorerAdapter,
 } from '@/modules/pages/project-history/adapters/project-history.adapters';
 import {
+  ChangeNotFoundError,
   LinePatcher,
+  ResolvedThreadError,
+  StaleAnchorError,
+  TextRange,
+  ThreadNotFoundError,
   TrackChange,
-  CommentThread,
-  CommentReply,
-  TextRangeVo,
-  ChangeNotFoundException,
-  ThreadNotFoundException,
-  ResolvedThreadException,
-  StaleTrackChangeAnchorException,
-} from '@/modules/pages/track-changes/domain';
-import type { TrackChangesRepository } from '@/modules/pages/track-changes/track-changes.repository';
-import { TrackChangesService } from '@/modules/pages/track-changes/track-changes.service';
-import type { DocstorePatcherAdapter } from '@/modules/pages/track-changes/adapters/track-changes.adapters';
+} from '@/modules/pages/review/domain';
+import type { DocPatcher } from '@/modules/pages/review/doc-patcher.adapter';
+import type { ReviewRepository } from '@/modules/pages/review/review.repository';
+import { CommentsService } from '@/modules/pages/review/services/comments.service';
+import { SuggestionsService } from '@/modules/pages/review/services/suggestions.service';
 import { Role } from '@/modules/project/access';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
@@ -63,10 +65,10 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
       );
       expect(new EmptyProjectException(SPACE_ID).statusCode).toBe(400);
       expect(new InvalidVersionLabelException().statusCode).toBe(400);
-      expect(new ChangeNotFoundException('chg-1').statusCode).toBe(404);
-      expect(new ThreadNotFoundException('thr-1').statusCode).toBe(404);
-      expect(new ResolvedThreadException('thr-1').statusCode).toBe(409);
-      expect(new StaleTrackChangeAnchorException('chg-1').statusCode).toBe(409);
+      expect(new ChangeNotFoundError('chg-1').statusCode).toBe(404);
+      expect(new ThreadNotFoundError('thr-1').statusCode).toBe(404);
+      expect(new ResolvedThreadError('thr-1').statusCode).toBe(409);
+      expect(new StaleAnchorError('chg-1').statusCode).toBe(409);
     });
 
     it('converts 1-based UI suggestion coordinates to 0-based DB coordinates and back symmetrically', () => {
@@ -84,7 +86,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
       });
 
       const now = new Date('2026-10-01T00:00:00Z');
-      const dto = formatSuggestionItemDto(
+      const dto = toSuggestionDto(
         {
           id: 'sug-1',
           spaceId: SPACE_ID,
@@ -148,15 +150,18 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
           version: 1,
         }),
       };
-      const configMock: Partial<RealtimeConfigService> = {
-        getMaxDocumentSizeBytes: () => 256,
-        getMaxYjsUpdateSizeBytes: () => 512 * 1024,
+      const configMock: Partial<PagesRealtimeConfigService> = {
+        getYjsConfig: () => ({
+          ...PAGES_REALTIME_DEFAULTS.yjs,
+          maxDocumentSizeBytes: 256,
+          maxUpdateSizeBytes: 512 * 1024,
+        }),
       };
       yjsService = new YjsService(
         undefined,
         docstoreMock as never,
         new YjsUpdateValidator(),
-        configMock as RealtimeConfigService,
+        configMock as PagesRealtimeConfigService,
       );
 
       const remoteDoc = new Y.Doc();
@@ -309,14 +314,14 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
   });
 
   describe('4. Track Changes LinePatcher Anchor Safety & CAS Concurrency', () => {
-    it('throws StaleTrackChangeAnchorException (409) when delete text is missing or ambiguous in nearby context', () => {
+    it('throws StaleAnchorError (409) when delete text is missing or ambiguous in nearby context', () => {
       const missingChange = TrackChange.create({
         id: 'chg-missing',
-        projectId: SPACE_ID,
+        spaceId: SPACE_ID,
         docId: DOC_ID,
         type: 'delete',
         text: 'obsolete phrase',
-        range: TextRangeVo.create({
+        range: TextRange.create({
           startLine: 0,
           startCol: 0,
           endLine: 0,
@@ -329,15 +334,15 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
           ['completely different sentence'],
           missingChange,
         ),
-      ).toThrow(StaleTrackChangeAnchorException);
+      ).toThrow(StaleAnchorError);
 
       const ambiguousChange = TrackChange.create({
         id: 'chg-ambiguous',
-        projectId: SPACE_ID,
+        spaceId: SPACE_ID,
         docId: DOC_ID,
         type: 'delete',
         text: 'dup',
-        range: TextRangeVo.create({
+        range: TextRange.create({
           startLine: 0,
           startCol: 0,
           endLine: 0,
@@ -350,106 +355,150 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
           ['wrong header', 'prefix dup and dup again'],
           ambiguousChange,
         ),
-      ).toThrow(StaleTrackChangeAnchorException);
+      ).toThrow(StaleAnchorError);
     });
 
-    it('atomically claims pending change via CAS and reverts claim if DocstorePatcher fails', async () => {
-      const pendingChange = TrackChange.create({
-        id: 'chg-cas',
-        projectId: SPACE_ID,
+    it('atomically claims pending change via CAS and reverts claim if DocPatcher fails', async () => {
+      const now = new Date();
+      const CHG_CAS_ID = '66666666-6666-4666-8666-666666666661';
+      const pendingRow = {
+        id: CHG_CAS_ID,
+        spaceId: SPACE_ID,
         pageId: PAGE_A_ID,
         docId: DOC_ID,
-        type: 'delete',
+        type: 'delete' as const,
+        status: 'pending' as const,
         text: 'old',
-        range: TextRangeVo.create({
-          startLine: 0,
-          startCol: 0,
-          endLine: 0,
-          endCol: 3,
-        }),
-      });
+        startLine: 0,
+        startCol: 0,
+        endLine: 0,
+        endCol: 3,
+        createdById: AUTHOR_ID,
+        resolvedById: null,
+        resolvedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
 
-      const revertClaimedChangesStatus = jest.fn().mockResolvedValue(1);
+      const revertClaimedChanges = jest.fn().mockResolvedValue(undefined);
       const repoMock = {
-        findChangeById: jest.fn().mockResolvedValue(pendingChange),
-        claimPendingChanges: jest.fn().mockResolvedValue([pendingChange]),
-        revertClaimedChangesStatus,
-      } as unknown as TrackChangesRepository;
+        getPrisma: jest.fn().mockReturnValue({}),
+        findChange: jest.fn().mockResolvedValue(pendingRow),
+        claimPendingChanges: jest.fn().mockResolvedValue([CHG_CAS_ID]),
+        revertClaimedChanges,
+      } as unknown as ReviewRepository;
 
       const patcherMock = {
         applyChange: jest
           .fn()
-          .mockRejectedValue(new StaleTrackChangeAnchorException('chg-cas')),
-      } as unknown as DocstorePatcherAdapter;
+          .mockRejectedValue(new StaleAnchorError(CHG_CAS_ID)),
+      } as unknown as DocPatcher;
 
-      const docstoreMock = {
-        getDocById: jest.fn().mockResolvedValue({
+      const scopeRepoMock = {
+        findDocInProject: jest.fn().mockResolvedValue({
           id: DOC_ID,
-          projectId: SPACE_ID,
+          spaceId: SPACE_ID,
           pageId: PAGE_A_ID,
-          deleted: false,
         }),
+        getPrisma: jest.fn().mockReturnValue({}),
+      };
+      const userResolverMock = {
+        resolveUserNames: jest.fn().mockResolvedValue(new Map()),
+      };
+      const pageServiceMock = {
+        resolveActiveProjectId: jest.fn().mockReturnValue(SPACE_ID),
+        resolveProjectId: jest.fn().mockResolvedValue(SPACE_ID),
       };
 
-      const service = new TrackChangesService(
+      const service = new SuggestionsService(
         repoMock,
-        docstoreMock as never,
         patcherMock,
+        scopeRepoMock as never,
+        userResolverMock,
+        pageServiceMock as never,
       );
 
       await expect(
-        service.acceptChange(SPACE_ID, DOC_ID, 'chg-cas', AUTHOR_ID),
-      ).rejects.toThrow(StaleTrackChangeAnchorException);
+        service.accept(DOC_ID, CHG_CAS_ID, SPACE_ID, SPACE_ID, AUTHOR_ID),
+      ).rejects.toThrow(ConflictException);
 
-      expect(revertClaimedChangesStatus).toHaveBeenCalledWith(
+      expect(revertClaimedChanges).toHaveBeenCalledWith(
         SPACE_ID,
-        DOC_ID,
-        ['chg-cas'],
+        [CHG_CAS_ID],
         'accepted',
       );
-      expect(pendingChange.status).toBe('pending');
     });
 
-    it('enforces author-only ownership on updateCommentReply for non-author collaborators', async () => {
-      const thread = CommentThread.create({
-        id: 'thr-1',
-        projectId: SPACE_ID,
+    it('enforces author-only ownership on updateReply for non-author collaborators', async () => {
+      const now = new Date();
+      const THREAD_ID = '77777777-7777-4777-8777-777777777771';
+      const REPLY_ID = '88888888-8888-4888-8888-888888888881';
+      const threadRow = {
+        id: THREAD_ID,
         spaceId: SPACE_ID,
         pageId: PAGE_A_ID,
         docId: DOC_ID,
         quote: 'Lemma 1',
-        range: TextRangeVo.create({
-          startLine: 0,
-          startCol: 0,
-          endLine: 0,
-          endCol: 7,
-        }),
+        startLine: 0,
+        startCol: 0,
+        endLine: 0,
+        endCol: 7,
+        isResolved: false,
         createdById: AUTHOR_ID,
+        resolvedById: null,
+        resolvedAt: null,
+        createdAt: now,
+        updatedAt: now,
         replies: [
-          CommentReply.create({
-            id: 'rep-1',
-            threadId: 'thr-1',
+          {
+            id: REPLY_ID,
+            threadId: THREAD_ID,
             content: 'Original note',
             createdById: AUTHOR_ID,
-          }),
+            createdAt: now,
+            updatedAt: now,
+          },
         ],
-      });
+      };
 
       const repoMock = {
-        findThreadById: jest.fn().mockResolvedValue(thread),
-        updateCommentReply: jest.fn(),
-      } as unknown as TrackChangesRepository;
+        getPrisma: jest.fn().mockReturnValue({}),
+        findThread: jest.fn().mockResolvedValue(threadRow),
+        updateReply: jest.fn(),
+      } as unknown as ReviewRepository;
 
-      const service = new TrackChangesService(repoMock);
+      const scopeRepoMock = {
+        findDocInProject: jest.fn().mockResolvedValue({
+          id: DOC_ID,
+          spaceId: SPACE_ID,
+          pageId: PAGE_A_ID,
+        }),
+        getPrisma: jest.fn().mockReturnValue({}),
+      };
+      const userResolverMock = {
+        resolveUserNames: jest.fn().mockResolvedValue(new Map()),
+      };
+      const pageServiceMock = {
+        resolveActiveProjectId: jest.fn().mockReturnValue(SPACE_ID),
+        resolveProjectId: jest.fn().mockResolvedValue(SPACE_ID),
+      };
+
+      const service = new CommentsService(
+        repoMock,
+        scopeRepoMock as never,
+        userResolverMock,
+        pageServiceMock as never,
+      );
 
       await expect(
-        service.updateCommentReply(
-          SPACE_ID,
+        service.updateReply(
           DOC_ID,
-          'thr-1',
-          'rep-1',
-          'Tampered text',
-          OTHER_USER_ID,
+          THREAD_ID,
+          REPLY_ID,
+          { content: 'Tampered text' },
+          SPACE_ID,
+          { user: { id: OTHER_USER_ID } } as never,
+          SPACE_ID,
           Role.CONTRIBUTOR,
         ),
       ).rejects.toThrow(ForbiddenException);

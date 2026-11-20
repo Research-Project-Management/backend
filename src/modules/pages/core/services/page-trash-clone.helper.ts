@@ -179,7 +179,7 @@ export async function restoreDeletedDocOrFile(
       ).catch(() => undefined);
     }
 
-    eventEmitter?.emit('manuscripts.file-tree.change', {
+    eventEmitter?.emit('pages.file-tree.change', {
       projectId: docProjectId,
       change: {
         action: 'create',
@@ -244,7 +244,7 @@ export async function restoreDeletedDocOrFile(
       assetId: file.id,
     });
 
-    eventEmitter?.emit('manuscripts.file-tree.change', {
+    eventEmitter?.emit('pages.file-tree.change', {
       projectId: fileProjectId,
       change: {
         action: 'create',
@@ -614,7 +614,7 @@ export async function duplicateSourcePageAndNode(
     : [];
   const content = rootLines.join('\n');
 
-  eventEmitter?.emit('manuscripts.file-tree.change', {
+  eventEmitter?.emit('pages.file-tree.change', {
     projectId: spaceId,
     change: {
       action: 'page_duplicated',

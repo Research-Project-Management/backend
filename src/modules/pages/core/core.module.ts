@@ -6,7 +6,7 @@
  * shared across all 14 pages submodules.
  */
 
-import { Global, Module } from '@nestjs/common';
+import { forwardRef, Global, Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { IdentityModule } from '@/modules/identity/identity.module';
 import { RealtimeModule } from '@/modules/realtime/realtime.module';
@@ -24,7 +24,7 @@ import { CleanupListener } from './services/cleanup.listener';
 
 @Global()
 @Module({
-  imports: [PrismaModule, IdentityModule, RealtimeModule],
+  imports: [PrismaModule, IdentityModule, forwardRef(() => RealtimeModule)],
   providers: [
     PagesConfigService,
     WorkspaceCollectorService,
@@ -44,7 +44,7 @@ import { CleanupListener } from './services/cleanup.listener';
     UserResolverService,
     IDistributedLockPort,
     RedisLockAdapter,
-    RealtimeModule,
+    forwardRef(() => RealtimeModule),
   ],
 })
 export class PagesCoreModule {}

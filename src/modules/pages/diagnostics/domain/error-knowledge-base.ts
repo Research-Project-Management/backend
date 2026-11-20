@@ -153,6 +153,7 @@ export const CASCADE_SUPPRESSION_MAP: Record<string, string[]> = {
   ENVIRONMENT_MISMATCH: ['EMERGENCY_STOP', 'UNBALANCED_BRACES'],
   ENVIRONMENT_UNDEFINED: ['EMERGENCY_STOP'],
   EXTRA_ALIGNMENT_TAB: ['EMERGENCY_STOP'],
+  UNICODE_CHAR_NOT_SET_UP: ['EMERGENCY_STOP'],
 };
 
 export const FATAL_CASCADE_PATTERNS: RegExp[] = [
@@ -192,6 +193,24 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       exampleSnippet: '\\usepackage{amsmath}\n\\usepackage{graphicx}',
       documentationUrl: `${LATEX_KB_BASE_URL}#Undefined_control_sequence`,
       patterns: [/undefined control sequence/i],
+    },
+    {
+      code: 'UNICODE_CHAR_NOT_SET_UP',
+      title: 'Unsupported Unicode Character',
+      explanation:
+        'pdfLaTeX encountered a non-ASCII Unicode character without a font encoding package that maps it.',
+      commonCauses: [
+        'Using Vietnamese or accented Unicode text with pdfLaTeX without loading \\usepackage[T5]{fontenc} (Vietnamese) or \\usepackage[T1]{fontenc} (European Latin).',
+        'Using non-Latin scripts (CJK, Cyrillic, Greek, Arabic) or Unicode symbols under pdfLaTeX instead of XeLaTeX or LuaLaTeX.',
+      ],
+      suggestedFix:
+        'For Vietnamese text in pdfLaTeX, add \\usepackage[T5]{fontenc} to your preamble. For broader Unicode scripts, switch the compiler to XeLaTeX or LuaLaTeX in Project Settings.',
+      exampleSnippet: '\\usepackage[T5]{fontenc}',
+      documentationUrl: `${LATEX_KB_BASE_URL}`,
+      patterns: [
+        /unicode character .+ not set up for use with latex/i,
+        /package inputenc error:\s*unicode character/i,
+      ],
     },
     {
       code: 'MISSING_MATH_DELIMITER',

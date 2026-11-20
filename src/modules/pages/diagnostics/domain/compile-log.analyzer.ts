@@ -33,6 +33,7 @@ import {
   LOG_FILE_EXTENSION_REGEX,
   normalizeLogFilePath,
 } from './log-path.helper';
+import { hasVietnameseCharacters } from '@/modules/pages/core/domain/latex-preamble';
 
 export { ErrorKnowledgeBase, PKG_LOOKUP, ENV_PKG_LOOKUP };
 export type { ErrorExplainerLike, RuleDefinition };
@@ -243,11 +244,41 @@ export class CompileLogAnalyzer implements ILogParser {
     return undefined;
   }
 
+  private static isGenericErrorContinuationLine(nextLine: string): boolean {
+    return (
+      /^\s{10,}\S/.test(nextLine) &&
+      !/^\s*(?:l\.\d+|See the|Type\s+H|\.\.\.)/.test(nextLine)
+    );
+  }
+
   private static generateQuickFix(
     message: string,
     context: string,
   ): QuickFixVo | undefined {
     const combined = `${message}\n${context}`;
+
+    const unicodeMatch = combined.match(
+      /unicode character\s+(\S+)\s+\(U\+([0-9A-F]{4,6})\)[\s\S]*not set up for use with latex/i,
+    );
+    if (unicodeMatch?.[1] && unicodeMatch[2]) {
+      const charStr = unicodeMatch[1];
+      const cp = parseInt(unicodeMatch[2], 16);
+      const cpChar = Number.isFinite(cp) ? String.fromCodePoint(cp) : charStr;
+      if (hasVietnameseCharacters(charStr) || hasVietnameseCharacters(cpChar)) {
+        return {
+          description:
+            'Add \\usepackage[T5]{fontenc} for Vietnamese Unicode support',
+          replacementText: '\\usepackage[T5]{fontenc}',
+        };
+      }
+      if (Number.isFinite(cp) && cp >= 0x00a0 && cp <= 0x017f) {
+        return {
+          description:
+            'Add \\usepackage[T1]{fontenc} for Latin Unicode support',
+          replacementText: '\\usepackage[T1]{fontenc}',
+        };
+      }
+    }
 
     if (/undefined control sequence/i.test(combined)) {
       const cmdMatches = Array.from(combined.matchAll(/\\([a-zA-Z@]+)/g));
@@ -428,11 +459,13 @@ export class CompileLogAnalyzer implements ILogParser {
       if (fleMatch && fleMatch[1] && fleMatch[2] && fleMatch[3]) {
         const errorFile = normalizeLogFilePath(fleMatch[1].trim(), defaultFile);
         const errorLine = parseInt(fleMatch[2], 10);
-        const rawMessage = fleMatch[3].trim();
+        let rawMessage = fleMatch[3].trim();
         const contextLines: string[] = [line];
 
         let consumedTo = i;
         let sawCodeLine = false;
+        let inMessageContinuation =
+          /^(?:LaTeX|Package\s+\S+|Class\s+\S+)\s+Error:/i.test(rawMessage);
         for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
           const nextLine = lines[j] ?? '';
           if (
@@ -442,6 +475,14 @@ export class CompileLogAnalyzer implements ILogParser {
             CompileLogAnalyzer.RUNAWAY_ARG_REGEX.test(nextLine)
           ) {
             break;
+          }
+          if (
+            inMessageContinuation &&
+            CompileLogAnalyzer.isGenericErrorContinuationLine(nextLine)
+          ) {
+            rawMessage = `${rawMessage} ${nextLine.trim()}`;
+          } else {
+            inMessageContinuation = false;
           }
           contextLines.push(nextLine);
           scanParensLeftToRight(cleanNonFileParens(nextLine));
@@ -546,10 +587,12 @@ export class CompileLogAnalyzer implements ILogParser {
       }
 
       if (line.startsWith('!')) {
-        const rawMessage = line.slice(1).trim();
+        let rawMessage = line.slice(1).trim();
         let errorLine: number | null = null;
         const contextLines: string[] = [line];
         let blankStreak = 0;
+        let inMessageContinuation =
+          /^(?:LaTeX|Package\s+\S+|Class\s+\S+)\s+Error:/i.test(rawMessage);
 
         for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
           const nextLine = lines[j] ?? '';
@@ -561,6 +604,7 @@ export class CompileLogAnalyzer implements ILogParser {
             break;
           }
           if (!nextLine.trim()) {
+            inMessageContinuation = false;
             blankStreak++;
             if (blankStreak >= 2) {
               break;
@@ -568,6 +612,14 @@ export class CompileLogAnalyzer implements ILogParser {
             contextLines.push(nextLine);
             i = j;
             continue;
+          }
+          if (
+            inMessageContinuation &&
+            CompileLogAnalyzer.isGenericErrorContinuationLine(nextLine)
+          ) {
+            rawMessage = `${rawMessage} ${nextLine.trim()}`;
+          } else {
+            inMessageContinuation = false;
           }
           blankStreak = 0;
           contextLines.push(nextLine);

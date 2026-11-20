@@ -92,21 +92,21 @@ import {
 } from '@/modules/pages/project-history/domain/project-history.errors';
 import { InvalidVersionLabelException } from '@/modules/pages/project-history/domain/version-label.entity';
 import {
-  ChangeNotFoundException,
-  ResolvedThreadException,
-  StaleTrackChangeAnchorException,
-  ThreadNotFoundException,
-  TrackChangePatchConflictException,
-} from '@/modules/pages/track-changes/domain/track-changes.errors';
-import { InvalidCommentReplyException } from '@/modules/pages/track-changes/domain/comment-reply.entity';
-import { CommentThreadDomainException } from '@/modules/pages/track-changes/domain/comment-thread.entity';
-import { TrackChangeDomainException } from '@/modules/pages/track-changes/domain/track-change.entity';
+  ChangeNotFoundError,
+  InvalidChangeError,
+  InvalidReplyError,
+  InvalidThreadError,
+  PatchConflictError,
+  ResolvedThreadError,
+  StaleAnchorError,
+  ThreadNotFoundError,
+} from '@/modules/pages/review/domain';
 import { PagesFacade } from '@/modules/pages/pages.facade';
-import { WsAllExceptionsFilter } from '@/modules/realtime/core/ws-exception.filter';
 import {
+  WsAllExceptionsFilter,
   RealtimeRateLimitedException,
   RealtimeValidationFailedException,
-} from '@/modules/realtime/core/ws-errors';
+} from '@/modules/realtime/core/errors';
 
 interface CapturedHttpResponse {
   statusCode: number;
@@ -575,50 +575,50 @@ describe('Backend Pages Error Architecture & Flow Verification', () => {
       ],
       // Track Changes & Review
       [
-        'ChangeNotFoundException',
-        new ChangeNotFoundException('chg-1'),
+        'ChangeNotFoundError',
+        new ChangeNotFoundError('chg-1'),
         404,
         'TRACK_CHANGE_NOT_FOUND',
       ],
       [
-        'StaleTrackChangeAnchorException',
-        new StaleTrackChangeAnchorException('chg-1'),
+        'StaleAnchorError',
+        new StaleAnchorError('chg-1'),
         409,
         'STALE_TRACK_CHANGE_ANCHOR',
       ],
       [
-        'ResolvedThreadException',
-        new ResolvedThreadException('thr-1'),
+        'ResolvedThreadError',
+        new ResolvedThreadError('thr-1'),
         409,
         'COMMENT_THREAD_RESOLVED',
       ],
       [
-        'ThreadNotFoundException',
-        new ThreadNotFoundException('thr-1'),
+        'ThreadNotFoundError',
+        new ThreadNotFoundError('thr-1'),
         404,
         'COMMENT_THREAD_NOT_FOUND',
       ],
       [
-        'TrackChangePatchConflictException',
-        new TrackChangePatchConflictException('doc-1'),
+        'PatchConflictError',
+        new PatchConflictError('doc-1'),
         409,
         'TRACK_CHANGE_PATCH_CONFLICT',
       ],
       [
-        'InvalidCommentReplyException',
-        new InvalidCommentReplyException(),
+        'InvalidReplyError',
+        new InvalidReplyError(),
         400,
         'INVALID_COMMENT_REPLY',
       ],
       [
-        'CommentThreadDomainException',
-        new CommentThreadDomainException('Invalid range'),
+        'InvalidThreadError',
+        new InvalidThreadError('Invalid range'),
         400,
         'INVALID_COMMENT_THREAD',
       ],
       [
-        'TrackChangeDomainException',
-        new TrackChangeDomainException('Invalid change'),
+        'InvalidChangeError',
+        new InvalidChangeError('Invalid change'),
         400,
         'INVALID_TRACK_CHANGE',
       ],

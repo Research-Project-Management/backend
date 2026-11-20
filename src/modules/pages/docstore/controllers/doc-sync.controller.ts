@@ -119,7 +119,7 @@ export class DocSyncController {
     const flushedLive = await this.liveCollab.flushDocs(projectId, docIds);
 
     if (this.eventEmitter) {
-      this.eventEmitter.emit('manuscripts.project.event', {
+      this.eventEmitter.emit('pages.project.event', {
         projectId,
         event: 'compiler:sync',
         payload: {

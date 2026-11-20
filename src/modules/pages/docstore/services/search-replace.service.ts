@@ -426,7 +426,7 @@ export class SearchReplaceService {
 
           if (this.eventEmitter) {
             try {
-              this.eventEmitter.emit('manuscripts.project.event', {
+              this.eventEmitter.emit('pages.project.event', {
                 projectId,
                 event: 'doc:content-updated',
                 payload: {

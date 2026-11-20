@@ -1,7 +1,7 @@
 /**
  * modules/pages/docstore/controllers/presence.controller.ts
  * Domain-focused controller handling real-time collaboration presence,
- * heartbeats, room leaves, and SSE stream fallbacks.
+ * heartbeats, and room leaves (primary realtime transport is Socket.IO /pages).
  */
 
 import {
@@ -11,7 +11,6 @@ import {
   Param,
   Body,
   Req,
-  Res,
   HttpStatus,
   HttpCode,
   UseGuards,
@@ -25,7 +24,6 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
-import type { FastifyReply } from 'fastify';
 import { PresenceService, HeartbeatBody } from '../services/presence.service';
 
 @ApiTags('Manuscripts - Pages Search & Presence')
@@ -93,36 +91,5 @@ export class PresenceController {
     const userId = req?.user?.id || req?.user?.sub;
     const resolvedSpaceId = this.resolveSpaceId(space);
     return this.presenceService.leaveRoom(pageId, userId, resolvedSpaceId);
-  }
-
-  @Get([
-    'docs/:pageId/collaboration/stream',
-    'spaces/:spaceId/docs/:pageId/collaboration/stream',
-    'docs/:pageId/stream',
-  ])
-  async getStream(
-    @Param('pageId') pageId: string,
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param('spaceId') routeSpaceId?: string,
-    @ResolvedSpace()
-    space?: string | { id: string; spaceId?: string } | null,
-  ) {
-    const origin =
-      (Array.isArray(req.headers?.origin)
-        ? req.headers.origin[0]
-        : req.headers?.origin) ||
-      (Array.isArray(req.headers?.Origin)
-        ? req.headers.Origin[0]
-        : req.headers?.Origin) ||
-      undefined;
-    const resolvedSpaceId = this.resolveSpaceId(space, routeSpaceId);
-    await this.presenceService.streamPresenceAndUpdates(
-      pageId,
-      origin,
-      req.raw,
-      reply,
-      resolvedSpaceId,
-    );
   }
 }

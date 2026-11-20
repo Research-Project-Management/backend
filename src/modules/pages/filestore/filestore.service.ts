@@ -341,7 +341,7 @@ export class FilestoreService {
         saved.name || 'unnamed.bin',
         'unnamed.bin',
       );
-      this.eventEmitter?.emit('manuscripts.file-tree.change', {
+      this.eventEmitter?.emit('pages.file-tree.change', {
         projectId,
         change: {
           action: 'create',
@@ -493,7 +493,7 @@ export class FilestoreService {
       }
     }
 
-    this.eventEmitter?.emit('manuscripts.file-tree.change', {
+    this.eventEmitter?.emit('pages.file-tree.change', {
       projectId,
       change: {
         action: 'delete',

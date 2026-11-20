@@ -24,6 +24,7 @@ import {
   LogLineVo,
   postProcessDiagnostics,
 } from '@/modules/pages/diagnostics/domain';
+import { resolveUnicodePreamblePackages } from '@/modules/pages/core/domain/latex-preamble';
 
 describe('CLSI Log Harvesting, Validation & Diagnostics Pipeline', () => {
   afterEach(() => {
@@ -450,6 +451,56 @@ Warning--empty title in knuth1984
       expect(summary.truncated).toBe(true);
       // Item 0 and 1 deduplicated on normalized message & same file/line -> total errors = 4 (i=0,2,3,4)
       expect(summary.totalErrors).toBe(4);
+    });
+
+    it('joins multi-line GenericError Unicode messages and attaches T5 quickFix + explanation', () => {
+      const analyzer = new CompileLogAnalyzer();
+      const logText = [
+        '(./main.tex',
+        './main.tex:10: LaTeX Error: Unicode character ấ (U+1EA5)',
+        '               not set up for use with LaTeX.',
+        '',
+        'See the LaTeX manual or LaTeX Companion for explanation.',
+        'Type  H <return>  for immediate help.',
+        ' ...',
+        '',
+        'l.10 \\maketitle',
+        '',
+        '!  ==> Fatal error occurred, no output PDF file produced!',
+        ')',
+      ].join('\n');
+
+      const res = analyzer.parseWithSummary(logText, 'main.tex');
+      expect(res.summary.totalErrors).toBe(1);
+      expect(res.diagnostics).toHaveLength(1);
+      const err = res.diagnostics[0];
+      expect(err.file).toBe('main.tex');
+      expect(err.line).toBe(10);
+      expect(err.message).toContain(
+        'Unicode character ấ (U+1EA5) not set up for use with LaTeX.',
+      );
+      expect(err.code).toBe('UNICODE_CHAR_NOT_SET_UP');
+      expect(err.explanation?.title).toBe('Unsupported Unicode Character');
+      expect(err.quickFix?.replacementText).toBe('\\usepackage[T5]{fontenc}');
+    });
+
+    it('resolveUnicodePreamblePackages selects minimal script-appropriate preamble packages', () => {
+      expect(resolveUnicodePreamblePackages(['Flux', 'John Doe'])).toEqual({
+        magicComments: [],
+        packages: [],
+      });
+      expect(resolveUnicodePreamblePackages(['flux', 'Tấn Thành'])).toEqual({
+        magicComments: [],
+        packages: ['\\usepackage[T5]{fontenc}'],
+      });
+      expect(resolveUnicodePreamblePackages(['Paper', 'José Müller'])).toEqual({
+        magicComments: [],
+        packages: ['\\usepackage[T1]{fontenc}'],
+      });
+      expect(resolveUnicodePreamblePackages(['Paper', '山田太郎'])).toEqual({
+        magicComments: ['% !TEX program = xelatex'],
+        packages: ['\\usepackage{fontspec}'],
+      });
     });
   });
 });

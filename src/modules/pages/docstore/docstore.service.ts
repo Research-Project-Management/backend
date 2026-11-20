@@ -14,13 +14,7 @@ import { mapWithConcurrency } from '@/core';
 const gunzipAsync = promisify(zlib.gunzip);
 const gzipAsync = promisify(zlib.gzip);
 import { WorkspaceFile } from '@/modules/pages/core/domain/workspace-file.interface';
-import { DocstoreRepository } from './repositories/docstore.repository';
 import {
-  DocArchiveRepository,
-  StoragePortDocArchiveAdapter,
-} from './repositories/archive.repository';
-import {
-  DocHasherAdapter,
   IDocRepository,
   IDocPersistor,
   IDocHasher,
@@ -36,11 +30,6 @@ import {
   NullByteDetectedError,
   computeDocSha256,
 } from './domain';
-import {
-  TrackChangeSuggestionSpec,
-  applySuggestionToLines,
-  applyBatchSuggestionsToLines,
-} from '@/modules/pages/track-changes/domain';
 import {
   IncludedProjectDoc,
   ExportFormattedDocResult,
@@ -493,23 +482,6 @@ export class DocstoreService {
         ).catch(() => undefined);
       }
     }
-  }
-
-  public async applySuggestionsToDoc(
-    projectId: string,
-    docId: string,
-    lines: string[],
-    currentVersion: number,
-    suggestions: TrackChangeSuggestionSpec | TrackChangeSuggestionSpec[],
-  ): Promise<{ lines: string[]; result: UpdateDocResult }> {
-    const mutatedLines = Array.isArray(suggestions)
-      ? applyBatchSuggestionsToLines([...lines], suggestions)
-      : applySuggestionToLines([...lines], suggestions);
-    const result = await this.updateDoc(projectId, docId, {
-      lines: mutatedLines,
-      version: (currentVersion || 0) + 1,
-    });
-    return { lines: mutatedLines, result };
   }
 
   public transpileDocumentForExport(params: {

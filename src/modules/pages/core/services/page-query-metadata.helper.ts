@@ -125,7 +125,7 @@ export async function applyPageMetadataAndTitleUpdates(
         } else {
           await runTitleSync(prisma);
         }
-        eventEmitter?.emit('manuscripts.file-tree.change', {
+        eventEmitter?.emit('pages.file-tree.change', {
           projectId: recordProjectId,
           change: {
             action: 'rename',

@@ -154,7 +154,7 @@ export async function createPageFileHelper(
   const createdDoc = createdDocResult;
   const nodeId = createdNodeResult.id;
 
-  ctx.eventEmitter?.emit('manuscripts.file-tree.change', {
+  ctx.eventEmitter?.emit('pages.file-tree.change', {
     projectId,
     change: {
       action: 'create',
@@ -450,7 +450,7 @@ export async function importFileFromProjectHelper(
     }
   }
 
-  ctx.eventEmitter?.emit('manuscripts.file-tree.change', {
+  ctx.eventEmitter?.emit('pages.file-tree.change', {
     projectId: targetProjectId,
     change: {
       action: 'create',

@@ -207,6 +207,7 @@ export interface EngineRunOptions {
   stopOnFirstError?: boolean;
   draft?: boolean;
   syntaxOnly?: boolean;
+  force?: boolean;
   shellEscape?: boolean;
   compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex';
   signal?: AbortSignal;
@@ -293,6 +294,7 @@ export interface IWorkspaceManager {
     files: WorkspaceFile[],
   ): Promise<WorkspaceSyncStats>;
   cleanScratch(projectId: string): Promise<void>;
+  cleanAuxBuildCache?(projectId: string): Promise<void>;
   purgeExtraneousFiles(projectId: string, inputFiles: string[]): Promise<void>;
   listAuxFiles(projectId: string): Promise<AuxFileInfo[]>;
   readAuxFile(projectId: string, filename: string): Promise<Buffer | null>;

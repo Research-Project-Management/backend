@@ -210,6 +210,27 @@ export class WorkspaceRepository implements IWorkspaceManager {
     }
   }
 
+  public async cleanAuxBuildCache(projectId: string): Promise<void> {
+    const scratchDir = this.getScratchDir(projectId);
+    try {
+      const entries = await fs.readdir(scratchDir, { withFileTypes: true });
+      await Promise.allSettled(
+        entries
+          .filter((entry) => {
+            if (!entry.isFile() || entry.isSymbolicLink()) return false;
+            const lower = entry.name.toLowerCase();
+            const ext = path.extname(lower);
+            return AUX_EXTENSIONS.has(ext) || lower.endsWith('.synctex.gz');
+          })
+          .map((entry) =>
+            fs.unlink(path.join(scratchDir, entry.name)).catch(() => {}),
+          ),
+      );
+    } catch {
+      // Ignored if directory doesn't exist yet
+    }
+  }
+
   public async purgeExtraneousFiles(
     projectId: string,
     inputFiles: string[],

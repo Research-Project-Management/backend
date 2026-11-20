@@ -1,7 +1,6 @@
 /**
- * modules/manuscripts/docstore/services/presence.service.ts
- * Domain/Application service managing HTTP fallback presence, WebSocket presence merging,
- * and Server-Sent Events (SSE) collaboration stream notifications.
+ * modules/pages/docstore/services/presence.service.ts
+ * Domain/Application service managing HTTP presence and WebSocket presence merging.
  */
 
 import {
@@ -13,10 +12,7 @@ import {
   NotFoundException,
   OnModuleDestroy,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
-import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
-import type { FastifyReply } from 'fastify';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
@@ -88,7 +84,6 @@ export class PresenceService implements OnModuleDestroy {
       }>;
     }
   >();
-  private readonly activeSseCleanups = new Set<() => void>();
   private liveCollab: LiveCollaborationPort | null | undefined;
 
   constructor(
@@ -96,7 +91,6 @@ export class PresenceService implements OnModuleDestroy {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
-    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {
     this.liveCollab =
       liveCollabOrLegacyRef &&
@@ -108,10 +102,6 @@ export class PresenceService implements OnModuleDestroy {
   }
 
   public onModuleDestroy(): void {
-    for (const cleanup of this.activeSseCleanups) {
-      cleanup();
-    }
-    this.activeSseCleanups.clear();
     this.presenceCache.clear();
     this.httpPresence.clear();
     this.projectIdCache.clear();
@@ -353,109 +343,5 @@ export class PresenceService implements OnModuleDestroy {
       this.presenceCache.delete(`${authorizedProjectId}:${pageId}`);
     }
     return { success: true };
-  }
-
-  public formatSseEvent(
-    pageId: string,
-    payload: Record<string, unknown>,
-  ): string {
-    return `data: ${JSON.stringify({ pageId, timestamp: Date.now(), ...payload })}\n\n`;
-  }
-
-  public async streamPresenceAndUpdates(
-    pageId: string,
-    origin: string | undefined,
-    rawRequest: { on(event: 'close', listener: () => void): void },
-    reply: FastifyReply,
-    authorizedProjectId?: string,
-  ): Promise<void> {
-    if (authorizedProjectId) {
-      await this.verifyPageInProject(pageId, authorizedProjectId);
-    }
-    if (origin && isOriginAllowed(origin)) {
-      reply.raw.setHeader('Access-Control-Allow-Origin', origin);
-      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    reply.raw.setHeader('Content-Type', 'text/event-stream');
-    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
-    reply.raw.setHeader('Connection', 'keep-alive');
-    reply.raw.writeHead(200);
-
-    const send = (payload: Record<string, unknown>) => {
-      if (reply.raw.writableEnded || reply.raw.destroyed) return;
-      reply.raw.write(this.formatSseEvent(pageId, payload));
-    };
-
-    let lastPresenceKey = '';
-    let closed = false;
-
-    const onProjectEvent = (evt: {
-      projectId?: string;
-      event?: string;
-      payload?: { docId?: string; version?: number };
-    }) => {
-      if (closed) return;
-      if (
-        authorizedProjectId &&
-        evt?.projectId &&
-        evt.projectId !== authorizedProjectId
-      ) {
-        return;
-      }
-      if (
-        evt?.event === 'doc:content-updated' &&
-        evt.payload?.docId === pageId
-      ) {
-        send({ type: 'content-updated', version: evt.payload.version });
-      }
-    };
-
-    this.eventEmitter?.on('manuscripts.project.event', onProjectEvent);
-
-    const tick = async () => {
-      if (closed) return;
-      try {
-        const { users } = await this.collectPresence(
-          pageId,
-          authorizedProjectId,
-        );
-        const key = users
-          .map(
-            (u: LivePresenceUser | ActivePresenceUser) =>
-              `${u.userId}:${JSON.stringify(u.cursor ?? null)}`,
-          )
-          .sort()
-          .join('|');
-        if (key !== lastPresenceKey) {
-          lastPresenceKey = key;
-          send({ type: 'presence', users });
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.debug(`SSE tick failed for ${pageId}: ${message}`);
-      }
-    };
-
-    await tick();
-    const poll = setInterval(() => void tick(), 3000);
-    poll.unref?.();
-    const keepalive = setInterval(() => {
-      if (!reply.raw.writableEnded && !reply.raw.destroyed) {
-        reply.raw.write(': keepalive\n\n');
-      }
-    }, 15000);
-    keepalive.unref?.();
-
-    const cleanup = () => {
-      if (closed) return;
-      closed = true;
-      clearInterval(poll);
-      clearInterval(keepalive);
-      this.eventEmitter?.off('manuscripts.project.event', onProjectEvent);
-      this.activeSseCleanups.delete(cleanup);
-    };
-
-    this.activeSseCleanups.add(cleanup);
-    rawRequest.on('close', cleanup);
   }
 }

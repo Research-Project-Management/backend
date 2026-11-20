@@ -10,6 +10,7 @@ export * from './domain/workspace-file.interface';
 export * from './domain/pages-domain.error';
 export * from './domain/ssrf-guard';
 export * from './domain/latex-escape';
+export * from './domain/latex-preamble';
 export * from './domain/text-extensions';
 export * from './ports/live-collaboration.port';
 export * from './ports/distributed-lock.port';

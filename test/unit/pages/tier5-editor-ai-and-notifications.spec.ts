@@ -317,6 +317,17 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant & Page Chat', () 
             createdAt: new Date(),
             updatedAt: new Date(),
           }),
+          create: jest.fn().mockResolvedValue({
+            id: 'chat-1',
+            createdById: userId,
+            spaceId: personalSpaceId,
+            pageId: canonicalPageId,
+            title: 'Doc Chat',
+            documentIds: [],
+            messages: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }),
           update: jest.fn().mockResolvedValue({}),
           findUnique: jest.fn().mockResolvedValue({
             id: 'chat-1',
@@ -377,6 +388,14 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant & Page Chat', () 
         }),
         mockReply,
         expect.any(Object),
+      );
+      expect(mockPrisma.aiChat.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            spaceId: personalSpaceId,
+            pageId: canonicalPageId,
+          }),
+        }),
       );
     });
 

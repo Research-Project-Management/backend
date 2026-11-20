@@ -6,9 +6,9 @@
  * - Subsystem 0 (Shared Kernel): PagesCoreModule
  * - Subsystem 1 (Virtual File System & Storage): FilestoreModule -> DocstoreModule -> StructureModule
  * - Subsystem 3 (Compilation & Diagnostics): DiagnosticsModule -> ClsiModule
- * - Subsystem 4 (Review & Versioning): TrackChangesModule -> ProjectHistoryModule
+ * - Subsystem 4 (Review & Versioning): ReviewModule -> ProjectHistoryModule
  * - Subsystem 5 (Academic Authoring & Packaging): SpellingModule -> CitationsModule -> TemplatesModule -> ExportImportModule -> GitBridgeModule
- * (Note: Subsystem 2 - Real-time Collaboration lives in @/modules/realtime/pages)
+ * (Note: Subsystem 2 - Real-time Collaboration lives in @/modules/realtime/channels/pages)
  */
 
 import { Module } from '@nestjs/common';
@@ -26,7 +26,7 @@ import { DiagnosticsModule } from './diagnostics/diagnostics.module';
 import { ClsiModule } from './clsi/clsi.module';
 
 // Subsystem 4: Review & Versioning
-import { TrackChangesModule } from './track-changes/track-changes.module';
+import { ReviewModule } from './review/review.module';
 import { ProjectHistoryModule } from './project-history/project-history.module';
 
 // Subsystem 5: Academic Authoring & Packaging
@@ -54,7 +54,7 @@ import { PagesFacade } from './pages.facade';
     ClsiModule,
 
     // Tier 3 (Subsystem 4): Review & Versioning
-    TrackChangesModule,
+    ReviewModule,
     ProjectHistoryModule,
 
     // Tier 4 (Subsystem 5): Academic Authoring & Packaging
@@ -83,7 +83,7 @@ import { PagesFacade } from './pages.facade';
     ClsiModule,
 
     // Subsystem 4: Review & Versioning
-    TrackChangesModule,
+    ReviewModule,
     ProjectHistoryModule,
 
     // Subsystem 5: Academic Authoring & Packaging

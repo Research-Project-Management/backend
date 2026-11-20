@@ -404,7 +404,7 @@ export class PageVersionsService {
       lines,
     );
 
-    this.eventEmitter?.emit('manuscripts.project.event', {
+    this.eventEmitter?.emit('pages.project.event', {
       projectId: docProjectId,
       event: 'version:restored',
       payload: {

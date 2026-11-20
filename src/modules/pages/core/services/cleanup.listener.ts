@@ -73,7 +73,7 @@ export class CleanupListener {
     }
   }
 
-  @OnEvent('manuscripts.page.deleted', { async: true })
+  @OnEvent('pages.page.deleted', { async: true })
   public async handlePageDeleted(event: PageDeletedEvent): Promise<void> {
     if (!event?.projectId || !event?.deletedFiles?.length) return;
     try {

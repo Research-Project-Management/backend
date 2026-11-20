@@ -1,8 +1,3 @@
-/**
- * modules/pages/track-changes/dto/review-status.dto.ts
- * Request DTO and transition table for the manuscript review lifecycle.
- */
-
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsIn,
@@ -24,7 +19,6 @@ export const REVIEW_STATUSES = [
 
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
-/** Allowed next states per current state (same-state updates are idempotent). */
 export const REVIEW_TRANSITIONS: Record<ReviewStatus, readonly ReviewStatus[]> =
   {
     draft: ['in_review'],
@@ -49,17 +43,12 @@ export interface ReviewTransitionCandidate {
   toStatus: ReviewStatus;
 }
 
-export interface IReviewPolicySpec {
+export interface ReviewPolicySpec {
   isSatisfiedBy(candidate: ReviewTransitionCandidate): boolean;
   readonly violationReason: (candidate: ReviewTransitionCandidate) => string;
   readonly violationType: 'forbidden' | 'bad_request';
 }
 
-/**
- * Specification / Policy Pattern for Manuscript Review Lifecycle transitions.
- * Composes role authorization rules (`OWNER`, `COORDINATOR`, `CONTRIBUTOR`) and
- * state-machine transition rules into a single testable policy object.
- */
 export class ReviewTransitionPolicy {
   private static readonly PRIVILEGED_ROLES = new Set(['owner', 'coordinator']);
   private static readonly CONTRIBUTOR_OR_ABOVE = new Set([
@@ -77,7 +66,7 @@ export class ReviewTransitionPolicy {
     return (role || '').trim().toLowerCase();
   }
 
-  private readonly specs: ReadonlyArray<IReviewPolicySpec> = [
+  private readonly specs: ReadonlyArray<ReviewPolicySpec> = [
     {
       violationType: 'forbidden',
       isSatisfiedBy: ({ role, toStatus }) =>
@@ -135,7 +124,7 @@ export class ReviewTransitionPolicy {
   }
 }
 
-export const defaultReviewTransitionPolicy = new ReviewTransitionPolicy();
+export const reviewTransitionPolicy = new ReviewTransitionPolicy();
 
 export class UpdateReviewStatusDto {
   @ApiProperty({ enum: REVIEW_STATUSES })
