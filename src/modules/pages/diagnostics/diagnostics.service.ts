@@ -10,7 +10,6 @@ import {
   LintDocumentDto,
   DiagnosticReportDto,
   ErrorExplanationDto,
-  AutoFixResponseDto,
 } from './dto/diagnostics.dto';
 import {
   DiagnosticReport,
@@ -249,19 +248,6 @@ export class DiagnosticsService {
       items: allItems,
     });
     return aggregatedReport.toJSON();
-  }
-
-  /**
-   * Pre-compile auto-fixer: Automatically repairs common syntax errors
-   * (smart quotes, unescaped _, %, unclosed environments).
-   */
-  public autoFix(source: string): AutoFixResponseDto {
-    const res = this.syntaxLinter.autoFix(source);
-    return {
-      isFixed: res.isFixed,
-      fixedSource: res.fixedSource,
-      appliedFixes: res.appliedFixes,
-    };
   }
 
   /**

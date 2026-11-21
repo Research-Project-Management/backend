@@ -44,8 +44,6 @@ import {
   LintDocumentDto,
   DiagnosticReportDto,
   ErrorExplanationDto,
-  AutoFixRequestDto,
-  AutoFixResponseDto,
 } from './dto/diagnostics.dto';
 import {
   InvalidLogFormatException,
@@ -168,20 +166,6 @@ export class DiagnosticsController {
       req,
     );
     return await this.diagnosticsService.lintProject(spaceId, pageId);
-  }
-
-  @Post('autofix')
-  @UseGuards(UserRateLimitGuard)
-  @UserRateLimit('search-replace')
-  @NoProjectContext()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary:
-      'Automatically repair common LaTeX syntax errors (smart quotes, naked _, %)',
-  })
-  @ApiResponse({ status: 200, type: AutoFixResponseDto })
-  public autoFixDocument(@Body() dto: AutoFixRequestDto): AutoFixResponseDto {
-    return this.diagnosticsService.autoFix(dto.source);
   }
 
   @Get('explain/:code')

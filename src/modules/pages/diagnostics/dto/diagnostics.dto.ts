@@ -1,4 +1,4 @@
-/**
+﻿/**
  * diagnostics/dto/diagnostics.dto.ts
  * Data Transfer Objects for Diagnostics API endpoints.
  */
@@ -156,39 +156,6 @@ export class DiagnosticItemDto {
     description: string;
     replacementText: string;
   };
-}
-
-export class AutoFixRequestDto {
-  @ApiProperty({ description: 'LaTeX source content to auto-fix' })
-  @IsString()
-  source!: string;
-
-  @ApiPropertyOptional({ description: 'Target filename', default: 'main.tex' })
-  @IsString()
-  @IsOptional()
-  filename?: string;
-}
-
-export class AppliedFixDto {
-  @ApiProperty()
-  line!: number;
-
-  @ApiProperty()
-  rule!: string;
-
-  @ApiProperty()
-  description!: string;
-}
-
-export class AutoFixResponseDto {
-  @ApiProperty()
-  isFixed!: boolean;
-
-  @ApiProperty()
-  fixedSource!: string;
-
-  @ApiProperty({ type: [AppliedFixDto] })
-  appliedFixes!: AppliedFixDto[];
 }
 
 export class DiagnosticReportDto {

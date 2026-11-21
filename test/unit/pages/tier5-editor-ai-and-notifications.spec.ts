@@ -1,5 +1,5 @@
-import 'reflect-metadata';
-import { ValidationPipe, ForbiddenException } from '@nestjs/common';
+﻿import 'reflect-metadata';
+import { ValidationPipe } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { fromPartial } from '@total-typescript/shoehorn';
@@ -19,8 +19,12 @@ import { ChatService } from '@/modules/ai/chat/services/chat.service';
 import { SessionService } from '@/modules/ai/chat/services/session.service';
 import { TitleService } from '@/modules/ai/chat/services/title.service';
 import { ClsiService } from '@/modules/pages/clsi/services/clsi.service';
+import {
+  generateLatexEquationHelper,
+  sanitizeLatexEquation,
+} from '@/modules/pages/clsi/services/clsi-ai.helper';
 
-describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant & Page Chat', () => {
+describe('Khá»‘i 2 / Táº§ng 5 Backend â€” AI Writing Assistant & Page Chat', () => {
   describe('1. AiFacade.generate & ClsiService AI Writing / Error Assist', () => {
     it('AiFacade.generate delegates to stateless direct chatSync with system/user messages and extracts text', async () => {
       const mockEnginePort = fromPartial<IAiEnginePort>({
@@ -60,109 +64,6 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant & Page Chat', () 
       );
     });
 
-    it('ClsiService.transformAcademicText forwards surrounding context, unmasks LaTeX, and preserves outer whitespace', async () => {
-      const mockConfig = fromPartial<ConfigService>({ get: jest.fn() });
-      const mockAiEngine = {
-        generate: jest.fn(async ({ prompt }: { prompt: string }) => {
-          expect(prompt).toContain('Document Title: Quantum Survey');
-          expect(prompt).toContain('Intro context');
-          expect(prompt).toContain('Outro context');
-          const match = prompt.match(/__LATEX_INLINE_MATH_\d+__/);
-          const citeMatch = prompt.match(/__LATEX_CITE_\d+__/);
-          return {
-            text: `Empirical findings establish ${match?.[0] ?? ''} per ${citeMatch?.[0] ?? ''}.`,
-          };
-        }),
-      };
-
-      const clsi = new ClsiService(
-        mockConfig,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        mockAiEngine,
-      );
-
-      const res = await clsi.transformAcademicText(
-        {
-          action: 'academic-tone',
-          selectedText: '  Results show $E=mc^2$ per \\cite{einstein1905}. \n',
-          contextBefore: 'Intro context',
-          contextAfter: 'Outro context',
-          documentTitle: 'Quantum Survey',
-        },
-        'user-1',
-      );
-
-      expect(res.success).toBe(true);
-      expect(res.suggestedText).toBe(
-        '  Empirical findings establish $E=mc^2$ per \\cite{einstein1905}. \n',
-      );
-    });
-
-    it('ClsiService.transformAcademicText enforces workspace access via AiFacade.authorizeScope when spaceId is provided', async () => {
-      const mockConfig = fromPartial<ConfigService>({ get: jest.fn() });
-      const mockPrisma = fromPartial<PrismaService>({
-        space: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: '11111111-1111-1111-1111-111111111111',
-            type: 'personal',
-            ownerUserId: 'other-user',
-            projectId: null,
-          }),
-        },
-      });
-      const mockEnginePort = fromPartial<IAiEnginePort>({
-        chatSync: jest.fn(),
-      });
-      const accessRepo = new AccessRepository(mockPrisma);
-      const spaceAccess = new SpaceAccessService(accessRepo);
-      const docAccess = new DocumentAccessService(accessRepo, spaceAccess);
-      const accessService = new AccessService(spaceAccess, docAccess);
-      const aiFacade = new AiFacade(mockEnginePort, accessService);
-
-      const clsi = new ClsiService(
-        mockConfig,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        aiFacade,
-      );
-
-      await expect(
-        clsi.transformAcademicText(
-          {
-            action: 'academic-tone',
-            selectedText: 'Draft text',
-            spaceId: '11111111-1111-1111-1111-111111111111',
-          },
-          'intruder-user',
-        ),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
     it('ClsiService.fixLatexError returns clean \\usepackage{booktabs} snippet without comment noise', async () => {
       const mockConfig = fromPartial<ConfigService>({ get: jest.fn() });
       const clsi = new ClsiService(mockConfig);
@@ -177,6 +78,49 @@ describe('Khối 2 / Tầng 5 Backend — AI Writing Assistant & Page Chat', () 
       expect(fix.confidence).toBe('high');
       expect(fix.fixedSnippet).toBe('\\usepackage{booktabs}');
       expect(fix.explanation).toContain('booktabs');
+    });
+
+    it('sanitizeLatexEquation strips fences and math delimiters and wraps in equation environment', () => {
+      expect(sanitizeLatexEquation('```latex\n$$E = mc^2$$\n```')).toBe(
+        '\\begin{equation}\n  E = mc^2\n\\end{equation}',
+      );
+      expect(sanitizeLatexEquation('\\[ a^2 + b^2 = c^2 \\]')).toBe(
+        '\\begin{equation}\n  a^2 + b^2 = c^2\n\\end{equation}',
+      );
+      const aligned = '\\begin{align}\n a &= b \\\\\n c &= d\n\\end{align}';
+      expect(sanitizeLatexEquation(aligned)).toBe(aligned);
+      expect(sanitizeLatexEquation('   ')).toBe('');
+    });
+
+    it('generateLatexEquationHelper returns sanitized equation from AI and empty string when AI is unavailable', async () => {
+      const generate = jest.fn().mockResolvedValue({
+        text: '$$\\int_0^1 x^2 \\, dx = \\tfrac{1}{3}$$',
+      });
+      const res = await generateLatexEquationHelper(
+        { generate },
+        { prompt: 'integral of x squared from 0 to 1' },
+        'user-1',
+      );
+      expect(res.equation).toBe(
+        '\\begin{equation}\n  \\int_0^1 x^2 \\, dx = \\tfrac{1}{3}\n\\end{equation}',
+      );
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'integral of x squared from 0 to 1',
+          userId: 'user-1',
+        }),
+      );
+
+      const offline = await generateLatexEquationHelper(undefined, {
+        prompt: 'anything',
+      });
+      expect(offline.equation).toBe('');
+
+      const failing = await generateLatexEquationHelper(
+        { generate: jest.fn().mockRejectedValue(new Error('boom')) },
+        { prompt: 'anything' },
+      );
+      expect(failing.equation).toBe('');
     });
   });
 

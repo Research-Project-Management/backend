@@ -33,9 +33,9 @@ import { ClsiService } from './services/clsi.service';
 import {
   CompilePageDto,
   ClsiWordCountDto,
-  ClsiAiTransformDto,
   ClsiAiFixErrorDto,
   ClsiAiGenerateTableDto,
+  ClsiAiGenerateEquationDto,
 } from './dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
@@ -320,22 +320,6 @@ export class ClsiController {
     return { staleStats, quotaStats };
   }
 
-  @Post('clsi/ai/transform')
-  @UseGuards(UserRateLimitGuard)
-  @UserRateLimit('search-replace')
-  @NoProjectContext()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary:
-      'Transform academic LaTeX/Markdown text while masking math, citation, and reference macros',
-  })
-  async transformAcademicText(
-    @Body() dto: ClsiAiTransformDto,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.clsiService.transformAcademicText(dto, userId);
-  }
-
   @Post('clsi/ai/fix-error')
   @UseGuards(UserRateLimitGuard)
   @UserRateLimit('search-replace')
@@ -365,5 +349,20 @@ export class ClsiController {
     @CurrentUser('id') userId: string,
   ) {
     return this.clsiService.generateLatexTable(dto, userId);
+  }
+
+  @Post('clsi/ai/generate-equation')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('search-replace')
+  @NoProjectContext()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Generate a LaTeX display equation from a natural language prompt',
+  })
+  async generateLatexEquation(
+    @Body() dto: ClsiAiGenerateEquationDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.clsiService.generateLatexEquation(dto, userId);
   }
 }

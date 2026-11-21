@@ -1,143 +1,20 @@
-/**
+﻿/**
  * modules/pages/clsi/services/clsi-ai.helper.ts
- * Server-side LaTeX AI academic text transformation, error remediation, and table generation helpers.
+ * Server-side LaTeX AI error remediation and table generation helpers.
  */
 
 import {
   ClsiAiFixErrorDto,
+  ClsiAiGenerateEquationDto,
   ClsiAiGenerateTableDto,
-  ClsiAiTransformDto,
 } from '../dto/clsi.dto';
 import { SyntaxLinter } from '@/modules/pages/diagnostics/domain';
-import {
-  AiActionResult,
-  AiErrorFixResult,
-  applyFallbackTransform,
-  fixLatexError,
-  getAiSystemPrompt,
-  maskLatexEntities,
-} from '../domain/ai-assistant';
+import { AiErrorFixResult, fixLatexError } from '../domain/ai-assistant';
 import type { IAiFacade } from '@/modules/ai';
 
 export type ClsiAiEngine = Partial<
   Pick<IAiFacade, 'generate' | 'authorizeScope'>
 >;
-
-/**
- * Server-side LaTeX AI academic writing transformation:
- * Masks LaTeX math, citations, and references, applies academic strategy via IAiFacade
- * (with heuristic fallback), and unmasks all LaTeX entities verbatim.
- */
-export async function transformAcademicTextHelper(
-  aiEngine: ClsiAiEngine | undefined,
-  dto: ClsiAiTransformDto,
-  userId?: string,
-): Promise<AiActionResult> {
-  const {
-    action,
-    selectedText,
-    customPrompt,
-    contextBefore,
-    contextAfter,
-    documentTitle,
-  } = dto;
-
-  const scope = aiEngine?.authorizeScope
-    ? await aiEngine.authorizeScope({
-        userId,
-        spaceId: dto.spaceId,
-        pageId: dto.pageId,
-      })
-    : { spaceId: dto.spaceId, pageId: dto.pageId };
-
-  const rawText = selectedText || '';
-  const trimmed = rawText.trim();
-  const leadingWs = rawText.match(/^\s*/)?.[0] ?? '';
-  const trailingWs = rawText.match(/\s*$/)?.[0] ?? '';
-
-  if (!trimmed) {
-    return {
-      success: false,
-      originalText: selectedText,
-      suggestedText: selectedText,
-      explanation: 'No text selected.',
-      action,
-      diffSummary: {
-        charsOriginal: 0,
-        charsSuggested: 0,
-        wordsOriginal: 0,
-        wordsSuggested: 0,
-      },
-    };
-  }
-
-  const { maskedText, unmask } = maskLatexEntities(trimmed);
-  let suggestedCore = '';
-  let explanation = '';
-
-  if (aiEngine && typeof aiEngine.generate === 'function') {
-    try {
-      const systemPrompt = getAiSystemPrompt(action, customPrompt);
-      const promptParts: string[] = [];
-      if (documentTitle) {
-        promptParts.push(`Document Title: ${documentTitle}`);
-      }
-      if (contextBefore) {
-        promptParts.push(
-          `Context before selection:\n"""\n${contextBefore.slice(-1500)}\n"""`,
-        );
-      }
-      promptParts.push(`Text to edit:\n"""\n${maskedText}\n"""`);
-      if (contextAfter) {
-        promptParts.push(
-          `Context after selection:\n"""\n${contextAfter.slice(0, 1500)}\n"""`,
-        );
-      }
-      const promptText = promptParts.join('\n\n');
-      const aiRes = await aiEngine.generate({
-        prompt: promptText,
-        systemInstruction: systemPrompt,
-        temperature: 0.3,
-        userId,
-        spaceId: scope.spaceId,
-        pageId: scope.pageId,
-      });
-      const rawAiText = (aiRes?.text || '')
-        .replace(/^"""\s*|\s*"""$/g, '')
-        .trim();
-      if (rawAiText.length > 0) {
-        suggestedCore = unmask(rawAiText).trim();
-        explanation = `Applied ${action.replace(/-/g, ' ')} via AI Assistant.`;
-      }
-    } catch {
-      // Fallback to server-side heuristic transformation
-    }
-  }
-
-  if (!suggestedCore) {
-    const fallbackMasked = applyFallbackTransform(maskedText, action);
-    suggestedCore = unmask(fallbackMasked).trim();
-    explanation = `Enhanced ${action.replace(/-/g, ' ')} using Academic Heuristic Rules.`;
-  }
-
-  const suggestedResult = `${leadingWs}${suggestedCore}${trailingWs}`;
-  const wordsOriginal = trimmed.split(/\s+/).filter(Boolean).length;
-  const wordsSuggested = suggestedCore.split(/\s+/).filter(Boolean).length;
-
-  return {
-    success: true,
-    originalText: selectedText,
-    suggestedText: suggestedResult,
-    explanation,
-    action,
-    diffSummary: {
-      charsOriginal: selectedText.length,
-      charsSuggested: suggestedResult.length,
-      wordsOriginal,
-      wordsSuggested,
-    },
-  };
-}
 
 /**
  * Server-side LaTeX compiler error remediation:
@@ -172,7 +49,7 @@ export async function fixLatexErrorHelper(
       '',
       'Rules:',
       '- Never place \\usepackage before \\documentclass{...}; all \\usepackage declarations must appear after \\documentclass{...} and before \\begin{document}.',
-      '- For Vietnamese Unicode errors in pdfLaTeX (e.g., ấ, ơ, ư, đ), use \\usepackage[T5]{fontenc} (NOT T1, which lacks Vietnamese glyphs, and omit legacy \\usepackage[utf8]{inputenc}). For non-Latin scripts (CJK, Cyrillic, Arabic), advise XeLaTeX or LuaLaTeX with \\usepackage{fontspec}.',
+      '- For Vietnamese Unicode errors in pdfLaTeX (e.g., áº¥, Æ¡, Æ°, Ä‘), use \\usepackage[T5]{fontenc} (NOT T1, which lacks Vietnamese glyphs, and omit legacy \\usepackage[utf8]{inputenc}). For non-Latin scripts (CJK, Cyrillic, Arabic), advise XeLaTeX or LuaLaTeX with \\usepackage{fontspec}.',
       '',
       'Reply ONLY with a valid JSON object in this exact schema (no markdown fences, pure JSON):',
       '{',
@@ -303,4 +180,67 @@ Output ONLY the clean LaTeX tabular code starting with \\begin{tabular} and endi
   return {
     table: `\\begin{tabular}{lll}\n\\hline\nColumn 1 & Column 2 & Column 3 \\\\\n\\hline\nValue 1 & Value 2 & Value 3 \\\\\n\\hline\n\\end{tabular}`,
   };
+}
+
+/**
+ * Normalizes raw model output into a display-math LaTeX equation:
+ * strips markdown fences and `$$` / `\[ \]` / `$` delimiters, then wraps the body
+ * in an `equation` environment unless it already contains a math environment.
+ */
+export function sanitizeLatexEquation(raw: string): string {
+  const stripped = (raw || '')
+    .replace(/```(?:latex|tex)?\n?/g, '')
+    .trim()
+    .replace(/^\$\$([\s\S]*?)\$\$$/, '$1')
+    .replace(/^\\\[([\s\S]*?)\\\]$/, '$1')
+    .replace(/^\$([\s\S]*?)\$$/, '$1')
+    .trim();
+  if (!stripped) {
+    return '';
+  }
+  if (
+    /\\begin\{(equation|align|gather|multline|eqnarray)\*?\}/.test(stripped)
+  ) {
+    return stripped;
+  }
+  return `\\begin{equation}\n  ${stripped}\n\\end{equation}`;
+}
+
+/**
+ * Server-side LaTeX equation generator from a natural language prompt.
+ * Returns an empty equation when no AI engine is available or generation fails.
+ */
+export async function generateLatexEquationHelper(
+  aiEngine: ClsiAiEngine | undefined,
+  dto: ClsiAiGenerateEquationDto,
+  userId?: string,
+): Promise<{ equation: string }> {
+  const scope = aiEngine?.authorizeScope
+    ? await aiEngine.authorizeScope({
+        userId,
+        spaceId: dto.spaceId,
+        pageId: dto.pageId,
+      })
+    : { spaceId: dto.spaceId, pageId: dto.pageId };
+
+  const systemPrompt = `You are an expert academic LaTeX assistant. Convert the user's description into a single correct LaTeX equation.
+Output ONLY the LaTeX math (no markdown fences, no explanation, no surrounding text).`;
+
+  if (aiEngine && typeof aiEngine.generate === 'function') {
+    try {
+      const aiRes = await aiEngine.generate({
+        prompt: dto.prompt,
+        systemInstruction: systemPrompt,
+        temperature: 0.2,
+        userId,
+        spaceId: scope.spaceId,
+        pageId: scope.pageId,
+      });
+      return { equation: sanitizeLatexEquation(aiRes?.text || '') };
+    } catch {
+      // Fall through to empty result
+    }
+  }
+
+  return { equation: '' };
 }

@@ -26,9 +26,9 @@ import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import {
   CompilePageDto,
   ClsiWordCountDto,
-  ClsiAiTransformDto,
   ClsiAiFixErrorDto,
   ClsiAiGenerateTableDto,
+  ClsiAiGenerateEquationDto,
 } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { WordCountStats } from '../domain/clsi.ports';
@@ -41,7 +41,7 @@ import {
   CompileLogAnalyzer,
   SyntaxLinter,
 } from '@/modules/pages/diagnostics/domain';
-import { AiActionResult, AiErrorFixResult } from '../domain/ai-assistant';
+import { AiErrorFixResult } from '../domain/ai-assistant';
 import { SyncTexProcessor } from '../domain/synctex.parser';
 import { TexWordCounter } from '../domain/tex-word.counter';
 import {
@@ -87,7 +87,7 @@ import {
   type ClsiAiEngine,
   fixLatexErrorHelper,
   generateLatexTableHelper,
-  transformAcademicTextHelper,
+  generateLatexEquationHelper,
 } from './clsi-ai.helper';
 
 export type ClsiCompileResult = CompilePipelineResult;
@@ -751,18 +751,6 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   /**
-   * Server-side LaTeX AI academic writing transformation:
-   * Masks LaTeX math, citations, and references, applies academic strategy via EngineService
-   * (with heuristic fallback), and unmasks all LaTeX entities verbatim.
-   */
-  public async transformAcademicText(
-    dto: ClsiAiTransformDto,
-    userId?: string,
-  ): Promise<AiActionResult> {
-    return await transformAcademicTextHelper(this.aiEngine, dto, userId);
-  }
-
-  /**
    * Server-side LaTeX compiler error remediation:
    * Queries EngineService for structured JSON fix, falls back to FastSyntaxLinter.autoFix
    * and expert heuristic rules.
@@ -787,5 +775,15 @@ export class ClsiService implements OnModuleDestroy {
     userId?: string,
   ): Promise<{ table: string }> {
     return await generateLatexTableHelper(this.aiEngine, dto, userId);
+  }
+
+  /**
+   * Server-side LaTeX equation generator from a natural language prompt.
+   */
+  public async generateLatexEquation(
+    dto: ClsiAiGenerateEquationDto,
+    userId?: string,
+  ): Promise<{ equation: string }> {
+    return await generateLatexEquationHelper(this.aiEngine, dto, userId);
   }
 }

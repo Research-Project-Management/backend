@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/manuscripts/clsi/dto/clsi.dto.ts
  * Canonical Data Transfer Objects for the Common LaTeX Service Interface (CLSI).
  */
@@ -200,81 +200,6 @@ export class ClsiWordCountDto {
   files?: Record<string, string>;
 }
 
-export class ClsiAiTransformDto {
-  @ApiProperty({
-    description: 'Academic writing action type',
-    enum: [
-      'academic-tone',
-      'make-concise',
-      'rewrite-academic',
-      'concise',
-      'expand',
-      'fix-grammar',
-      'translate-english',
-      'explain-latex',
-      'custom',
-    ],
-  })
-  @IsString()
-  @IsIn([
-    'academic-tone',
-    'make-concise',
-    'rewrite-academic',
-    'concise',
-    'expand',
-    'fix-grammar',
-    'translate-english',
-    'explain-latex',
-    'custom',
-  ])
-  action!:
-    | 'academic-tone'
-    | 'make-concise'
-    | 'rewrite-academic'
-    | 'concise'
-    | 'expand'
-    | 'fix-grammar'
-    | 'translate-english'
-    | 'explain-latex'
-    | 'custom';
-
-  @ApiProperty({ description: 'Selected LaTeX/Markdown text to transform' })
-  @IsString()
-  selectedText!: string;
-
-  @ApiPropertyOptional({
-    description: 'Custom instruction when action is custom',
-  })
-  @IsOptional()
-  @IsString()
-  customPrompt?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  contextBefore?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  contextAfter?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  documentTitle?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  spaceId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  pageId?: string;
-}
-
 export class ClsiAiFixErrorDto {
   @ApiProperty({ description: 'Compiler error message' })
   @IsString()
@@ -318,6 +243,24 @@ export class ClsiAiFixErrorDto {
 
 export class ClsiAiGenerateTableDto {
   @ApiProperty({ description: 'Natural language description of the table' })
+  @IsString()
+  prompt!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  spaceId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  pageId?: string;
+}
+
+export class ClsiAiGenerateEquationDto {
+  @ApiProperty({
+    description: 'Natural language description of the equation to generate',
+  })
   @IsString()
   prompt!: string;
 
