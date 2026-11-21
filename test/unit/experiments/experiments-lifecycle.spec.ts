@@ -1,6 +1,7 @@
 import { BlobStatus, FilesFacade, StorageBlobRecord } from '@/modules/files';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import { S3StorageAdapter } from '@/modules/files/adapters/s3.adapter';
+import { supportsBucketLifecycle } from '@/modules/files/types/adapter.type';
 import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';
@@ -99,22 +100,18 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       expect(config?.rules[0].expirationDays).toBe(1);
     });
 
-    it('LocalStorageAdapter should record and return active lifecycle rules', async () => {
+    it('LocalStorageAdapter does not expose bucket lifecycle capability (no fake stub)', () => {
       const localDriver = new LocalStorageAdapter('./test-storage');
-      await localDriver.applyLifecycleRules({
-        rules: [
-          {
-            id: 'local-temp',
-            prefix: 'tmp/',
-            status: 'Enabled',
-            expirationDays: 1,
-          },
-        ],
-      });
-
-      const config = await localDriver.getLifecycleRules();
-      expect(config?.rules).toHaveLength(1);
-      expect(config?.rules[0].id).toBe('local-temp');
+      expect(supportsBucketLifecycle(localDriver)).toBe(false);
+      expect(
+        supportsBucketLifecycle(
+          new S3StorageAdapter({
+            region: 'auto',
+            bucket: 'b',
+            credentials: { accessKeyId: 'a', secretAccessKey: 's' },
+          }),
+        ),
+      ).toBe(true);
     });
   });
 

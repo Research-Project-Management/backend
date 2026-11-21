@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -7,7 +7,6 @@ import {
   IStorageAdapter,
   StorageObjectMetadata,
   CompletedPart,
-  StorageLifecycleConfiguration,
 } from '../types/adapter.type';
 import { inferMimeType, streamToBuffer } from '../domain/files.policy';
 
@@ -359,43 +358,35 @@ export class LocalStorageAdapter implements IStorageAdapter {
     await fs.promises.rm(partDir, { recursive: true, force: true });
   }
 
-  listUploadedParts(): Promise<CompletedPart[]> {
-    return Promise.resolve([]);
-  }
+  async listUploadedParts(
+    _key?: string,
+    uploadId?: string,
+  ): Promise<CompletedPart[]> {
+    if (!uploadId) return [];
+    const partDir = this.getMultipartDir(uploadId);
+    let entries: string[];
+    try {
+      entries = await fs.promises.readdir(partDir);
+    } catch {
+      return [];
+    }
 
-  private activeLifecycleConfig: StorageLifecycleConfiguration | null = null;
-
-  applyLifecycleRules(config?: StorageLifecycleConfiguration): Promise<void> {
-    this.activeLifecycleConfig = config || {
-      rules: [
-        {
-          id: 'cleanup-staging-uploads',
-          prefix: 'uploads/staging/',
-          status: 'Enabled',
-          expirationDays: 1,
-          abortIncompleteMultipartUploadDays: 1,
-        },
-        {
-          id: 'cleanup-temp-uploads',
-          prefix: 'tmp/',
-          status: 'Enabled',
-          expirationDays: 1,
-        },
-        {
-          id: 'expire-old-backups',
-          prefix: 'backups/',
-          status: 'Enabled',
-          expirationDays: 30,
-        },
-      ],
-    };
-    this.logger.log(
-      `LocalStorageAdapter lifecycle rules configured: ${this.activeLifecycleConfig.rules.length} rules`,
-    );
-    return Promise.resolve();
-  }
-
-  getLifecycleRules(): Promise<StorageLifecycleConfiguration | null> {
-    return Promise.resolve(this.activeLifecycleConfig);
+    const parts: CompletedPart[] = [];
+    for (const entry of entries) {
+      const match = /^part\.(\d+)$/.exec(entry);
+      if (!match) continue;
+      const partNumber = Number(match[1]);
+      const hash = crypto.createHash('md5');
+      await new Promise<void>((resolve, reject) => {
+        const rs = fs.createReadStream(path.join(partDir, entry));
+        rs.on('data', (chunk: Buffer | string) =>
+          hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+        );
+        rs.on('error', reject);
+        rs.on('end', resolve);
+      });
+      parts.push({ partNumber, eTag: hash.digest('hex') });
+    }
+    return parts.sort((a, b) => a.partNumber - b.partNumber);
   }
 }

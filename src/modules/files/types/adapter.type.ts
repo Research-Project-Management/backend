@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+﻿import { Readable } from 'node:stream';
 
 export interface StorageObjectMetadata {
   key: string;
@@ -30,10 +30,8 @@ export interface StorageLifecycleConfiguration {
   rules: StorageLifecycleRule[];
 }
 
-/**
- * Abstraction for physical object storage providers (AWS S3, Cloudflare R2, MinIO, Local Disk).
- */
-export interface IStorageAdapter {
+/** Core object CRUD + presigned read/write. */
+export interface IObjectStorage {
   put(
     key: string,
     data: Buffer | Readable,
@@ -69,6 +67,15 @@ export interface IStorageAdapter {
 
   getBucketName?(): string;
 
+  /**
+   * True when clients can read objects directly from the storage provider via
+   * presigned URLs (S3/R2). Enables 302 redirect offload by default.
+   */
+  readonly supportsDirectDownload?: boolean;
+}
+
+/** Resumable multipart upload capability. */
+export interface IPresignMultipartStorage {
   initiateMultipartUpload(
     key: string,
     options: { mimeType: string },
@@ -86,7 +93,30 @@ export interface IStorageAdapter {
   ): Promise<{ location?: string; eTag?: string }>;
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;
   listUploadedParts(key: string, uploadId: string): Promise<CompletedPart[]>;
+}
 
+/** Bucket lifecycle management; only providers with real server-side rules (S3/R2) implement it. */
+export interface IBucketLifecycleDriver {
   applyLifecycleRules(config?: StorageLifecycleConfiguration): Promise<void>;
   getLifecycleRules(): Promise<StorageLifecycleConfiguration | null>;
+}
+
+/**
+ * Abstraction for physical object storage providers (AWS S3, Cloudflare R2, MinIO, Local Disk).
+ * Lifecycle management is an optional capability (see {@link supportsBucketLifecycle}).
+ */
+export interface IStorageAdapter
+  extends
+    IObjectStorage,
+    IPresignMultipartStorage,
+    Partial<IBucketLifecycleDriver> {}
+
+export function supportsBucketLifecycle(
+  adapter: unknown,
+): adapter is IBucketLifecycleDriver {
+  return (
+    !!adapter &&
+    typeof (adapter as Partial<IBucketLifecycleDriver>).applyLifecycleRules ===
+      'function'
+  );
 }

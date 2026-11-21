@@ -134,10 +134,16 @@ export class FilesFacade implements IFilesPort {
     partNumbers: number[],
     actor?: FileActorContext,
   ): Promise<MultipartPartUrlItem[]> {
-    return this.uploadService.presignMultipartParts(sessionId, partNumbers, actor);
+    return this.uploadService.presignMultipartParts(
+      sessionId,
+      partNumbers,
+      actor,
+    );
   }
 
-  completeMultipart(input: CompleteFileMultipartInput): Promise<CompleteFileMultipartOutput> {
+  completeMultipart(
+    input: CompleteFileMultipartInput,
+  ): Promise<CompleteFileMultipartOutput> {
     return this.uploadService.completeMultipart(input);
   }
 
@@ -145,18 +151,29 @@ export class FilesFacade implements IFilesPort {
     return this.uploadService.abortMultipart(sessionId, actor);
   }
 
-  registerUploadedObject(input: RegisterUploadedObjectInput): Promise<StoreBufferCasResult> {
+  registerUploadedObject(
+    input: RegisterUploadedObjectInput,
+  ): Promise<StoreBufferCasResult> {
     return this.blobService.registerUploadedObject(input);
   }
 
-  private async resolveBlobMime(blob: StorageBlobRecord, headerBytes?: Buffer): Promise<string> {
-    if (blob.mimeType && blob.mimeType !== 'application/octet-stream') return blob.mimeType;
+  private async resolveBlobMime(
+    blob: StorageBlobRecord,
+    headerBytes?: Buffer,
+  ): Promise<string> {
+    if (blob.mimeType && blob.mimeType !== 'application/octet-stream')
+      return blob.mimeType;
     if (headerBytes) return inferMimeType({ headerBytes });
     if (blob.sizeBytes <= 0n) return 'application/octet-stream';
     try {
       const end = Math.min(31, Number(blob.sizeBytes) - 1);
-      const { stream } = await this.driver.getStream(blob.s3Key, { start: 0, end });
-      return inferMimeType({ headerBytes: await streamToBuffer(stream as AsyncIterable<Buffer>) });
+      const { stream } = await this.driver.getStream(blob.s3Key, {
+        start: 0,
+        end,
+      });
+      return inferMimeType({
+        headerBytes: await streamToBuffer(stream as AsyncIterable<Buffer>),
+      });
     } catch {
       return 'application/octet-stream';
     }
@@ -184,9 +201,15 @@ export class FilesFacade implements IFilesPort {
 
     const totalSize = Number(blob.sizeBytes);
     const range = input.range
-      ? { start: input.range.start, end: input.range.end ?? Math.max(0, totalSize - 1) }
+      ? {
+          start: input.range.start,
+          end: input.range.end ?? Math.max(0, totalSize - 1),
+        }
       : undefined;
-    const { stream, contentLength, contentRange } = await this.driver.getStream(blob.s3Key, range);
+    const { stream, contentLength, contentRange } = await this.driver.getStream(
+      blob.s3Key,
+      range,
+    );
 
     return {
       stream,
@@ -336,7 +359,9 @@ export class FilesFacade implements IFilesPort {
       ? sanitizeFilename(input.filename)
       : blob.id;
 
-    if (input.redirect) {
+    const preferRedirect =
+      input.redirect ?? this.driver.supportsDirectDownload === true;
+    if (preferRedirect) {
       const location = await this.getPresignedDownloadUrl(blob.id, {
         expiresInSeconds: 300,
         filename: safeFilename,
@@ -380,11 +405,16 @@ export class FilesFacade implements IFilesPort {
     let isPublicAsset: boolean;
 
     if (this.accessService) {
-      ({ key, isPublicAsset } = this.accessService.resolveObjectAccess(input.rawKey, input));
+      ({ key, isPublicAsset } = this.accessService.resolveObjectAccess(
+        input.rawKey,
+        input,
+      ));
     } else {
       const classified = classifyObjectKey(input.rawKey);
       if (classified.isDerivative && !input.userId) {
-        throw new UnauthorizedException('Authentication or signed access token is required');
+        throw new UnauthorizedException(
+          'Authentication or signed access token is required',
+        );
       }
       ({ key, isPublicAsset } = classified);
     }
@@ -397,7 +427,9 @@ export class FilesFacade implements IFilesPort {
       filename: key.split('/').pop() || 'file',
       contentLength: output.contentLength,
       contentRange: output.contentRange,
-      cacheControl: isPublicAsset ? 'public, max-age=86400' : 'private, max-age=3600',
+      cacheControl: isPublicAsset
+        ? 'public, max-age=86400'
+        : 'private, max-age=3600',
     };
   }
 
@@ -411,7 +443,14 @@ export class FilesFacade implements IFilesPort {
     const etag = blob.contentHashHex ? `"${blob.contentHashHex}"` : undefined;
 
     if (etag && options?.ifNoneMatch === etag && !options.rangeHeader) {
-      return { stream: null, statusCode: 304, mimeType, contentLength: 0, filename, etag };
+      return {
+        stream: null,
+        statusCode: 304,
+        mimeType,
+        contentLength: 0,
+        filename,
+        etag,
+      };
     }
 
     const byteRange = ByteRange.parse(options?.rangeHeader, totalSize);

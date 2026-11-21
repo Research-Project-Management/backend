@@ -458,7 +458,12 @@ export class FilesController {
       sig: querySig,
       filename: queryFilename,
       isDownload,
-      redirect: queryRedirect === '1' || queryRedirect === 'true',
+      redirect:
+        queryRedirect === '1' || queryRedirect === 'true'
+          ? true
+          : queryRedirect === '0' || queryRedirect === 'false'
+            ? false
+            : undefined,
       ifNoneMatch:
         typeof req.headers?.['if-none-match'] === 'string'
           ? req.headers['if-none-match']

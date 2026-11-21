@@ -71,6 +71,11 @@ export class FilesFinalizeCasProcessor
       case FILES_JOB_PROMOTE_CAS: {
         const data = job.data as PromoteCasJobData;
         const result = await this.blobService.promoteStagingBlobToCas(data);
+        const lagMs =
+          typeof job.timestamp === 'number' ? Date.now() - job.timestamp : null;
+        this.logger.log(
+          `metric=finalize_cas blobId=${data.blobId} promoted=${result.promoted} isolated=${result.isolated} lag_ms=${lagMs ?? 'n/a'} attempts=${job.attemptsMade ?? 0}`,
+        );
         if (result.stagingKeyToDelete && this.finalizeCasQueue) {
           const keyDigest = crypto
             .createHash('sha256')

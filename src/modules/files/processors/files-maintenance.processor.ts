@@ -22,6 +22,7 @@ import { FilesUploadService } from '../services/upload.service';
 import {
   IStorageAdapter,
   StorageLifecycleConfiguration,
+  supportsBucketLifecycle,
 } from '../types/adapter.type';
 
 /**
@@ -90,6 +91,12 @@ export class FilesMaintenanceProcessor
     config?: StorageLifecycleConfiguration,
   ): Promise<void> {
     try {
+      if (!supportsBucketLifecycle(this.driver)) {
+        this.logger.debug(
+          'Storage adapter has no bucket lifecycle capability; skipping lifecycle rules',
+        );
+        return;
+      }
       await this.driver.applyLifecycleRules(config);
       this.logger.log('Storage bucket lifecycle rules configured successfully');
     } catch (err: unknown) {

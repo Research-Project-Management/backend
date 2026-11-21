@@ -41,6 +41,7 @@ export type S3DriverConfig = S3AdapterConfig;
 
 @Injectable()
 export class S3StorageAdapter implements IStorageAdapter {
+  public readonly supportsDirectDownload = true;
   private readonly client: S3Client;
   private readonly bucket: string;
   private readonly logger = new Logger(S3StorageAdapter.name);

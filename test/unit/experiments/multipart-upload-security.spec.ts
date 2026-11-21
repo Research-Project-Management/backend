@@ -101,22 +101,25 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
     mockBlobRepo = {
       findById: jest.fn(),
       findByHash: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation(async (input) => ({
-        id: input.id,
-        contentHashHex: input.contentHashHex,
-        hashAlgorithm: 'SHA256',
-        sizeBytes: input.sizeBytes,
-        mimeType: input.mimeType,
-        checksumVerified: input.checksumVerified,
-        s3Key: input.s3Key,
-        s3Bucket: input.s3Bucket,
-        storageClass: 'STANDARD',
-        refCount: input.refCount ?? 1,
-        status: input.status ?? BlobStatus.READY,
-        createdAt: new Date(),
-        tombstoneAt: null,
-        claimedAt: null,
-      }) as StorageBlobRecord),
+      create: jest.fn().mockImplementation(
+        async (input) =>
+          ({
+            id: input.id,
+            contentHashHex: input.contentHashHex,
+            hashAlgorithm: 'SHA256',
+            sizeBytes: input.sizeBytes,
+            mimeType: input.mimeType,
+            checksumVerified: input.checksumVerified,
+            s3Key: input.s3Key,
+            s3Bucket: input.s3Bucket,
+            storageClass: 'STANDARD',
+            refCount: input.refCount ?? 1,
+            status: input.status ?? BlobStatus.READY,
+            createdAt: new Date(),
+            tombstoneAt: null,
+            claimedAt: null,
+          }) as StorageBlobRecord,
+      ),
       delete: jest.fn(),
       incrementRefCount: jest.fn(),
       decrementRefCount: jest.fn(),
@@ -138,11 +141,20 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
         }),
       ),
       findById: jest.fn(),
-      markStatus: jest.fn().mockImplementation(
-        async (id: string, status: UploadSessionStatus) =>
+      markStatus: jest
+        .fn()
+        .mockImplementation(async (id: string, status: UploadSessionStatus) =>
           createTestSession({ id, status }),
-      ),
+        ),
       markUploadingIfInitialized: jest.fn().mockResolvedValue(true),
+      claimForFinalizing: jest.fn().mockResolvedValue(true),
+      releaseFinalizingToUploading: jest.fn().mockResolvedValue(true),
+      markCompletedWithBlob: jest
+        .fn()
+        .mockImplementation(async (id: string, blobId: string) => ({
+          ...createTestSession({ id, status: UploadSessionStatus.COMPLETED }),
+          resultBlobId: blobId,
+        })),
       findExpiredSessions: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<SessionRepository>;
 
@@ -176,12 +188,7 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockQuotaRepo,
       uploadService,
     );
-    service = new UploadService(
-      filesPort,
-      mockNodeRepo,
-      mockCache,
-      mockEvents,
-    );
+    service = new UploadService(filesPort, mockNodeRepo, mockCache, mockEvents);
   });
 
   describe('getMultipartPartUrl (Phase 2)', () => {
@@ -225,7 +232,9 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       mockSessionRepo.findById.mockResolvedValue(session);
 
       await expect(
-        service.getMultipartPartUrl('session-valid-1', 1, { userId: attackerId }),
+        service.getMultipartPartUrl('session-valid-1', 1, {
+          userId: attackerId,
+        }),
       ).rejects.toThrow(NotFoundException);
 
       expect(mockDriver.getPresignedPartUploadUrl).not.toHaveBeenCalled();
@@ -244,7 +253,9 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       ).rejects.toThrow(BadRequestException);
 
       await expect(
-        service.getMultipartPartUrl('session-valid-1', 1.5, { userId: ownerId }),
+        service.getMultipartPartUrl('session-valid-1', 1.5, {
+          userId: ownerId,
+        }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -286,6 +297,12 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
     it('should complete upload for rightful owner and create storage node and blob', async () => {
       const session = createTestSession();
       mockSessionRepo.findById.mockResolvedValue(session);
+      mockDriver.stat.mockResolvedValue({
+        key: session.s3Key,
+        size: Number(session.totalSize),
+        mimeType: session.mimeType,
+        lastModified: new Date(),
+      });
 
       const result = await service.completeMultipart({
         sessionId: 'session-valid-1',
@@ -306,9 +323,9 @@ describe('Multipart Upload BOLA/IDOR Hardening Suite', () => {
       );
       expect(mockBlobRepo.create).toHaveBeenCalledTimes(1);
       expect(mockNodeRepo.create).toHaveBeenCalledTimes(1);
-      expect(mockSessionRepo.markStatus).toHaveBeenCalledWith(
+      expect(mockSessionRepo.markCompletedWithBlob).toHaveBeenCalledWith(
         'session-valid-1',
-        UploadSessionStatus.COMPLETED,
+        result.blobId,
       );
     });
 

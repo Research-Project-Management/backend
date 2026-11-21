@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import {
   DEFAULT_STORAGE_QUOTA_BYTES,
@@ -9,6 +9,8 @@ import { StorageQuotaRecord, UploadSessionStatus } from '../types/files.type';
 
 @Injectable()
 export class QuotaRepository {
+  private readonly logger = new Logger(QuotaRepository.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async findBySpaceId(
@@ -96,6 +98,11 @@ export class QuotaRepository {
       ? await this.getPendingUploadBytes(spaceId)
       : 0n;
     if (usedBytes + pendingBytes + requiredBytes > maxBytes) {
+      if (pendingBytes > 0n && usedBytes + requiredBytes <= maxBytes) {
+        this.logger.warn(
+          `metric=quota_pending_rejected spaceId=${spaceId ?? 'n/a'} pending_bytes=${pendingBytes}`,
+        );
+      }
       throw new BadRequestException('Storage quota exceeded');
     }
 
