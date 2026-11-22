@@ -77,12 +77,6 @@ export abstract class IDocRepository {
   abstract destroyAllDocs(projectId: string): Promise<number>;
 }
 
-export interface PersistArchivePayload {
-  lines: string[];
-  ranges?: DocRanges | Record<string, unknown>;
-  schema_v: number;
-}
-
 export abstract class IDocPersistor {
   abstract sendStream(
     key: string,

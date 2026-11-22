@@ -797,13 +797,3 @@ export class CompileLogAnalyzer implements ILogParser {
     return diagnostics;
   }
 }
-
-const defaultLogParser = new CompileLogAnalyzer();
-
-export function parseLatexLog(
-  logText: string,
-  defaultFile = 'main.tex',
-  options?: LogParseOptions,
-): CompilerDiagnostic[] {
-  return defaultLogParser.parse(logText, defaultFile, options);
-}

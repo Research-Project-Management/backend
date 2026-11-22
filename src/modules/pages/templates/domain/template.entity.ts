@@ -64,12 +64,6 @@ export class TemplateCategoryVo {
   }
 }
 
-export interface TemplateFileBlueprint {
-  path: string;
-  content: string;
-  isBinary?: boolean;
-}
-
 export interface CreatePageTemplateProps {
   id?: string;
   versionId?: string;

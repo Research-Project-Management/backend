@@ -1,89 +1,29 @@
 import { Injectable } from '@nestjs/common';
-import {
-  PageCommentReply,
-  PageCommentThread,
-  PageDocReview,
-  PageReviewStatus,
-  PageTrackChange,
-  Prisma,
-} from '@prisma/client';
+import { Prisma, ReviewStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
-import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
   ChangeStatus,
   CommentReply,
   CommentThread,
-  TextRange,
   TrackChange,
 } from './domain';
+import {
+  ReviewMapper,
+  extractMentionUserIds,
+  toPrismaBytes,
+  type ChangeWithDoc,
+  type DocReviewWithRound,
+  type ThreadWithReplies,
+} from './mappers/review.mapper';
 
-export type ThreadWithReplies = PageCommentThread & {
-  replies?: PageCommentReply[];
+export {
+  ReviewMapper,
+  extractMentionUserIds,
+  type ChangeWithDoc,
+  type DocReviewWithRound,
+  type ThreadWithReplies,
 };
-
-export class ReviewMapper {
-  public static toDomainChange(row: PageTrackChange): TrackChange {
-    return TrackChange.create({
-      id: row.id,
-      spaceId: row.spaceId,
-      pageId: row.pageId,
-      docId: row.docId,
-      type: row.type,
-      status: row.status,
-      text: row.text,
-      range: TextRange.create({
-        startLine: row.startLine,
-        startCol: row.startCol,
-        endLine: row.endLine,
-        endCol: row.endCol,
-      }),
-      createdById: row.createdById,
-      resolvedById: row.resolvedById,
-      resolvedAt: row.resolvedAt,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
-  }
-
-  public static toDomainReply(row: PageCommentReply): CommentReply {
-    return CommentReply.create({
-      id: row.id,
-      threadId: row.threadId,
-      content: row.content,
-      createdById: row.createdById,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
-  }
-
-  public static toDomainThread(row: ThreadWithReplies): CommentThread {
-    const replies = row.replies
-      ? row.replies.map((r) => this.toDomainReply(r))
-      : [];
-
-    return CommentThread.create({
-      id: row.id,
-      spaceId: row.spaceId,
-      pageId: row.pageId,
-      docId: row.docId,
-      quote: row.quote,
-      range: TextRange.create({
-        startLine: row.startLine,
-        startCol: row.startCol,
-        endLine: row.endLine,
-        endCol: row.endCol,
-      }),
-      isResolved: row.isResolved,
-      createdById: row.createdById,
-      resolvedById: row.resolvedById,
-      resolvedAt: row.resolvedAt,
-      replies,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
-  }
-}
 
 @Injectable()
 export class ReviewRepository {
@@ -93,34 +33,30 @@ export class ReviewRepository {
     return this.prisma;
   }
 
-  private async resolveDocPageId(
-    spaceId: string,
-    docId: string,
-  ): Promise<string> {
-    if (this.prisma.pageDoc?.findUnique) {
-      const doc = await Promise.resolve(
-        this.prisma.pageDoc.findUnique({
-          where: { id: docId },
-          select: { pageId: true },
-        }),
-      ).catch(() => null);
-      if (doc?.pageId) return doc.pageId;
+  private async syncMentions(replyId: string, content: string): Promise<void> {
+    if (!this.prisma.commentMention?.createMany) return;
+    const userIds = extractMentionUserIds(content);
+    if (this.prisma.commentMention.deleteMany) {
+      await this.prisma.commentMention.deleteMany({ where: { replyId } });
     }
-    return ensureCanonicalPageId(this.prisma, spaceId, docId);
+    if (userIds.length > 0) {
+      await this.prisma.commentMention.createMany({
+        data: userIds.map((userId) => ({ replyId, userId })),
+        skipDuplicates: true,
+      });
+    }
   }
 
-  // ── Track Changes ──────────────────────────────────────────────────────────
+  // ── Document Changes (Suggestions / Track Changes) ─────────────────────────
 
   public async saveChange(change: TrackChange): Promise<TrackChange> {
     const { range } = change;
-    const pageId = await this.resolveDocPageId(change.spaceId, change.docId);
-    const record = await this.prisma.pageTrackChange.upsert({
+    const record = await this.prisma.docChange.upsert({
       where: { id: change.id },
       create: {
         id: change.id,
-        spaceId: change.spaceId,
-        pageId,
         docId: change.docId,
+        groupId: change.groupId,
         type: change.type,
         status: change.status,
         text: change.text,
@@ -128,6 +64,9 @@ export class ReviewRepository {
         startCol: range.startCol,
         endLine: range.endLine,
         endCol: range.endCol,
+        anchorStart: toPrismaBytes(change.anchorStart),
+        anchorEnd: toPrismaBytes(change.anchorEnd),
+        baseDocRev: change.baseDocRev,
         createdById: change.createdById,
         resolvedById: change.resolvedById,
         resolvedAt: change.resolvedAt,
@@ -140,22 +79,24 @@ export class ReviewRepository {
         resolvedAt: change.resolvedAt,
         updatedAt: change.updatedAt,
       },
+      include: { doc: { select: { spaceId: true, pageId: true } } },
     });
-    return ReviewMapper.toDomainChange(record);
+    return ReviewMapper.toDomainChange(record, change.spaceId, change.pageId);
   }
 
   public async findChange(
     spaceId: string,
     changeId: string,
     docId?: string,
-  ): Promise<PageTrackChange | null> {
+  ): Promise<ChangeWithDoc | null> {
     if (!isUUID(changeId)) return null;
-    return this.prisma.pageTrackChange.findFirst({
+    return this.prisma.docChange.findFirst({
       where: {
         id: changeId,
-        spaceId,
+        doc: { spaceId },
         ...(docId && isUUID(docId) ? { docId } : {}),
       },
+      include: { doc: { select: { spaceId: true, pageId: true } } },
     });
   }
 
@@ -164,24 +105,48 @@ export class ReviewRepository {
     docId: string,
     status?: ChangeStatus,
   ): Promise<TrackChange[]> {
-    const where: Prisma.PageTrackChangeWhereInput = { spaceId, docId };
+    const where: Prisma.DocChangeWhereInput = { docId, doc: { spaceId } };
     if (status) where.status = status;
 
-    const records = await this.prisma.pageTrackChange.findMany({
+    const records = await this.prisma.docChange.findMany({
       where,
+      include: { doc: { select: { spaceId: true, pageId: true } } },
       orderBy: { createdAt: 'asc' },
       take: 1000,
     });
-    return records.map((r) => ReviewMapper.toDomainChange(r));
+    return records.map((r) => ReviewMapper.toDomainChange(r, spaceId));
+  }
+
+  public async findPendingChangesByGroup(
+    spaceId: string,
+    docId: string,
+    groupId: string,
+  ): Promise<TrackChange[]> {
+    if (!isUUID(groupId) || !this.prisma.docChange?.findMany) return [];
+    const records = await Promise.resolve(
+      this.prisma.docChange.findMany({
+        where: {
+          docId,
+          groupId,
+          status: 'pending',
+          doc: { spaceId },
+        },
+        include: { doc: { select: { spaceId: true, pageId: true } } },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ).catch(() => []);
+    return Array.isArray(records)
+      ? records.map((r) => ReviewMapper.toDomainChange(r, spaceId))
+      : [];
   }
 
   public async updateChange(
     spaceId: string,
     changeId: string,
-    data: Prisma.PageTrackChangeUpdateInput,
+    data: Prisma.DocChangeUpdateManyMutationInput,
   ): Promise<boolean> {
-    const res = await this.prisma.pageTrackChange.updateMany({
-      where: { id: changeId, spaceId },
+    const res = await this.prisma.docChange.updateMany({
+      where: { id: changeId, doc: { spaceId } },
       data,
     });
     return res.count > 0;
@@ -199,21 +164,22 @@ export class ReviewRepository {
     const resolvedAt = new Date();
 
     const runClaim = async (
-      db: Pick<PrismaService, 'pageTrackChange'>,
+      db: Pick<PrismaService, 'docChange'>,
     ): Promise<string[]> => {
       const claimed: string[] = [];
       for (const id of uniqueIds) {
-        const res = await db.pageTrackChange.updateMany({
+        const res = await db.docChange.updateMany({
           where: {
             id,
-            spaceId,
             status: 'pending',
+            doc: { spaceId },
             ...(docId && isUUID(docId) ? { docId } : {}),
           },
           data: {
             status: nextStatus,
             resolvedAt,
             resolvedById,
+            version: { increment: 1 },
             updatedAt: resolvedAt,
           },
         });
@@ -224,7 +190,7 @@ export class ReviewRepository {
 
     if (typeof this.prisma.$transaction === 'function') {
       return this.prisma.$transaction(async (tx) => {
-        const client = tx?.pageTrackChange ? tx : this.prisma;
+        const client = tx?.docChange ? tx : this.prisma;
         return runClaim(client);
       });
     }
@@ -237,11 +203,11 @@ export class ReviewRepository {
     expectedStatus: 'accepted' | 'rejected',
   ): Promise<void> {
     if (changeIds.length === 0) return;
-    await this.prisma.pageTrackChange.updateMany({
+    await this.prisma.docChange.updateMany({
       where: {
         id: { in: changeIds },
-        spaceId,
         status: expectedStatus,
+        doc: { spaceId },
       },
       data: {
         status: 'pending',
@@ -252,23 +218,23 @@ export class ReviewRepository {
     });
   }
 
-  // ── Comments & Replies ─────────────────────────────────────────────────────
+  // ── Comments, Replies & Mentions ───────────────────────────────────────────
 
   public async saveThread(thread: CommentThread): Promise<CommentThread> {
     const { range } = thread;
-    const pageId = await this.resolveDocPageId(thread.spaceId, thread.docId);
-    const record = await this.prisma.pageCommentThread.upsert({
+    const record = await this.prisma.docComment.upsert({
       where: { id: thread.id },
       create: {
         id: thread.id,
-        spaceId: thread.spaceId,
-        pageId,
         docId: thread.docId,
         quote: thread.quote,
         startLine: range.startLine,
         startCol: range.startCol,
         endLine: range.endLine,
         endCol: range.endCol,
+        anchorStart: toPrismaBytes(thread.anchorStart),
+        anchorEnd: toPrismaBytes(thread.anchorEnd),
+        baseDocRev: thread.baseDocRev,
         isResolved: thread.isResolved,
         createdById: thread.createdById,
         resolvedById: thread.resolvedById,
@@ -294,24 +260,40 @@ export class ReviewRepository {
         resolvedAt: thread.resolvedAt,
         updatedAt: thread.updatedAt,
       },
-      include: { replies: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        doc: { select: { spaceId: true, pageId: true } },
+        replies: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
-    return ReviewMapper.toDomainThread(record);
+    for (const r of thread.replies) {
+      await this.syncMentions(r.id, r.content).catch(() => undefined);
+    }
+    return ReviewMapper.toDomainThread(record, thread.spaceId, thread.pageId);
   }
 
   public async findThread(
     spaceId: string,
     threadId: string,
     docId?: string,
-  ): Promise<(PageCommentThread & { replies: PageCommentReply[] }) | null> {
+  ): Promise<ThreadWithReplies | null> {
     if (!isUUID(threadId)) return null;
-    return this.prisma.pageCommentThread.findFirst({
+    return this.prisma.docComment.findFirst({
       where: {
         id: threadId,
-        spaceId,
+        deletedAt: null,
+        doc: { spaceId },
         ...(docId && isUUID(docId) ? { docId } : {}),
       },
-      include: { replies: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        doc: { select: { spaceId: true, pageId: true } },
+        replies: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
   }
 
@@ -320,82 +302,124 @@ export class ReviewRepository {
     docId: string,
     isResolved?: boolean,
   ): Promise<CommentThread[]> {
-    const where: Prisma.PageCommentThreadWhereInput = { spaceId, docId };
+    const where: Prisma.DocCommentWhereInput = {
+      docId,
+      deletedAt: null,
+      doc: { spaceId },
+    };
     if (isResolved !== undefined) where.isResolved = isResolved;
 
-    const records = await this.prisma.pageCommentThread.findMany({
+    const records = await this.prisma.docComment.findMany({
       where,
-      include: { replies: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        doc: { select: { spaceId: true, pageId: true } },
+        replies: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
       orderBy: { createdAt: 'asc' },
       take: 1000,
     });
-    return records.map((r) => ReviewMapper.toDomainThread(r));
+    return records.map((r) => ReviewMapper.toDomainThread(r, spaceId));
   }
 
   public async updateThread(
     spaceId: string,
-    threadId: string,
-    data: Prisma.PageCommentThreadUpdateInput,
+    commentId: string,
+    data: Prisma.DocCommentUpdateManyMutationInput,
   ): Promise<boolean> {
-    const res = await this.prisma.pageCommentThread.updateMany({
-      where: { id: threadId, spaceId },
-      data,
+    const res = await this.prisma.docComment.updateMany({
+      where: { id: commentId, deletedAt: null, doc: { spaceId } },
+      data: { ...data, version: { increment: 1 } },
     });
     return res.count > 0;
   }
 
   public async deleteThread(
     spaceId: string,
-    threadId: string,
+    commentId: string,
+    deletedById?: string | null,
   ): Promise<boolean> {
-    const res = await this.prisma.pageCommentThread.deleteMany({
-      where: { id: threadId, spaceId },
+    const res = await this.prisma.docComment.updateMany({
+      where: { id: commentId, deletedAt: null, doc: { spaceId } },
+      data: {
+        deletedAt: new Date(),
+        ...(deletedById && isUUID(deletedById) ? { deletedById } : {}),
+      },
     });
+    if (res.count > 0 && this.prisma.commentMention?.deleteMany) {
+      await this.prisma.commentMention
+        .deleteMany({ where: { reply: { commentId } } })
+        .catch(() => undefined);
+    }
     return res.count > 0;
   }
 
   public async addReply(
-    threadId: string,
+    commentId: string,
     reply: CommentReply,
   ): Promise<CommentReply> {
-    const record = await this.prisma.pageCommentReply.create({
+    const record = await this.prisma.commentReply.create({
       data: {
         id: reply.id,
-        threadId,
+        commentId,
         content: reply.content,
         createdById: reply.createdById,
         createdAt: reply.createdAt,
         updatedAt: reply.updatedAt,
       },
     });
+    await this.syncMentions(record.id, reply.content).catch(() => undefined);
     return ReviewMapper.toDomainReply(record);
   }
 
   public async updateReply(
-    threadId: string,
+    commentId: string,
     replyId: string,
     content: string,
+    updatedById?: string | null,
   ): Promise<boolean> {
-    if (!isUUID(threadId) || !isUUID(replyId)) return false;
-    const res = await this.prisma.pageCommentReply.updateMany({
-      where: { id: replyId, threadId },
-      data: { content: content.trim(), updatedAt: new Date() },
+    if (!isUUID(commentId) || !isUUID(replyId)) return false;
+    const trimmed = content.trim();
+    const res = await this.prisma.commentReply.updateMany({
+      where: { id: replyId, commentId, deletedAt: null },
+      data: {
+        content: trimmed,
+        ...(updatedById && isUUID(updatedById) ? { updatedById } : {}),
+        version: { increment: 1 },
+        updatedAt: new Date(),
+      },
     });
-    return res.count > 0;
+    if (res.count > 0) {
+      await this.syncMentions(replyId, trimmed).catch(() => undefined);
+      return true;
+    }
+    return false;
   }
 
   public async deleteReply(
-    threadId: string,
+    commentId: string,
     replyId: string,
+    deletedById?: string | null,
   ): Promise<boolean> {
-    if (!isUUID(threadId) || !isUUID(replyId)) return false;
-    const res = await this.prisma.pageCommentReply.deleteMany({
-      where: { id: replyId, threadId },
+    if (!isUUID(commentId) || !isUUID(replyId)) return false;
+    const res = await this.prisma.commentReply.updateMany({
+      where: { id: replyId, commentId, deletedAt: null },
+      data: {
+        deletedAt: new Date(),
+        ...(deletedById && isUUID(deletedById) ? { deletedById } : {}),
+      },
     });
+    if (res.count > 0 && this.prisma.commentMention?.deleteMany) {
+      await this.prisma.commentMention
+        .deleteMany({ where: { replyId } })
+        .catch(() => undefined);
+    }
     return res.count > 0;
   }
 
-  // ── Overview & Document Review Status ──────────────────────────────────────
+  // ── Overview, DocReview & ReviewRound ──────────────────────────────────────
 
   public async getOverviewData(spaceId: string, explicitPageId?: string) {
     let targetSpaceId = spaceId;
@@ -418,10 +442,15 @@ export class ReviewRepository {
     }
 
     const pageFilter = targetPageId ? { pageId: targetPageId } : {};
+    const docScopeWhere = {
+      spaceId: targetSpaceId,
+      ...pageFilter,
+      deletedAt: null,
+    };
 
     const [docs, nodes, allThreads, allChanges] = await Promise.all([
       this.prisma.pageDoc.findMany({
-        where: { spaceId: targetSpaceId, ...pageFilter, deletedAt: null },
+        where: docScopeWhere,
         select: { id: true, lastKnownPath: true },
         orderBy: { createdAt: 'asc' },
       }),
@@ -437,13 +466,18 @@ export class ReviewRepository {
         },
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       }),
-      this.prisma.pageCommentThread.findMany({
-        where: { spaceId: targetSpaceId, ...pageFilter },
-        include: { replies: { orderBy: { createdAt: 'asc' } } },
+      this.prisma.docComment.findMany({
+        where: { deletedAt: null, doc: docScopeWhere },
+        include: {
+          replies: {
+            where: { deletedAt: null },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
         orderBy: [{ startLine: 'asc' }, { createdAt: 'asc' }],
       }),
-      this.prisma.pageTrackChange.findMany({
-        where: { spaceId: targetSpaceId, ...pageFilter },
+      this.prisma.docChange.findMany({
+        where: { doc: docScopeWhere },
         orderBy: [
           { startLine: 'asc' },
           { startCol: 'asc' },
@@ -455,10 +489,18 @@ export class ReviewRepository {
     return { docs, nodes, allThreads, allChanges };
   }
 
-  public async findDocReview(docId: string): Promise<PageDocReview | null> {
-    if (!this.prisma.pageDocReview?.findUnique) return null;
+  public async findDocReview(
+    docId: string,
+  ): Promise<DocReviewWithRound | null> {
+    if (!this.prisma.docReview?.findUnique) return null;
     return Promise.resolve(
-      this.prisma.pageDocReview.findUnique({ where: { docId } }),
+      this.prisma.docReview.findUnique({
+        where: { docId },
+        include: {
+          doc: { select: { spaceId: true } },
+          rounds: { orderBy: { roundNumber: 'desc' }, take: 1 },
+        },
+      }),
     ).catch(() => null);
   }
 
@@ -467,7 +509,7 @@ export class ReviewRepository {
     spaceId: string,
     expectedVersion: number,
     data: {
-      status: PageReviewStatus;
+      status: ReviewStatus;
       roundNumber: number;
       requestedById: string | null;
       requestedAt: Date | null;
@@ -477,19 +519,65 @@ export class ReviewRepository {
       deadline: Date | null;
     },
   ): Promise<boolean> {
-    if (!this.prisma.pageDocReview?.updateMany) return true;
-    const res = await this.prisma.pageDocReview.updateMany({
-      where: { docId, spaceId, version: expectedVersion },
-      data: { ...data, version: { increment: 1 } },
-    });
-    return res.count > 0;
+    if (!this.prisma.docReview?.updateMany) return true;
+
+    const applyUpdate = async (
+      db: Pick<PrismaService, 'docReview' | 'reviewRound'>,
+    ): Promise<boolean> => {
+      const res = await db.docReview.updateMany({
+        where: { docId, version: expectedVersion, doc: { spaceId } },
+        data: {
+          status: data.status,
+          currentRound: data.roundNumber,
+          version: { increment: 1 },
+        },
+      });
+      if (res.count === 0) return false;
+
+      if (db.reviewRound?.upsert) {
+        await db.reviewRound.upsert({
+          where: {
+            docId_roundNumber: { docId, roundNumber: data.roundNumber },
+          },
+          create: {
+            docId,
+            roundNumber: data.roundNumber,
+            status: data.status,
+            requestedById: data.requestedById,
+            requestedAt: data.requestedAt,
+            verdictById: data.verdictById,
+            verdictAt: data.verdictAt,
+            notes: data.notes,
+            deadline: data.deadline,
+          },
+          update: {
+            status: data.status,
+            requestedById: data.requestedById,
+            requestedAt: data.requestedAt,
+            verdictById: data.verdictById,
+            verdictAt: data.verdictAt,
+            notes: data.notes,
+            deadline: data.deadline,
+          },
+        });
+      }
+      return true;
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction(async (tx) => {
+        const client = tx?.docReview ? tx : this.prisma;
+        return applyUpdate(client);
+      });
+    }
+    return applyUpdate(this.prisma);
   }
 
   public async createOrUpsertDocReview(
     docId: string,
-    spaceId: string,
+    _spaceId: string,
     data: {
-      status: PageReviewStatus;
+      status: ReviewStatus;
       roundNumber: number;
       requestedById: string | null;
       requestedAt: Date | null;
@@ -499,17 +587,73 @@ export class ReviewRepository {
       deadline: Date | null;
     },
   ): Promise<void> {
-    if (!this.prisma.pageDocReview) return;
-    if (this.prisma.pageDocReview.create) {
-      await this.prisma.pageDocReview.create({
-        data: { docId, spaceId, version: 1, ...data },
+    if (!this.prisma.docReview) return;
+
+    const applyCreate = async (
+      db: Pick<PrismaService, 'docReview' | 'reviewRound'>,
+    ) => {
+      if (db.docReview.create) {
+        await db.docReview.create({
+          data: {
+            docId,
+            status: data.status,
+            currentRound: data.roundNumber,
+            version: 1,
+          },
+        });
+      } else if (db.docReview.upsert) {
+        await db.docReview.upsert({
+          where: { docId },
+          create: {
+            docId,
+            status: data.status,
+            currentRound: data.roundNumber,
+            version: 1,
+          },
+          update: {
+            status: data.status,
+            currentRound: data.roundNumber,
+            version: { increment: 1 },
+          },
+        });
+      }
+
+      if (db.reviewRound?.upsert) {
+        await db.reviewRound.upsert({
+          where: {
+            docId_roundNumber: { docId, roundNumber: data.roundNumber },
+          },
+          create: {
+            docId,
+            roundNumber: data.roundNumber,
+            status: data.status,
+            requestedById: data.requestedById,
+            requestedAt: data.requestedAt,
+            verdictById: data.verdictById,
+            verdictAt: data.verdictAt,
+            notes: data.notes,
+            deadline: data.deadline,
+          },
+          update: {
+            status: data.status,
+            requestedById: data.requestedById,
+            requestedAt: data.requestedAt,
+            verdictById: data.verdictById,
+            verdictAt: data.verdictAt,
+            notes: data.notes,
+            deadline: data.deadline,
+          },
+        });
+      }
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      await this.prisma.$transaction(async (tx) => {
+        const client = tx?.docReview ? tx : this.prisma;
+        await applyCreate(client);
       });
-    } else if (this.prisma.pageDocReview.upsert) {
-      await this.prisma.pageDocReview.upsert({
-        where: { docId },
-        create: { docId, spaceId, version: 1, ...data },
-        update: { ...data, version: { increment: 1 } },
-      });
+      return;
     }
+    await applyCreate(this.prisma);
   }
 }

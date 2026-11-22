@@ -125,6 +125,26 @@ export async function downloadAuxFileHelper(
   return res.send(buffer);
 }
 
+async function statScratchArtifacts(scratchDir: string) {
+  const statSafe = (filename: string) =>
+    fs.lstat(path.join(scratchDir, filename)).catch(() => null);
+  const [pdfStat, logStat, synctexGzStat, synctexStat] = await Promise.all([
+    statSafe('output.pdf'),
+    statSafe('output.log'),
+    statSafe('output.synctex.gz'),
+    statSafe('output.synctex'),
+  ]);
+  return { pdfStat, logStat, synctexGzStat, synctexStat };
+}
+
+function isRegularNonEmptyFile(
+  stat: Awaited<ReturnType<typeof fs.lstat>> | null,
+): boolean {
+  return Boolean(
+    stat && !stat.isSymbolicLink() && stat.isFile() && stat.size > 0,
+  );
+}
+
 export async function getLastBuildSummaryHelper(
   workspace: WorkspaceRepository,
   logParser: CompileLogAnalyzer,
@@ -134,20 +154,8 @@ export async function getLastBuildSummaryHelper(
 ): Promise<EditorLastBuildSummary> {
   const scratchId = pageId || projectId;
   const scratchDir = workspace.getScratchDir(scratchId);
-  const statSafe = (filename: string) =>
-    fs.lstat(path.join(scratchDir, filename)).catch(() => null);
-
-  const [pdfStat, logStat, synctexGzStat, synctexStat] = await Promise.all([
-    statSafe('output.pdf'),
-    statSafe('output.log'),
-    statSafe('output.synctex.gz'),
-    statSafe('output.synctex'),
-  ]);
-
-  const isRegularNonEmptyFile = (
-    stat: Awaited<ReturnType<typeof fs.lstat>> | null,
-  ): boolean =>
-    Boolean(stat && !stat.isSymbolicLink() && stat.isFile() && stat.size > 0);
+  const { pdfStat, logStat, synctexGzStat, synctexStat } =
+    await statScratchArtifacts(scratchDir);
 
   const hasPdf = isRegularNonEmptyFile(pdfStat);
   const hasLog = isRegularNonEmptyFile(logStat);
@@ -277,17 +285,9 @@ export async function formatCompileResultForClient(params: {
   const isAdhoc =
     !projectId || projectId.startsWith('adhoc-') || projectId === 'default';
   const scratchDir = workspace.getScratchDir(scratchWorkspaceId);
-  const statSafe = (filename: string) =>
-    fs.lstat(path.join(scratchDir, filename)).catch(() => null);
-  const isValidFile = (stat: Awaited<ReturnType<typeof fs.lstat>> | null) =>
-    Boolean(stat && !stat.isSymbolicLink() && stat.isFile() && stat.size > 0);
-
-  const [pdfStat, logStat, synctexGzStat, synctexStat] = await Promise.all([
-    statSafe('output.pdf'),
-    statSafe('output.log'),
-    statSafe('output.synctex.gz'),
-    statSafe('output.synctex'),
-  ]);
+  const isValidFile = isRegularNonEmptyFile;
+  const { pdfStat, logStat, synctexGzStat, synctexStat } =
+    await statScratchArtifacts(scratchDir);
 
   const basePrefix = !isAdhoc
     ? pageId

@@ -11,10 +11,14 @@ export interface TrackChangeProps {
   projectId?: string;
   pageId?: string | null;
   docId: string;
+  groupId?: string | null;
   type: ChangeType;
   status?: ChangeStatus;
   text: string;
   range: TextRange;
+  anchorStart?: Uint8Array | null;
+  anchorEnd?: Uint8Array | null;
+  baseDocRev?: number | null;
   createdById?: string | null;
   resolvedById?: string | null;
   resolvedAt?: Date | null;
@@ -27,10 +31,14 @@ export class TrackChange {
   private readonly _spaceId: string;
   private readonly _pageId: string | null;
   private readonly _docId: string;
+  private readonly _groupId: string | null;
   private readonly _type: ChangeType;
   private _status: ChangeStatus;
   private readonly _text: string;
   private readonly _range: TextRange;
+  private readonly _anchorStart: Uint8Array | null;
+  private readonly _anchorEnd: Uint8Array | null;
+  private readonly _baseDocRev: number | null;
   private readonly _createdById: string | null;
   private _resolvedById: string | null;
   private _resolvedAt: Date | null;
@@ -50,10 +58,14 @@ export class TrackChange {
     this._spaceId = spaceId;
     this._pageId = props.pageId ?? null;
     this._docId = props.docId;
+    this._groupId = props.groupId ?? null;
     this._type = props.type;
     this._status = props.status ?? 'pending';
     this._text = props.text;
     this._range = props.range;
+    this._anchorStart = props.anchorStart ?? null;
+    this._anchorEnd = props.anchorEnd ?? null;
+    this._baseDocRev = props.baseDocRev ?? null;
     this._createdById = props.createdById ?? null;
     this._resolvedById = props.resolvedById ?? null;
     this._resolvedAt = props.resolvedAt ?? null;
@@ -77,6 +89,9 @@ export class TrackChange {
   public get docId(): string {
     return this._docId;
   }
+  public get groupId(): string | null {
+    return this._groupId;
+  }
   public get type(): ChangeType {
     return this._type;
   }
@@ -88,6 +103,15 @@ export class TrackChange {
   }
   public get range(): TextRange {
     return this._range;
+  }
+  public get anchorStart(): Uint8Array | null {
+    return this._anchorStart;
+  }
+  public get anchorEnd(): Uint8Array | null {
+    return this._anchorEnd;
+  }
+  public get baseDocRev(): number | null {
+    return this._baseDocRev;
   }
   public get createdById(): string | null {
     return this._createdById;

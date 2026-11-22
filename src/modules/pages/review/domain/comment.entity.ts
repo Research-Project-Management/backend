@@ -82,6 +82,9 @@ export interface CommentThreadProps {
   docId: string;
   quote?: string | null;
   range: TextRange;
+  anchorStart?: Uint8Array | null;
+  anchorEnd?: Uint8Array | null;
+  baseDocRev?: number | null;
   isResolved?: boolean;
   createdById?: string | null;
   resolvedById?: string | null;
@@ -98,6 +101,9 @@ export class CommentThread {
   private readonly _docId: string;
   private readonly _quote: string | null;
   private readonly _range: TextRange;
+  private readonly _anchorStart: Uint8Array | null;
+  private readonly _anchorEnd: Uint8Array | null;
+  private readonly _baseDocRev: number | null;
   private _isResolved: boolean;
   private readonly _createdById: string | null;
   private _resolvedById: string | null;
@@ -121,6 +127,9 @@ export class CommentThread {
     this._docId = props.docId;
     this._quote = props.quote ?? null;
     this._range = props.range;
+    this._anchorStart = props.anchorStart ?? null;
+    this._anchorEnd = props.anchorEnd ?? null;
+    this._baseDocRev = props.baseDocRev ?? null;
     this._isResolved = props.isResolved ?? false;
     this._createdById = props.createdById ?? null;
     this._resolvedById = props.resolvedById ?? null;
@@ -151,6 +160,15 @@ export class CommentThread {
   }
   public get range(): TextRange {
     return this._range;
+  }
+  public get anchorStart(): Uint8Array | null {
+    return this._anchorStart;
+  }
+  public get anchorEnd(): Uint8Array | null {
+    return this._anchorEnd;
+  }
+  public get baseDocRev(): number | null {
+    return this._baseDocRev;
   }
   public get isResolved(): boolean {
     return this._isResolved;

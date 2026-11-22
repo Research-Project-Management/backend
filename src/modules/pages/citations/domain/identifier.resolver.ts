@@ -66,6 +66,20 @@ export type FetchLikeFn = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+function formatCrossrefPersonList(
+  people?: Array<{ family?: string; given?: string; name?: string }>,
+): string {
+  return (people || [])
+    .map((a) => {
+      if (a.family && a.given) return `${a.family}, ${a.given}`;
+      if (a.family) return String(a.family);
+      if (a.name) return `{${a.name}}`;
+      return '';
+    })
+    .filter(Boolean)
+    .join(' and ');
+}
+
 /**
  * Decorator Pattern: Wraps a fetch implementation with timeout and transient 5xx retry.
  */
@@ -248,23 +262,8 @@ export class CrossrefJsonHandler extends BaseIdentifierHandler {
             item.published?.['date-parts']?.[0]?.[0];
           const year = yearRaw ? String(yearRaw) : undefined;
 
-          const authors = (item.author || [])
-            .map((a) => {
-              if (a.family && a.given) return `${a.family}, ${a.given}`;
-              if (a.family) return String(a.family);
-              if (a.name) return `{${a.name}}`;
-              return '';
-            })
-            .filter(Boolean)
-            .join(' and ');
-          const editors = (item.editor || [])
-            .map((a) =>
-              a.family && a.given
-                ? `${a.family}, ${a.given}`
-                : a.family || (a.name ? `{${a.name}}` : ''),
-            )
-            .filter(Boolean)
-            .join(' and ');
+          const authors = formatCrossrefPersonList(item.author);
+          const editors = formatCrossrefPersonList(item.editor);
 
           const containerTitle = item['container-title']?.[0];
           const mapping =

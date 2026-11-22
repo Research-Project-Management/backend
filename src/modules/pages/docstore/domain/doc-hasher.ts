@@ -40,11 +40,3 @@ export class DocHasherAdapter implements IDocHasher {
     return computeContentMd5(content);
   }
 }
-
-/**
- * Pure domain object grouping document hashing computations.
- */
-export const DocHasher = {
-  computeHash: computeDocSha256,
-  computeMd5: computeContentMd5,
-} as const;

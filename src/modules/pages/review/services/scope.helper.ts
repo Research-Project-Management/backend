@@ -1,5 +1,4 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { PageTrackChange } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
   getRecordSpaceId,
@@ -8,13 +7,14 @@ import {
 import { PageService } from '@/modules/pages/core/services/page.service';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 import { Role } from '@/modules/project/access';
-import { CommentThread, TrackChange } from '../domain';
-import type { ThreadWithReplies } from '../review.repository';
 
-export type ResolvedUserMap = Map<
-  string,
-  { id: string; name: string; avatar?: string }
->;
+export {
+  decodeAnchorBase64,
+  encodeAnchorBase64,
+  toCommentDto,
+  toSuggestionDto,
+  type ResolvedUserMap,
+} from '../mappers/review.mapper';
 
 export async function resolveReviewTarget(params: {
   scopeRepo: ScopeRepository;
@@ -121,95 +121,4 @@ export function assertCanModifyItem(
       message,
     });
   }
-}
-
-export function toCommentDto(
-  thread: CommentThread | ThreadWithReplies,
-  userMap: ResolvedUserMap,
-  options?: { includeAvatar?: boolean; includeDocId?: boolean },
-) {
-  const creator = thread.createdById
-    ? userMap.get(thread.createdById)
-    : undefined;
-  const includeAvatar = options?.includeAvatar ?? false;
-  const includeDocId = options?.includeDocId ?? true;
-  const line =
-    thread instanceof CommentThread ? thread.range.startLine : thread.startLine;
-  const lineEnd =
-    thread instanceof CommentThread ? thread.range.endLine : thread.endLine;
-
-  return {
-    id: thread.id,
-    page: thread.docId,
-    projectPageId: thread.docId,
-    ...(includeDocId ? { docId: thread.docId } : {}),
-    author: {
-      id: thread.createdById || 'anonymous',
-      name: creator?.name || 'Collaborator',
-      ...(includeAvatar ? { avatar: creator?.avatar || '' } : {}),
-    },
-    content: thread.quote || '',
-    line,
-    lineEnd,
-    status: thread.isResolved ? 'resolved' : 'open',
-    replies: (thread.replies || []).map((r) => {
-      const replyUser = r.createdById ? userMap.get(r.createdById) : undefined;
-      return {
-        id: r.id,
-        author: {
-          id: r.createdById || 'anonymous',
-          name: replyUser?.name || 'Collaborator',
-          ...(includeAvatar ? { avatar: replyUser?.avatar || '' } : {}),
-        },
-        content: r.content,
-        createdAt: r.createdAt.toISOString(),
-      };
-    }),
-    createdAt: thread.createdAt.toISOString(),
-    updatedAt: thread.updatedAt.toISOString(),
-  };
-}
-
-export function toSuggestionDto(
-  change: TrackChange | PageTrackChange,
-  userMap: ResolvedUserMap,
-) {
-  const creator = change.createdById
-    ? userMap.get(change.createdById)
-    : undefined;
-  const isEntity = change instanceof TrackChange;
-  const startLine = isEntity ? change.range.startLine : (change.startLine ?? 0);
-  const startCol = isEntity ? change.range.startCol : change.startCol;
-  const endLine = isEntity
-    ? change.range.endLine
-    : (change.endLine ?? change.startLine ?? 0);
-  const endCol = isEntity ? change.range.endCol : change.endCol;
-
-  return {
-    id: change.id,
-    pageId: change.docId,
-    page: change.docId,
-    projectPageId: change.docId,
-    authorId: change.createdById || 'anonymous',
-    author: {
-      id: change.createdById || 'anonymous',
-      name: creator?.name || 'Collaborator',
-      ...(creator?.avatar ? { avatar: creator.avatar } : {}),
-      email: '',
-    },
-    type: change.type,
-    originalText: change.type === 'delete' ? change.text : '',
-    suggestedText: change.type === 'insert' ? change.text : '',
-    text: change.text,
-    fromLine: startLine + 1,
-    fromColumn: startCol,
-    toLine: endLine + 1,
-    toColumn: endCol,
-    description: null,
-    status: change.status,
-    resolvedById: change.resolvedById,
-    resolvedAt: change.resolvedAt ? change.resolvedAt.toISOString() : null,
-    createdAt: change.createdAt.toISOString(),
-    updatedAt: change.updatedAt.toISOString(),
-  };
 }

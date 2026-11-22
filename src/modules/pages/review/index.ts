@@ -10,4 +10,5 @@ export * from './services/suggestions.service';
 export * from './services/status.service';
 export * from './dto/review.dto';
 export * from './dto/status.dto';
+export * from './mappers/review.mapper';
 export * from './domain';

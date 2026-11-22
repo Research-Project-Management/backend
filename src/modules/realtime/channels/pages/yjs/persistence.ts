@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { Server } from 'socket.io';
 import * as Y from 'yjs';
+import { applyTextEditsAndCapture } from './util';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { RedisCacheService } from '@/core';
@@ -316,24 +317,13 @@ export async function executeFlushDocHelper(
               session.approxEncodedBytes = 0;
 
               if (reconciledText !== currentText) {
-                let captured: Uint8Array | null = null;
-                const capture = (update: Uint8Array) => {
-                  captured = captured
-                    ? Y.mergeUpdates([captured, update])
-                    : update;
-                };
-                session.doc.on('update', capture);
-                try {
-                  YjsCursorDiffEngine.applyEditsToYText(
-                    session.doc,
-                    session.yText,
-                    currentText,
-                    reconciledText,
-                    'rest-api',
-                  );
-                } finally {
-                  session.doc.off('update', capture);
-                }
+                const captured = applyTextEditsAndCapture(
+                  session.doc,
+                  session.yText,
+                  currentText,
+                  reconciledText,
+                  'rest-api',
+                );
                 if (captured && ctx.server) {
                   const enc = encoding.createEncoder();
                   syncProtocol.writeUpdate(enc, captured);
@@ -373,6 +363,18 @@ export async function executeFlushDocHelper(
         session.lastFlushedRev,
         ctx.redisSnapshotTtlSeconds,
       );
+    }
+
+    if (ctx.server) {
+      ctx.server
+        .to(PAGES_ROOMS.doc(projectId, docId))
+        .emit(PAGES_EVENTS.DOC_PERSISTED, {
+          spaceId: projectId,
+          docId,
+          rev: session.lastFlushedRev,
+          version: session.currentVersion,
+          savedAt: new Date().toISOString(),
+        });
     }
 
     if (convergedOnConflict || session.yText.toString() === flushedText) {

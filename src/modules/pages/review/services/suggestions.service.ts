@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PageChangeType } from '@prisma/client';
+import { ChangeType } from '@prisma/client';
 import { AuthenticatedRequest, isUuid } from '@/core';
 import { PageService } from '@/modules/pages/core/services/page.service';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
@@ -23,6 +23,8 @@ import {
 import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
 import { ReviewMapper, ReviewRepository } from '../review.repository';
 import {
+  decodeAnchorBase64,
+  encodeAnchorBase64,
   resolveReviewTarget,
   toSuggestionDto,
   validateSuggestionRange,
@@ -36,6 +38,10 @@ export interface CreateSuggestionInput {
   fromColumn?: number;
   toLine?: number;
   toColumn?: number;
+  groupId?: string;
+  anchorStart?: string;
+  anchorEnd?: string;
+  baseDocRev?: number;
   spaceId?: string;
 }
 
@@ -137,8 +143,8 @@ export class SuggestionsService {
       );
     }
 
-    const type: PageChangeType =
-      body.type === 'delete' ? PageChangeType.delete : PageChangeType.insert;
+    const type: ChangeType =
+      body.type === 'delete' ? ChangeType.delete : ChangeType.insert;
     const text = body.suggestedText || body.originalText || '';
 
     const userMap = await this.userResolver.resolveUserNames([userId]);
@@ -157,15 +163,22 @@ export class SuggestionsService {
         spaceId,
         pageId: pageId ?? null,
         docId: docTargetId,
-        type: type === PageChangeType.delete ? 'delete' : 'insert',
+        groupId: isUuid(body.groupId) ? body.groupId : null,
+        type: type === ChangeType.delete ? 'delete' : 'insert',
         text,
         range: TextRange.create({ startLine, startCol, endLine, endCol }),
+        anchorStart: decodeAnchorBase64(body.anchorStart),
+        anchorEnd: decodeAnchorBase64(body.anchorEnd),
+        baseDocRev: body.baseDocRev ?? null,
         createdById: isUuid(userId) ? userId : null,
       }),
     );
 
+    const anchorStart = encodeAnchorBase64(saved.anchorStart);
+    const anchorEnd = encodeAnchorBase64(saved.anchorEnd);
     const suggestion = {
       id: saved.id,
+      ...(saved.groupId ? { groupId: saved.groupId } : {}),
       pageId: docTargetId,
       page: docTargetId,
       projectPageId: docTargetId,
@@ -183,6 +196,9 @@ export class SuggestionsService {
       fromColumn: saved.range.startCol,
       toLine: saved.range.endLine + 1,
       toColumn: saved.range.endCol,
+      ...(anchorStart ? { anchorStart } : {}),
+      ...(anchorEnd ? { anchorEnd } : {}),
+      ...(saved.baseDocRev != null ? { baseDocRev: saved.baseDocRev } : {}),
       status: saved.status,
       createdAt: saved.createdAt.toISOString(),
       updatedAt: saved.updatedAt.toISOString(),
@@ -275,6 +291,94 @@ export class SuggestionsService {
 
     const nextStatus = isAccept ? 'accepted' : 'rejected';
     const resolvedById = isUuid(userId) ? userId : null;
+
+    if (existing.groupId) {
+      const groupMembers = await this.repo.findPendingChangesByGroup(
+        spaceId,
+        existing.docId,
+        existing.groupId,
+      );
+      if (groupMembers.length > 1) {
+        const claimedIds = await this.repo.claimPendingChanges(
+          spaceId,
+          groupMembers.map((c) => c.id),
+          nextStatus,
+          resolvedById,
+          existing.docId,
+        );
+        if (claimedIds.length > 0) {
+          const claimedSet = new Set(claimedIds);
+          const sorted = LinePatcher.sortChangesBottomUp(
+            groupMembers.filter((c) => claimedSet.has(c.id)),
+          );
+          let updatedGroupPage: {
+            id: string;
+            content: string;
+            version: number;
+            rev: number;
+            projectId: string;
+          } | null = null;
+          let groupBroadcastSpace = spaceId;
+
+          try {
+            const batchOutcome = await this.docPatcher.applyBatch(
+              spaceId,
+              existing.docId,
+              sorted,
+              isAccept,
+            );
+            if (batchOutcome) {
+              groupBroadcastSpace = batchOutcome.spaceId;
+              updatedGroupPage = {
+                id: existing.docId,
+                content: batchOutcome.lines.join('\n'),
+                version: batchOutcome.version,
+                rev: batchOutcome.rev,
+                projectId: batchOutcome.spaceId,
+              };
+            }
+          } catch (err: unknown) {
+            this.logger.error(
+              `Failed to ${isAccept ? 'apply accepted' : 'revert rejected'} grouped suggestion ${suggestionId}, rolling back claims: ${String(err)}`,
+            );
+            await this.repo
+              .revertClaimedChanges(spaceId, claimedIds, nextStatus)
+              .catch(() => undefined);
+            this.mapPatchError(err);
+          }
+
+          emitReviewEvent(
+            this.eventEmitter,
+            groupBroadcastSpace,
+            REVIEW_EVENTS.SUGGESTION_RESOLVED,
+            {
+              docId: existing.docId,
+              changeIds: sorted.map((c) => c.id),
+              groupId: existing.groupId,
+              action: nextStatus,
+              resolvedById,
+            },
+          );
+
+          const refreshed =
+            (await this.repo.findChange(spaceId, suggestionId)) ?? existing;
+          const groupUserMap = await this.userResolver.resolveUserNames([
+            refreshed.createdById,
+            userId,
+          ]);
+          return {
+            ok: true,
+            suggestion: {
+              ...refreshed,
+              ...toSuggestionDto(refreshed, groupUserMap),
+            },
+            resolvedIds: claimedIds,
+            ...(updatedGroupPage ? { page: updatedGroupPage } : {}),
+          };
+        }
+      }
+    }
+
     const claimed = await this.repo.claimPendingChanges(
       spaceId,
       [suggestionId],
@@ -301,7 +405,7 @@ export class SuggestionsService {
 
     const record =
       (await this.repo.findChange(spaceId, suggestionId)) ?? existing;
-    const domainChange = ReviewMapper.toDomainChange(record);
+    const domainChange = ReviewMapper.toDomainChange(record, spaceId);
 
     let updatedPage: {
       id: string;
@@ -333,7 +437,7 @@ export class SuggestionsService {
       }
     } catch (err: unknown) {
       this.logger.error(
-        `Failed to ${isAccept ? 'apply accepted' : 'revert rejected'} suggestion ${suggestionId}, rolling back claim: ${err}`,
+        `Failed to ${isAccept ? 'apply accepted' : 'revert rejected'} suggestion ${suggestionId}, rolling back claim: ${String(err)}`,
       );
       await this.repo
         .revertClaimedChanges(spaceId, [suggestionId], nextStatus)

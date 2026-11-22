@@ -8,10 +8,11 @@ import {
 import type { Server } from 'socket.io';
 import { randomUUID } from 'node:crypto';
 import * as Y from 'yjs';
+import { applyTextEditsAndCapture } from './util';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, SystemResourceGovernor } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   PAGES_REALTIME_DEFAULTS,
@@ -69,6 +70,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() validator?: YjsUpdateValidator,
     @Optional() private readonly config?: PagesRealtimeConfigService,
+    @Optional() private readonly resourceGovernor?: SystemResourceGovernor,
   ) {
     const raw = this.config?.getYjsConfig?.();
     const d = PAGES_REALTIME_DEFAULTS.yjs;
@@ -134,34 +136,39 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
   public async sweepIdleDocs(): Promise<number> {
     const now = Date.now();
     let evictedCount = 0;
+    const advise = () =>
+      this.resourceGovernor?.adviseEviction({
+        activeCount: this.activeDocs.size,
+        baseIdleTtlMs: this.yjsConfig.idleThresholdMs,
+        hardCap: this.yjsConfig.maxActiveDocs,
+      });
+    const idleTtlMs =
+      advise()?.effectiveIdleTtlMs ?? this.yjsConfig.idleThresholdMs;
 
     for (const [, session] of this.activeDocs.entries()) {
-      if (now - session.lastActiveAt > this.yjsConfig.idleThresholdMs) {
+      if (now - session.lastActiveAt > idleTtlMs) {
         await this.evictDoc(session.projectId, session.docId);
         evictedCount++;
       }
     }
-
     if (evictedCount > 0) {
       this.logger.log(
         `Garbage collected ${evictedCount} idle Y.Doc in-memory session(s)`,
       );
     }
 
-    if (this.activeDocs.size > this.yjsConfig.maxActiveDocs) {
+    const targetEvictions =
+      advise()?.targetEvictions ??
+      Math.max(0, this.activeDocs.size - this.yjsConfig.maxActiveDocs);
+    if (targetEvictions > 0) {
       const sorted = [...this.activeDocs.values()].sort(
         (a, b) => a.lastActiveAt - b.lastActiveAt,
       );
-
-      const targetEvictions =
-        this.activeDocs.size - this.yjsConfig.maxActiveDocs;
       for (let i = 0; i < Math.min(targetEvictions, sorted.length); i++) {
-        const s = sorted[i];
-        await this.evictDoc(s.projectId, s.docId);
+        await this.evictDoc(sorted[i].projectId, sorted[i].docId);
         evictedCount++;
       }
     }
-
     return evictedCount;
   }
 
@@ -345,23 +352,14 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    let captured: Uint8Array | null = null;
     session.currentVersion = undefined;
-    const capture = (update: Uint8Array) => {
-      captured = captured ? Y.mergeUpdates([captured, update]) : update;
-    };
-    session.doc.on('update', capture);
-    try {
-      YjsCursorDiffEngine.applyEditsToYText(
-        session.doc,
-        session.yText,
-        current,
-        nextText,
-        'rest-api',
-      );
-    } finally {
-      session.doc.off('update', capture);
-    }
+    const captured = applyTextEditsAndCapture(
+      session.doc,
+      session.yText,
+      current,
+      nextText,
+      'rest-api',
+    );
     session.lastFlushedText = nextText;
     if (!captured) return null;
     const encoder = encoding.createEncoder();

@@ -44,6 +44,8 @@ import {
 } from '@/modules/pages/review/domain';
 import type { DocPatcher } from '@/modules/pages/review/doc-patcher.adapter';
 import type { ReviewRepository } from '@/modules/pages/review/review.repository';
+import { extractMentionUserIds } from '@/modules/pages/review/review.repository';
+import { REVIEW_EVENTS } from '@/modules/pages/review/review.events';
 import { CommentsService } from '@/modules/pages/review/services/comments.service';
 import { SuggestionsService } from '@/modules/pages/review/services/suggestions.service';
 import { Role } from '@/modules/project/access';
@@ -429,6 +431,158 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
       );
     });
 
+    it('atomically resolves grouped replace changes (delete + insert) in one DocPatcher.applyBatch call', async () => {
+      const now = new Date();
+      const GROUP_ID = '99999999-9999-4999-8999-999999999990';
+      const DEL_ID = '99999999-9999-4999-8999-999999999991';
+      const INS_ID = '99999999-9999-4999-8999-999999999992';
+      const deleteRow = {
+        id: DEL_ID,
+        spaceId: SPACE_ID,
+        pageId: PAGE_A_ID,
+        docId: DOC_ID,
+        groupId: GROUP_ID,
+        type: 'delete' as const,
+        status: 'pending' as const,
+        text: 'old',
+        startLine: 0,
+        startCol: 0,
+        endLine: 0,
+        endCol: 3,
+        createdById: AUTHOR_ID,
+        resolvedById: null,
+        resolvedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const deleteChange = TrackChange.create({
+        id: DEL_ID,
+        spaceId: SPACE_ID,
+        pageId: PAGE_A_ID,
+        docId: DOC_ID,
+        groupId: GROUP_ID,
+        type: 'delete',
+        status: 'pending',
+        text: 'old',
+        range: TextRange.create({
+          startLine: 0,
+          startCol: 0,
+          endLine: 0,
+          endCol: 3,
+        }),
+        createdById: AUTHOR_ID,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const insertChange = TrackChange.create({
+        id: INS_ID,
+        spaceId: SPACE_ID,
+        pageId: PAGE_A_ID,
+        docId: DOC_ID,
+        groupId: GROUP_ID,
+        type: 'insert',
+        status: 'pending',
+        text: 'new',
+        range: TextRange.create({
+          startLine: 0,
+          startCol: 3,
+          endLine: 0,
+          endCol: 6,
+        }),
+        createdById: AUTHOR_ID,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const findPendingChangesByGroup = jest
+        .fn()
+        .mockResolvedValue([deleteChange, insertChange]);
+      const claimPendingChanges = jest.fn().mockResolvedValue([DEL_ID, INS_ID]);
+      const findChange = jest
+        .fn()
+        .mockResolvedValueOnce(deleteRow)
+        .mockResolvedValueOnce({
+          ...deleteRow,
+          status: 'accepted',
+          resolvedById: AUTHOR_ID,
+        });
+      const repoMock = {
+        getPrisma: jest.fn().mockReturnValue({}),
+        findChange,
+        findPendingChangesByGroup,
+        claimPendingChanges,
+        revertClaimedChanges: jest.fn(),
+      } as unknown as ReviewRepository;
+
+      const applyBatch = jest.fn().mockResolvedValue({
+        spaceId: SPACE_ID,
+        lines: ['new'],
+        version: 2,
+        rev: 3,
+      });
+      const patcherMock = {
+        applyBatch,
+        applyChange: jest.fn(),
+      } as unknown as DocPatcher;
+
+      const scopeRepoMock = {
+        findDocInProject: jest.fn().mockResolvedValue({
+          id: DOC_ID,
+          spaceId: SPACE_ID,
+          pageId: PAGE_A_ID,
+        }),
+        getPrisma: jest.fn().mockReturnValue({}),
+      };
+      const userResolverMock = {
+        resolveUserNames: jest.fn().mockResolvedValue(new Map()),
+      };
+      const pageServiceMock = {
+        resolveActiveProjectId: jest.fn().mockReturnValue(SPACE_ID),
+        resolveProjectId: jest.fn().mockResolvedValue(SPACE_ID),
+      };
+
+      const service = new SuggestionsService(
+        repoMock,
+        patcherMock,
+        scopeRepoMock as never,
+        userResolverMock,
+        pageServiceMock as never,
+      );
+
+      const res = await service.accept(
+        DOC_ID,
+        DEL_ID,
+        SPACE_ID,
+        SPACE_ID,
+        AUTHOR_ID,
+      );
+
+      expect(findPendingChangesByGroup).toHaveBeenCalledWith(
+        SPACE_ID,
+        DOC_ID,
+        GROUP_ID,
+      );
+      expect(claimPendingChanges).toHaveBeenCalledWith(
+        SPACE_ID,
+        [DEL_ID, INS_ID],
+        'accepted',
+        AUTHOR_ID,
+        DOC_ID,
+      );
+      expect(applyBatch).toHaveBeenCalledTimes(1);
+      expect(applyBatch).toHaveBeenCalledWith(
+        SPACE_ID,
+        DOC_ID,
+        expect.arrayContaining([
+          expect.objectContaining({ id: DEL_ID }),
+          expect.objectContaining({ id: INS_ID }),
+        ]),
+        true,
+      );
+      expect(res.resolvedIds).toEqual([DEL_ID, INS_ID]);
+    });
+
     it('enforces author-only ownership on updateReply for non-author collaborators', async () => {
       const now = new Date();
       const THREAD_ID = '77777777-7777-4777-8777-777777777771';
@@ -452,7 +606,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
         replies: [
           {
             id: REPLY_ID,
-            threadId: THREAD_ID,
+            commentId: THREAD_ID,
             content: 'Original note',
             createdById: AUTHOR_ID,
             createdAt: now,
@@ -502,6 +656,295 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
           Role.CONTRIBUTOR,
         ),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('extracts deduplicated mention UUIDs and excludes self-mentions on REPLY_ADDED', async () => {
+      const upperOther = OTHER_USER_ID.toUpperCase();
+      const ids = extractMentionUserIds(
+        `Ping @[Alice](${AUTHOR_ID}) @[Bob](${upperOther}) @[Bob2](${OTHER_USER_ID}) @[Invalid](not-a-uuid)`,
+      );
+      expect(ids).toEqual([AUTHOR_ID, OTHER_USER_ID]);
+
+      const now = new Date();
+      const THREAD_ID = '77777777-7777-4777-8777-777777777772';
+      const threadRow = {
+        id: THREAD_ID,
+        spaceId: SPACE_ID,
+        pageId: PAGE_A_ID,
+        docId: DOC_ID,
+        quote: 'Lemma 2',
+        startLine: 1,
+        startCol: 0,
+        endLine: 1,
+        endCol: 7,
+        isResolved: false,
+        createdById: AUTHOR_ID,
+        resolvedById: null,
+        resolvedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        replies: [],
+      };
+
+      const addReplyMock = jest.fn().mockResolvedValue(undefined);
+      const repoMock = {
+        getPrisma: jest.fn().mockReturnValue({}),
+        findThread: jest.fn().mockResolvedValue(threadRow),
+        addReply: addReplyMock,
+      } as unknown as ReviewRepository;
+      const scopeRepoMock = {
+        findDocInProject: jest.fn().mockResolvedValue({
+          id: DOC_ID,
+          spaceId: SPACE_ID,
+          pageId: PAGE_A_ID,
+        }),
+        getPrisma: jest.fn().mockReturnValue({}),
+      };
+      const userResolverMock = {
+        resolveUserNames: jest.fn().mockResolvedValue(new Map()),
+      };
+      const pageServiceMock = {
+        resolveActiveProjectId: jest.fn().mockReturnValue(SPACE_ID),
+        resolveProjectId: jest.fn().mockResolvedValue(SPACE_ID),
+      };
+      const emitMock = jest.fn();
+
+      const service = new CommentsService(
+        repoMock,
+        scopeRepoMock as never,
+        userResolverMock,
+        pageServiceMock as never,
+        { emit: emitMock } as never,
+      );
+
+      await service.addReply(
+        DOC_ID,
+        THREAD_ID,
+        {
+          content: `@[Self](${AUTHOR_ID}) check with @[Reviewer](${OTHER_USER_ID})`,
+        },
+        { user: { id: AUTHOR_ID } } as never,
+        SPACE_ID,
+        SPACE_ID,
+      );
+
+      expect(addReplyMock).toHaveBeenCalledTimes(1);
+      expect(emitMock).toHaveBeenCalledTimes(1);
+      const emittedCall = emitMock.mock.calls[0] as [
+        string,
+        {
+          projectId: string;
+          event: string;
+          payload: {
+            docId: string;
+            commentId: string;
+            mentionedUserIds?: string[];
+          };
+        },
+      ];
+      expect(emittedCall[0]).toBe('pages.project.event');
+      expect(emittedCall[1].projectId).toBe(SPACE_ID);
+      expect(emittedCall[1].event).toBe(REVIEW_EVENTS.REPLY_ADDED);
+      expect(emittedCall[1].payload).toMatchObject({
+        docId: DOC_ID,
+        commentId: THREAD_ID,
+        mentionedUserIds: [OTHER_USER_ID],
+      });
+    });
+
+    it('blocks create and addReply with ForbiddenException when document review is locked', async () => {
+      const THREAD_ID = '77777777-7777-4777-8777-777777777773';
+      const repoMock = {
+        getPrisma: jest.fn().mockReturnValue({}),
+        findDocReview: jest.fn().mockResolvedValue({
+          docId: DOC_ID,
+          status: 'locked',
+          currentRound: 1,
+          version: 1,
+        }),
+        findThread: jest.fn().mockResolvedValue({
+          id: THREAD_ID,
+          spaceId: SPACE_ID,
+          docId: DOC_ID,
+          isResolved: false,
+          replies: [],
+        }),
+      } as unknown as ReviewRepository;
+      const scopeRepoMock = {
+        findDocInProject: jest.fn().mockResolvedValue({
+          id: DOC_ID,
+          spaceId: SPACE_ID,
+          pageId: PAGE_A_ID,
+        }),
+        getPrisma: jest.fn().mockReturnValue({}),
+      };
+      const userResolverMock = {
+        resolveUserNames: jest.fn().mockResolvedValue(new Map()),
+      };
+      const pageServiceMock = {
+        resolveActiveProjectId: jest.fn().mockReturnValue(SPACE_ID),
+        resolveProjectId: jest.fn().mockResolvedValue(SPACE_ID),
+      };
+
+      const service = new CommentsService(
+        repoMock,
+        scopeRepoMock as never,
+        userResolverMock,
+        pageServiceMock as never,
+      );
+
+      await expect(
+        service.create(
+          DOC_ID,
+          { content: 'Locked note', line: 1 },
+          { user: { id: AUTHOR_ID } } as never,
+          SPACE_ID,
+          SPACE_ID,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.addReply(
+          DOC_ID,
+          THREAD_ID,
+          { content: 'Locked reply' },
+          { user: { id: AUTHOR_ID } } as never,
+          SPACE_ID,
+          SPACE_ID,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('diff-emits only newly added mentionedUserIds on CommentsService.updateReply', async () => {
+      const now = new Date();
+      const THREAD_ID = '77777777-7777-4777-8777-777777777774';
+      const REPLY_ID = '88888888-8888-4888-8888-888888888884';
+      const PREV_USER = '11111111-1111-4111-8111-111111111119';
+      const threadRow = {
+        id: THREAD_ID,
+        spaceId: SPACE_ID,
+        pageId: PAGE_A_ID,
+        docId: DOC_ID,
+        quote: 'Lemma 4',
+        startLine: 1,
+        startCol: 0,
+        endLine: 1,
+        endCol: 7,
+        isResolved: false,
+        createdById: AUTHOR_ID,
+        resolvedById: null,
+        resolvedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        replies: [
+          {
+            id: REPLY_ID,
+            commentId: THREAD_ID,
+            content: `Existing mention @[Prev](${PREV_USER})`,
+            createdById: AUTHOR_ID,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      };
+
+      const updateReplyMock = jest.fn().mockResolvedValue(true);
+      const repoMock = {
+        getPrisma: jest.fn().mockReturnValue({}),
+        findDocReview: jest.fn().mockResolvedValue(null),
+        findThread: jest.fn().mockResolvedValue(threadRow),
+        updateReply: updateReplyMock,
+      } as unknown as ReviewRepository;
+      const scopeRepoMock = {
+        findDocInProject: jest.fn().mockResolvedValue({
+          id: DOC_ID,
+          spaceId: SPACE_ID,
+          pageId: PAGE_A_ID,
+        }),
+        getPrisma: jest.fn().mockReturnValue({}),
+      };
+      const userResolverMock = {
+        resolveUserNames: jest.fn().mockResolvedValue(new Map()),
+      };
+      const pageServiceMock = {
+        resolveActiveProjectId: jest.fn().mockReturnValue(SPACE_ID),
+        resolveProjectId: jest.fn().mockResolvedValue(SPACE_ID),
+      };
+      const emitMock = jest.fn();
+
+      const service = new CommentsService(
+        repoMock,
+        scopeRepoMock as never,
+        userResolverMock,
+        pageServiceMock as never,
+        { emit: emitMock } as never,
+      );
+
+      await service.updateReply(
+        DOC_ID,
+        THREAD_ID,
+        REPLY_ID,
+        {
+          content: `Keep @[Prev](${PREV_USER}) and add @[New](${OTHER_USER_ID})`,
+        },
+        SPACE_ID,
+        { user: { id: AUTHOR_ID } } as never,
+        SPACE_ID,
+        Role.CONTRIBUTOR,
+      );
+
+      expect(updateReplyMock).toHaveBeenCalledTimes(1);
+      expect(emitMock).toHaveBeenCalledTimes(1);
+      const emittedCall = emitMock.mock.calls[0] as [
+        string,
+        {
+          event: string;
+          payload: { mentionedUserIds?: string[] };
+        },
+      ];
+      expect(emittedCall[1].event).toBe(REVIEW_EVENTS.REPLY_UPDATED);
+      expect(emittedCall[1].payload.mentionedUserIds).toEqual([OTHER_USER_ID]);
+    });
+
+    it('emits doc:persisted ACK to doc room with latest rev after YjsService.flushDoc succeeds', async () => {
+      const emitMock = jest.fn();
+      const toMock = jest.fn().mockReturnValue({ emit: emitMock });
+      const docstoreMock = {
+        getDoc: jest.fn().mockResolvedValue({
+          id: DOC_ID,
+          lines: ['initial'],
+          rev: 1,
+          version: 1,
+        }),
+        updateDoc: jest.fn().mockResolvedValue({
+          id: DOC_ID,
+          lines: ['initial updated'],
+          rev: 2,
+          version: 2,
+        }),
+      };
+
+      const yjs = new YjsService(undefined, docstoreMock as never);
+      yjs.setServer({ to: toMock } as never);
+
+      const session = await yjs.getOrCreateDoc(SPACE_ID, DOC_ID);
+      session.doc.transact(() => {
+        session.yText.insert(session.yText.length, ' updated');
+      }, 'client-edit');
+
+      await yjs.flushDoc(SPACE_ID, DOC_ID);
+
+      expect(toMock).toHaveBeenCalledWith(`doc:${SPACE_ID}:${DOC_ID}`);
+      expect(emitMock).toHaveBeenCalledWith(
+        'doc:persisted',
+        expect.objectContaining({
+          spaceId: SPACE_ID,
+          docId: DOC_ID,
+          rev: 2,
+          version: 2,
+        }),
+      );
+      await yjs.onModuleDestroy();
     });
   });
 });

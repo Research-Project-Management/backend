@@ -20,7 +20,10 @@ import {
   reviewTransitionPolicy,
 } from '../dto/status.dto';
 import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
-import { ReviewRepository } from '../review.repository';
+import {
+  ReviewRepository,
+  type DocReviewWithRound,
+} from '../review.repository';
 import {
   resolveReviewTarget,
   toCommentDto,
@@ -51,6 +54,20 @@ export class ReviewStatusService {
     };
   }
 
+  private toReviewInfo(row: DocReviewWithRound): ReviewRoundInfo {
+    const round = row.rounds?.[0];
+    return {
+      status: row.status,
+      roundNumber: round?.roundNumber ?? row.currentRound ?? 1,
+      requestedById: round?.requestedById ?? undefined,
+      requestedAt: round?.requestedAt?.toISOString(),
+      verdictById: round?.verdictById ?? undefined,
+      verdictAt: round?.verdictAt?.toISOString(),
+      notes: round?.notes ?? undefined,
+      deadline: round?.deadline?.toISOString(),
+    };
+  }
+
   public async getStatus(
     targetId: string,
     routeSpaceId?: string,
@@ -68,17 +85,9 @@ export class ReviewStatusService {
     }
 
     const row = await this.repo.findDocReview(docId);
-    if (row && (!row.spaceId || row.spaceId === spaceId)) {
-      const review: ReviewRoundInfo = {
-        status: row.status,
-        roundNumber: row.roundNumber,
-        requestedById: row.requestedById ?? undefined,
-        requestedAt: row.requestedAt?.toISOString(),
-        verdictById: row.verdictById ?? undefined,
-        verdictAt: row.verdictAt?.toISOString(),
-        notes: row.notes ?? undefined,
-        deadline: row.deadline?.toISOString(),
-      };
+    const rowSpaceId = row?.doc?.spaceId ?? row?.spaceId;
+    if (row && (!rowSpaceId || rowSpaceId === spaceId)) {
+      const review = this.toReviewInfo(row);
       return { ok: true, docId, projectId: spaceId, review };
     }
 
@@ -127,16 +136,7 @@ export class ReviewStatusService {
     for (let attempt = 1; attempt <= MAX_CAS_ATTEMPTS; attempt++) {
       const existingRow = await this.repo.findDocReview(docId);
       prevReview = existingRow
-        ? {
-            status: existingRow.status,
-            roundNumber: existingRow.roundNumber,
-            requestedById: existingRow.requestedById ?? undefined,
-            requestedAt: existingRow.requestedAt?.toISOString(),
-            verdictById: existingRow.verdictById ?? undefined,
-            verdictAt: existingRow.verdictAt?.toISOString(),
-            notes: existingRow.notes ?? undefined,
-            deadline: existingRow.deadline?.toISOString(),
-          }
+        ? this.toReviewInfo(existingRow)
         : legacyReview || { roundNumber: 1, status: 'draft' };
 
       const decision = reviewTransitionPolicy.evaluate({

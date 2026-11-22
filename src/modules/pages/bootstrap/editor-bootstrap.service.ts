@@ -16,6 +16,7 @@ import { PageDoc, PageNode } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { Role, RoleHierarchy } from '@/modules/project/access';
 import { PageService } from '@/modules/pages/core/services/page.service';
+import { isRecordDeleted } from '@/modules/pages/core/page-scope.helper';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   findPageRecordWithNode,
@@ -96,10 +97,42 @@ async function withBranchDeadline<T>(
 
 type PageDocWithNode = PageDoc & { node: PageNode | null };
 
-function isRecordDeleted(
-  record?: { deletedAt?: Date | null; deleted?: boolean } | null,
+const PAGE_ROW_SELECT = {
+  id: true,
+  rootDocId: true,
+  title: true,
+  spaceId: true,
+  deletedAt: true,
+} as const;
+
+function buildPathOrFilter(cleanPath: string) {
+  return [
+    { node: { path: `/${cleanPath}` } },
+    { lastKnownPath: `/${cleanPath}` },
+    { lastKnownPath: cleanPath },
+  ];
+}
+
+function matchesPageScope(
+  candidate: PageDocWithNode,
+  spaceId: string,
+  canonicalPageId: string,
+  rootDocId?: string,
+  isScopedPage = false,
 ): boolean {
-  return Boolean(record?.deletedAt ?? record?.deleted);
+  const candidatePageId = (candidate as { pageId?: string | null }).pageId;
+  if (
+    candidatePageId &&
+    canonicalPageId &&
+    candidatePageId !== canonicalPageId &&
+    (isScopedPage || candidatePageId !== spaceId)
+  ) {
+    return false;
+  }
+  if (isScopedPage && !candidatePageId && candidate.id !== rootDocId) {
+    return false;
+  }
+  return true;
 }
 
 @Injectable()
@@ -177,26 +210,14 @@ export class EditorBootstrapService {
             this.prisma.page?.findFirst?.({
               where: { spaceId, deletedAt: null },
               orderBy: { createdAt: 'asc' },
-              select: {
-                id: true,
-                rootDocId: true,
-                title: true,
-                spaceId: true,
-                deletedAt: true,
-              },
+              select: PAGE_ROW_SELECT,
             }),
           ).catch(() => null)
         : isUuid(params.pageOrProjectId)
           ? Promise.resolve(
               this.prisma.page?.findUnique?.({
                 where: { id: params.pageOrProjectId },
-                select: {
-                  id: true,
-                  rootDocId: true,
-                  title: true,
-                  spaceId: true,
-                  deletedAt: true,
-                },
+                select: PAGE_ROW_SELECT,
               }),
             ).catch(() => null)
           : Promise.resolve(null),
@@ -262,13 +283,7 @@ export class EditorBootstrapService {
           ? await Promise.resolve(
               this.prisma.page?.findUnique?.({
                 where: { id: entryPageId },
-                select: {
-                  id: true,
-                  rootDocId: true,
-                  title: true,
-                  spaceId: true,
-                  deletedAt: true,
-                },
+                select: PAGE_ROW_SELECT,
               }),
             ).catch(() => null)
           : null;
@@ -628,33 +643,20 @@ export class EditorBootstrapService {
         })
         .catch(() => null);
       if (!candidate) return null;
-      const candidatePageId = (candidate as { pageId?: string | null }).pageId;
-      if (
-        candidatePageId &&
-        canonicalPageId &&
-        candidatePageId !== canonicalPageId &&
-        (isScopedPage || candidatePageId !== spaceId)
-      ) {
-        return null;
-      }
-      if (isScopedPage && !candidatePageId && candidate.id !== rootDocId) {
-        return null;
-      }
-      return candidate;
+      return matchesPageScope(candidate, spaceId, canonicalPageId, rootDocId, isScopedPage)
+        ? candidate
+        : null;
     }
 
     const cleanPath = explicitFileId.replace(/^\/+/, '');
+    const pathOr = buildPathOrFilter(cleanPath);
     const scopedCandidate = await this.prisma.pageDoc
       .findFirst({
         where: {
           spaceId,
           ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
           deletedAt: null,
-          OR: [
-            { node: { path: `/${cleanPath}` } },
-            { lastKnownPath: `/${cleanPath}` },
-            { lastKnownPath: cleanPath },
-          ],
+          OR: pathOr,
         },
         include: { node: true },
       })
@@ -677,28 +679,14 @@ export class EditorBootstrapService {
         where: {
           spaceId,
           deletedAt: null,
-          OR: [
-            { node: { path: `/${cleanPath}` } },
-            { lastKnownPath: `/${cleanPath}` },
-            { lastKnownPath: cleanPath },
-          ],
+          OR: pathOr,
         },
         include: { node: true },
       })
       .catch(() => null);
     if (!legacyCandidate) return null;
-    const legacyPageId = (legacyCandidate as { pageId?: string | null }).pageId;
-    if (
-      legacyPageId &&
-      canonicalPageId &&
-      legacyPageId !== canonicalPageId &&
-      (isScopedPage || legacyPageId !== spaceId)
-    ) {
-      return null;
-    }
-    if (isScopedPage && !legacyPageId && legacyCandidate.id !== rootDocId) {
-      return null;
-    }
-    return legacyCandidate;
+    return matchesPageScope(legacyCandidate, spaceId, canonicalPageId, rootDocId, isScopedPage)
+      ? legacyCandidate
+      : null;
   }
 }

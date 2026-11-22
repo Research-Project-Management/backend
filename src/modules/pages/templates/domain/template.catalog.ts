@@ -38,9 +38,6 @@ export interface TemplateDefinition {
   files: Record<string, string>;
 }
 
-/** @deprecated Use `TemplateDefinition` */
-export type OfficialTemplateDefinition = TemplateDefinition;
-
 export const TEMPLATE_CATALOG: readonly TemplateDefinition[] = [
   {
     id: '10000000-0000-0000-0000-000000000001',
@@ -768,6 +765,3 @@ Summarize the primary contributions and future outlook of this work.
     },
   },
 ];
-
-/** @deprecated Use `TEMPLATE_CATALOG` */
-export const OFFICIAL_TEMPLATE_CATALOG = TEMPLATE_CATALOG;

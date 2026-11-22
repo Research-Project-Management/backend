@@ -20,9 +20,11 @@ import {
 } from '@/modules/project/access';
 import { CommentReply, CommentThread, TextRange } from '../domain';
 import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
-import { ReviewRepository } from '../review.repository';
+import { ReviewRepository, extractMentionUserIds } from '../review.repository';
 import {
   assertCanModifyItem,
+  decodeAnchorBase64,
+  encodeAnchorBase64,
   resolveReviewTarget,
   toCommentDto,
   validateCommentLines,
@@ -77,6 +79,31 @@ export class CommentsService {
       throw new NotFoundException(`Comment thread ${commentId} not found`);
     }
     return { spaceId: spaceId!, thread };
+  }
+
+  private async assertDocNotLocked(docId: string): Promise<void> {
+    const review = await this.repo.findDocReview?.(docId);
+    if (review?.status === 'locked') {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'DOCUMENT_LOCKED',
+        message: 'Cannot modify comments on a locked document',
+      });
+    }
+  }
+
+  private resolveMentionTargets(
+    content: string,
+    authorId?: string | null,
+    previousContent?: string | null,
+  ): string[] {
+    const normalizedAuthor = authorId ? authorId.toLowerCase() : null;
+    const prevSet = previousContent
+      ? new Set(extractMentionUserIds(previousContent))
+      : null;
+    return extractMentionUserIds(content).filter(
+      (id) => id !== normalizedAuthor && (!prevSet || !prevSet.has(id)),
+    );
   }
 
   private async formatReloadedThread(
@@ -192,6 +219,9 @@ export class CommentsService {
       content: string;
       line?: number;
       lineEnd?: number;
+      anchorStart?: string;
+      anchorEnd?: string;
+      baseDocRev?: number;
       spaceId?: string;
     },
     req: AuthenticatedRequest,
@@ -216,6 +246,7 @@ export class CommentsService {
         'Valid pageId and associated project required to create a comment',
       );
     }
+    await this.assertDocNotLocked(docTargetId);
 
     const userId = req?.user?.id || req?.user?.sub || null;
     const userMap = await this.userResolver.resolveUserNames([userId]);
@@ -237,10 +268,15 @@ export class CommentsService {
         docId: docTargetId,
         quote: body.content,
         range: TextRange.create({ startLine, startCol: 0, endLine, endCol: 0 }),
+        anchorStart: decodeAnchorBase64(body.anchorStart),
+        anchorEnd: decodeAnchorBase64(body.anchorEnd),
+        baseDocRev: body.baseDocRev ?? null,
         createdById: isUuid(userId) ? userId : null,
       }),
     );
 
+    const anchorStart = encodeAnchorBase64(saved.anchorStart);
+    const anchorEnd = encodeAnchorBase64(saved.anchorEnd);
     const commentPayload = {
       id: saved.id,
       page: docTargetId,
@@ -253,15 +289,21 @@ export class CommentsService {
       content: saved.quote || '',
       line: saved.range.startLine,
       lineEnd: saved.range.endLine,
+      ...(anchorStart ? { anchorStart } : {}),
+      ...(anchorEnd ? { anchorEnd } : {}),
+      ...(saved.baseDocRev != null ? { baseDocRev: saved.baseDocRev } : {}),
       status: 'open',
       replies: [],
       createdAt: saved.createdAt.toISOString(),
       updatedAt: saved.updatedAt.toISOString(),
     };
 
+    const mentionedUserIds = this.resolveMentionTargets(body.content, userId);
+
     emitReviewEvent(this.eventEmitter, spaceId, REVIEW_EVENTS.COMMENT_CREATED, {
       docId: docTargetId,
       comment: commentPayload,
+      ...(mentionedUserIds.length > 0 ? { mentionedUserIds } : {}),
     });
 
     return { comment: commentPayload };
@@ -280,12 +322,13 @@ export class CommentsService {
     authSpace?: string | { id: string } | null,
     role?: Role,
   ) {
-    const { thread } = await this.loadThreadOrThrow(
+    const { spaceId: targetSpaceId, thread } = await this.loadThreadOrThrow(
       targetId,
       commentId,
       routeSpaceId,
       authSpace,
     );
+    await this.assertDocNotLocked(thread.docId);
 
     if (body.resolved !== undefined || body.status !== undefined) {
       if (
@@ -313,6 +356,9 @@ export class CommentsService {
       );
     }
 
+    const hasResolutionChange =
+      body.resolved !== undefined || body.status !== undefined;
+    const userId = req?.user?.id || req?.user?.sub;
     const isResolved =
       body.resolved !== undefined
         ? Boolean(body.resolved)
@@ -320,9 +366,19 @@ export class CommentsService {
           ? body.status === 'resolved'
           : thread.isResolved;
     const quote = body.content !== undefined ? body.content : thread.quote;
-    const spaceId = getRecordSpaceId(thread);
+    const spaceId =
+      thread.doc?.spaceId || getRecordSpaceId(thread) || targetSpaceId;
 
-    await this.repo.updateThread(spaceId, commentId, { quote, isResolved });
+    await this.repo.updateThread(spaceId, commentId, {
+      quote,
+      isResolved,
+      ...(hasResolutionChange
+        ? {
+            resolvedAt: isResolved ? new Date() : null,
+            resolvedById: isResolved && isUuid(userId) ? userId : null,
+          }
+        : {}),
+    });
     const { thread: updated, commentPayload } = await this.formatReloadedThread(
       spaceId,
       commentId,
@@ -331,11 +387,20 @@ export class CommentsService {
       },
     );
 
+    const mentionedUserIds =
+      body.content !== undefined
+        ? this.resolveMentionTargets(body.content, userId, thread.quote)
+        : [];
+
     emitReviewEvent(
       this.eventEmitter,
-      getRecordSpaceId(updated),
+      updated?.doc?.spaceId || getRecordSpaceId(updated) || spaceId,
       REVIEW_EVENTS.COMMENT_UPDATED,
-      { docId: updated!.docId, comment: commentPayload },
+      {
+        docId: updated!.docId,
+        comment: commentPayload,
+        ...(mentionedUserIds.length > 0 ? { mentionedUserIds } : {}),
+      },
     );
 
     return { comment: commentPayload };
@@ -349,12 +414,14 @@ export class CommentsService {
     authSpace?: string | { id: string } | null,
     role?: Role,
   ) {
-    const { thread: existing } = await this.loadThreadOrThrow(
-      targetId,
-      commentId,
-      routeSpaceId,
-      authSpace,
-    );
+    const { spaceId: targetSpaceId, thread: existing } =
+      await this.loadThreadOrThrow(
+        targetId,
+        commentId,
+        routeSpaceId,
+        authSpace,
+      );
+    await this.assertDocNotLocked(existing.docId);
 
     this.assertAuthorOrPolicy(
       req,
@@ -365,8 +432,10 @@ export class CommentsService {
       'Only the comment author or a coordinator/owner can delete this comment',
     );
 
-    const spaceId = getRecordSpaceId(existing);
-    await this.repo.deleteThread(spaceId, commentId);
+    const userId = req?.user?.id || req?.user?.sub;
+    const spaceId =
+      existing.doc?.spaceId || getRecordSpaceId(existing) || targetSpaceId;
+    await this.repo.deleteThread(spaceId, commentId, userId);
     emitReviewEvent(this.eventEmitter, spaceId, REVIEW_EVENTS.COMMENT_DELETED, {
       docId: existing.docId,
       commentId,
@@ -383,14 +452,19 @@ export class CommentsService {
     currentUserId?: string,
   ) {
     const isResolved = body.resolved ?? true;
-    const { spaceId } = await this.loadThreadOrThrow(
+    const { spaceId, thread } = await this.loadThreadOrThrow(
       targetId,
       commentId,
       routeSpaceId,
       authSpace,
     );
+    await this.assertDocNotLocked(thread.docId);
 
-    await this.repo.updateThread(spaceId, commentId, { isResolved });
+    await this.repo.updateThread(spaceId, commentId, {
+      isResolved,
+      resolvedAt: isResolved ? new Date() : null,
+      resolvedById: isResolved && isUuid(currentUserId) ? currentUserId : null,
+    });
     const { thread: updated, commentPayload } = await this.formatReloadedThread(
       spaceId,
       commentId,
@@ -402,7 +476,7 @@ export class CommentsService {
 
     emitReviewEvent(
       this.eventEmitter,
-      getRecordSpaceId(updated),
+      updated?.doc?.spaceId || getRecordSpaceId(updated) || spaceId,
       REVIEW_EVENTS.COMMENT_RESOLVED,
       {
         docId: updated!.docId,
@@ -439,6 +513,7 @@ export class CommentsService {
     if (!thread) {
       throw new NotFoundException(`Comment thread ${commentId} not found`);
     }
+    await this.assertDocNotLocked(thread.docId);
     if (thread.isResolved) {
       throw new BadRequestException(
         'Cannot add reply to a resolved comment thread',
@@ -451,6 +526,7 @@ export class CommentsService {
       createdById: isUuid(userId) ? userId : null,
     });
     await this.repo.addReply(commentId, reply);
+    const mentionedUserIds = this.resolveMentionTargets(body.content, userId);
 
     const { thread: updated, commentPayload } = await this.formatReloadedThread(
       spaceId,
@@ -462,12 +538,13 @@ export class CommentsService {
 
     emitReviewEvent(
       this.eventEmitter,
-      getRecordSpaceId(updated),
+      updated?.doc?.spaceId || getRecordSpaceId(updated) || spaceId,
       REVIEW_EVENTS.REPLY_ADDED,
       {
         docId: updated!.docId,
         commentId: updated!.id,
         comment: commentPayload,
+        ...(mentionedUserIds.length > 0 ? { mentionedUserIds } : {}),
       },
     );
 
@@ -510,6 +587,7 @@ export class CommentsService {
     if (!thread || !reply) {
       throw new NotFoundException(`Reply ${replyId} not found`);
     }
+    await this.assertDocNotLocked(thread.docId);
     if (thread.isResolved) {
       throw new ConflictException({
         statusCode: 409,
@@ -518,8 +596,8 @@ export class CommentsService {
       });
     }
 
+    const userId = req?.user?.id || req?.user?.sub;
     if (reply.createdById) {
-      const userId = req?.user?.id || req?.user?.sub;
       const reqCtx = req as
         { projectMember?: { permissionBitmask?: string } } | undefined;
       new ResourceAccessPolicy().assertCanModifyComment(
@@ -533,7 +611,12 @@ export class CommentsService {
       );
     }
 
-    await this.repo.updateReply(thread.id, replyId, trimmed);
+    await this.repo.updateReply(thread.id, replyId, trimmed, userId);
+    const mentionedUserIds = this.resolveMentionTargets(
+      trimmed,
+      userId,
+      reply.content,
+    );
 
     const { commentPayload } = await this.formatReloadedThread(
       spaceId,
@@ -546,6 +629,7 @@ export class CommentsService {
       commentId: thread.id,
       replyId,
       comment: commentPayload,
+      ...(mentionedUserIds.length > 0 ? { mentionedUserIds } : {}),
     });
 
     return { comment: commentPayload };
@@ -579,6 +663,7 @@ export class CommentsService {
     if (!thread || !reply) {
       throw new NotFoundException(`Reply ${replyId} not found`);
     }
+    await this.assertDocNotLocked(thread.docId);
 
     const userId = req?.user?.id || req?.user?.sub;
     if (userId || role) {
@@ -592,7 +677,7 @@ export class CommentsService {
       );
     }
 
-    await this.repo.deleteReply(thread.id, replyId).catch(() => false);
+    await this.repo.deleteReply(thread.id, replyId, userId).catch(() => false);
 
     emitReviewEvent(this.eventEmitter, spaceId, REVIEW_EVENTS.REPLY_DELETED, {
       docId: thread.docId,

@@ -13,11 +13,3 @@ export interface GitTokenSummaryDto {
   createdAt: string;
   lastUsedAt?: string | null;
 }
-
-export interface GitRepoInfoResponseDto {
-  enabled: boolean;
-  cloneUrl: string;
-  branch: string;
-  canPush: boolean;
-  tokens: GitTokenSummaryDto[];
-}

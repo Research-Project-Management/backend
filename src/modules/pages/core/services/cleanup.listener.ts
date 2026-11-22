@@ -163,16 +163,16 @@ export class CleanupListener {
       }
 
       const operations = [
-        this.prisma.pageTrackChange.deleteMany({
-          where: { spaceId: projectId },
+        this.prisma.docChange.deleteMany({
+          where: { doc: { spaceId: projectId } },
         }),
-        this.prisma.pageCommentThread.deleteMany({
-          where: { spaceId: projectId },
+        this.prisma.docComment.deleteMany({
+          where: { doc: { spaceId: projectId } },
         }),
-        ...(this.prisma.pageDocReview
+        ...(this.prisma.docReview
           ? [
-              this.prisma.pageDocReview.deleteMany({
-                where: { spaceId: projectId },
+              this.prisma.docReview.deleteMany({
+                where: { doc: { spaceId: projectId } },
               }),
             ]
           : []),

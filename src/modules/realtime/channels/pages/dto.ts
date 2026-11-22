@@ -101,23 +101,3 @@ export class DocSyncDto {
   @IsNotEmpty()
   data!: unknown;
 }
-
-// --- Outbound Server DTOs / Interfaces ---
-
-export interface UserPresenceDto {
-  userId: string;
-  socketId: string;
-  name: string;
-  color: string;
-  avatar: string | null;
-  activeDocId: string | null;
-  cursor: {
-    row: number;
-    column: number;
-    selection: {
-      anchor: { row: number; column: number };
-      head: { row: number; column: number };
-    } | null;
-  } | null;
-  lastSeenAt: string;
-}

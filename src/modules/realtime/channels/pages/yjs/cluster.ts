@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { Server } from 'socket.io';
 import * as Y from 'yjs';
+import { applyTextEditsAndCapture } from './util';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { RedisCacheService } from '@/core';
@@ -223,21 +224,13 @@ export function handleClusterRelayMessageHelper(
     const current = session.yText.toString();
     let captured: Uint8Array | null = null;
     if (current !== msg.text) {
-      const capture = (update: Uint8Array) => {
-        captured = captured ? Y.mergeUpdates([captured, update]) : update;
-      };
-      session.doc.on('update', capture);
-      try {
-        YjsCursorDiffEngine.applyEditsToYText(
-          session.doc,
-          session.yText,
-          current,
-          msg.text,
-          'cluster-relay',
-        );
-      } finally {
-        session.doc.off('update', capture);
-      }
+      captured = applyTextEditsAndCapture(
+        session.doc,
+        session.yText,
+        current,
+        msg.text,
+        'cluster-relay',
+      );
     }
     session.lastFlushedText = msg.text;
     if (captured) {

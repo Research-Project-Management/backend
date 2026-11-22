@@ -1,5 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SystemResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 import {
   REALTIME_CORE_DEFAULTS,
   RealtimeConfigService,
@@ -22,6 +23,7 @@ export const PAGES_EVENTS = {
   USER_LEFT_DOC: 'doc:user-left',
   DOC_CURSOR: 'doc:cursor',
   DOC_EVICTED: 'doc:evicted',
+  DOC_PERSISTED: 'doc:persisted',
 
   // Binary Yjs CRDT sync events
   YJS_SYNC_STEP_1: 'doc:sync:step1',
@@ -178,6 +180,7 @@ export class PagesRealtimeConfigService {
   constructor(
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly coreConfig?: RealtimeConfigService,
+    @Optional() private readonly resourceGovernor?: SystemResourceGovernor,
   ) {}
 
   public getYjsConfig(): PagesYjsConfig {
@@ -212,7 +215,8 @@ export class PagesRealtimeConfigService {
       ),
       maxActiveDocs: this.parseNum(
         'PAGES_REALTIME_YJS_MAX_ACTIVE_DOCS',
-        PAGES_REALTIME_DEFAULTS.yjs.maxActiveDocs,
+        this.resourceGovernor?.getTierBudgets().realtimeMaxActiveDocs ??
+          PAGES_REALTIME_DEFAULTS.yjs.maxActiveDocs,
       ),
       sweepIntervalMs: this.parseNum(
         'PAGES_REALTIME_YJS_SWEEP_INTERVAL_MS',
@@ -233,7 +237,8 @@ export class PagesRealtimeConfigService {
       ),
       maxCacheEntries: this.parseNum(
         'PAGES_REALTIME_AUTH_CACHE_MAX_ENTRIES',
-        PAGES_REALTIME_DEFAULTS.access.maxCacheEntries,
+        this.resourceGovernor?.getTierBudgets().realtimeMaxCacheEntries ??
+          PAGES_REALTIME_DEFAULTS.access.maxCacheEntries,
       ),
     };
   }

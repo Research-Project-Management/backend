@@ -1,6 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isOriginAllowed } from '@/core/http/setup/allowed-origins';
+import { SystemResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 
 export const REALTIME_NAMESPACES = {
   PAGES: '/pages',
@@ -77,7 +78,10 @@ export function parsePositiveInt(
 
 @Injectable()
 export class RealtimeConfigService {
-  constructor(@Optional() private readonly config?: ConfigService) {}
+  constructor(
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly resourceGovernor?: SystemResourceGovernor,
+  ) {}
 
   public getJwtSecret(): string {
     const secret = this.config?.get<string>('JWT_SECRET')?.trim();
@@ -124,7 +128,8 @@ export class RealtimeConfigService {
       ),
       maxTrackedSockets: this.parseNum(
         'REALTIME_RATE_MAX_SOCKETS',
-        REALTIME_CORE_DEFAULTS.rateLimiter.maxTrackedSockets,
+        this.resourceGovernor?.getTierBudgets().realtimeMaxTrackedSockets ??
+          REALTIME_CORE_DEFAULTS.rateLimiter.maxTrackedSockets,
       ),
       staleSocketTtlMs: this.parseNum(
         'REALTIME_RATE_STALE_SOCKET_MS',

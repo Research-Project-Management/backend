@@ -10,6 +10,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
+import { getDefaultResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 import { ClsiService, ClsiCompileResult } from '../services/clsi.service';
 import { CompilePageDto } from '../dto/clsi.dto';
 
@@ -19,7 +20,11 @@ export interface ClsiCompileJobData {
   authorizedProjectId?: string;
 }
 
-@Processor(MANUSCRIPT_CLSI_QUEUE, { concurrency: 2 })
+const resolvedWorkerConcurrency =
+  Number(process.env.CLSI_WORKER_CONCURRENCY) ||
+  getDefaultResourceGovernor().getTierBudgets().workerConcurrency;
+
+@Processor(MANUSCRIPT_CLSI_QUEUE, { concurrency: resolvedWorkerConcurrency })
 export class ClsiCompileProcessor extends WorkerHost {
   private readonly logger = new Logger(ClsiCompileProcessor.name);
 

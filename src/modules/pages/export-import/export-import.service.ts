@@ -56,13 +56,6 @@ import {
   ImportSummaryResponseDto,
 } from './dto/export-import.dto';
 
-export interface ExportProjectZipInput {
-  projectId: string;
-  projectName?: string;
-  includePdf?: boolean;
-  cleanArxiv?: boolean;
-}
-
 export interface ExportProjectZipOutput {
   zipBuffer: Buffer;
   manifest: ArchiveManifest;
@@ -73,19 +66,6 @@ export interface ExportProjectZipStreamOutput {
   projectName: string;
   fileCount: number;
   hasCompiledPdf: boolean;
-}
-
-export interface ImportProjectZipInput {
-  projectId: string;
-  zipBuffer: Buffer;
-  userId?: string | null;
-  preferredRootDoc?: string;
-}
-
-export interface ScaffoldTemplateInput {
-  projectId: string;
-  templateId: string;
-  userId?: string | null;
 }
 
 export interface ConvertDocumentInput {

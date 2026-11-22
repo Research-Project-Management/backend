@@ -8,13 +8,16 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
 
 export class CreateCommentDto {
   @ApiProperty()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
   @IsNotEmpty()
   @MaxLength(10000)
@@ -31,6 +34,22 @@ export class CreateCommentDto {
   @IsInt()
   @Min(1)
   lineEnd?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  anchorStart?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  anchorEnd?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  baseDocRev?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -58,7 +77,9 @@ export class UpdateCommentDto {
 
 export class ReplyDto {
   @ApiProperty()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
   @IsNotEmpty()
   @MaxLength(10000)
@@ -113,6 +134,27 @@ export class CreateSuggestionDto {
   @IsInt()
   @Min(0)
   toColumn?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  groupId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  anchorStart?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  anchorEnd?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  baseDocRev?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

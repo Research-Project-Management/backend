@@ -279,13 +279,6 @@ export interface AuxFileInfo {
   ext: string;
 }
 
-export interface SyncWorkspaceResult {
-  scratchDir: string;
-  syncedFiles: string[];
-  unchangedFiles: string[];
-  removedFiles: string[];
-}
-
 export interface IWorkspaceManager {
   getScratchDir(projectId: string): string;
   ensureScratch(projectId: string): Promise<string>;
