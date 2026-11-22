@@ -171,7 +171,7 @@ model SpaceLabel {
   updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // NULL-safe, case-insensitive uniqueness (`uq_space_labels_space_type_parent_name`)
-  // is enforced via PostgreSQL functional unique index in prisma/sql/library-schema-integrity.sql.
+  // is enforced via PostgreSQL functional unique index in prisma/migrations/0_baseline/migration.sql.
   @@index([spaceId, type, sortOrder], map: "idx_space_labels_type_sort")
   @@index([spaceId, sortOrder])
   @@index([spaceId, parentId])

@@ -22,10 +22,10 @@ model PageDoc {
   updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   node           PageNode?
-  rootForPages   Page[]              @relation("PageRootDoc")
-  trackChanges   PageTrackChange[]
-  commentThreads PageCommentThread[]
-  docReview      PageDocReview?
+  rootForPages   Page[]       @relation("PageRootDoc")
+  docChanges     DocChange[]
+  docComments    DocComment[]
+  docReview      DocReview?
 
   @@unique([id, pageId], map: "uq_page_docs_id_page")
   @@index([pageId, deletedAt, updatedAt(sort: Desc)], map: "idx_page_docs_page_del_updated")

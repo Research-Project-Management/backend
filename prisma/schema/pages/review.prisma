@@ -1,20 +1,21 @@
 // ============================================================================
-// Pages Subsystem: Review, Track Changes & Comments Sub-Domain
-// Self-managed domain schema: PageDocReview, PageTrackChange, PageCommentThread, PageCommentReply
+// Pages Subsystem: Review, Document Changes & Comments Sub-Domain
+// Normalized 3NF schema matching library conventions:
+// DocReview, ReviewRound, DocChange, DocComment, CommentReply, CommentMention
 // ============================================================================
 
-enum PageChangeType {
+enum ChangeType {
   insert
   delete
 }
 
-enum PageChangeStatus {
+enum ChangeStatus {
   pending
   accepted
   rejected
 }
 
-enum PageReviewStatus {
+enum ReviewStatus {
   draft
   in_review
   changes_requested
@@ -23,93 +24,124 @@ enum PageReviewStatus {
   locked
 }
 
-model PageDocReview {
-  docId         String           @id @map("doc_id") @db.Uuid
-  doc           PageDoc          @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_doc_review_doc_id")
-  spaceId       String           @map("space_id") @db.Uuid
-  space         Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_doc_review_space_id")
-  status        PageReviewStatus @default(draft)
-  roundNumber   Int              @default(1) @map("round_number")
-  version       Int              @default(1)
-  requestedById String?          @map("requested_by_id") @db.Uuid
-  requestedAt   DateTime?        @map("requested_at") @db.Timestamptz(6)
-  verdictById   String?          @map("verdict_by_id") @db.Uuid
-  verdictAt     DateTime?        @map("verdict_at") @db.Timestamptz(6)
-  notes         String?          @db.Text
-  deadline      DateTime?        @db.Timestamptz(6)
-  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+model DocReview {
+  docId        String       @id @map("doc_id") @db.Uuid
+  doc          PageDoc      @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_doc_reviews_doc_id")
+  status       ReviewStatus @default(draft)
+  currentRound Int          @default(1) @map("current_round")
+  version      Int          @default(1)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([spaceId, status], map: "idx_page_doc_reviews_space_status")
-  @@map("page_doc_reviews")
+  rounds ReviewRound[]
+
+  @@index([status], map: "idx_doc_reviews_status")
+  @@map("doc_reviews")
 }
 
-model PageTrackChange {
-  id           String           @id @default(uuid(7)) @db.Uuid
-  spaceId      String           @map("space_id") @db.Uuid
-  pageId       String           @map("page_id") @db.Uuid
-  page         Page             @relation(fields: [pageId, spaceId], references: [id, spaceId], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_track_changes_page_space")
-  docId        String           @map("doc_id") @db.Uuid
-  doc          PageDoc          @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_track_changes_doc_id")
-  type         PageChangeType
-  status       PageChangeStatus @default(pending)
-  text         String           @db.Text
-  startLine    Int              @map("start_line")
-  startCol     Int              @map("start_col")
-  endLine      Int              @map("end_line")
-  endCol       Int              @map("end_col")
-  createdById  String?          @map("created_by_id") @db.Uuid
-  resolvedById String?          @map("resolved_by_id") @db.Uuid
-  resolvedAt   DateTime?        @map("resolved_at") @db.Timestamptz(6)
-  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+model ReviewRound {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  docId         String       @map("doc_id") @db.Uuid
+  review        DocReview    @relation(fields: [docId], references: [docId], onDelete: Cascade, map: "fk_review_rounds_doc_id")
+  roundNumber   Int          @default(1) @map("round_number")
+  status        ReviewStatus @default(in_review)
+  requestedById String?      @map("requested_by_id") @db.Uuid
+  requestedAt   DateTime?    @map("requested_at") @db.Timestamptz(6)
+  verdictById   String?      @map("verdict_by_id") @db.Uuid
+  verdictAt     DateTime?    @map("verdict_at") @db.Timestamptz(6)
+  notes         String?      @db.Text
+  deadline      DateTime?    @db.Timestamptz(6)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([spaceId, docId, status, createdAt], map: "idx_page_changes_lookup")
-  @@index([spaceId, startLine, startCol, createdAt], map: "idx_page_changes_space_line_created")
-  @@index([pageId, docId, status, createdAt], map: "idx_page_changes_page_lookup")
-  @@index([docId, status, createdAt(sort: Desc)], map: "idx_page_changes_doc_id")
-  @@index([createdById], map: "idx_page_changes_author")
-  @@map("page_track_changes")
+  @@unique([docId, roundNumber], map: "uq_review_rounds_doc_round")
+  @@index([docId, createdAt(sort: Desc)], map: "idx_review_rounds_doc_created")
+  @@map("review_rounds")
 }
 
-model PageCommentThread {
+model DocChange {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  docId        String       @map("doc_id") @db.Uuid
+  doc          PageDoc      @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_doc_changes_doc_id")
+  groupId      String?      @map("group_id") @db.Uuid
+  type         ChangeType
+  status       ChangeStatus @default(pending)
+  text         String       @db.Text
+  startLine    Int          @map("start_line")
+  startCol     Int          @map("start_col")
+  endLine      Int          @map("end_line")
+  endCol       Int          @map("end_col")
+  anchorStart  Bytes?       @map("anchor_start")
+  anchorEnd    Bytes?       @map("anchor_end")
+  baseDocRev   Int?         @map("base_doc_rev")
+  version      Int          @default(1)
+  createdById  String?      @map("created_by_id") @db.Uuid
+  resolvedById String?      @map("resolved_by_id") @db.Uuid
+  resolvedAt   DateTime?    @map("resolved_at") @db.Timestamptz(6)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([docId, status, createdAt(sort: Desc)], map: "idx_doc_changes_doc_status")
+  @@index([groupId], map: "idx_doc_changes_group_id")
+  @@index([createdById], map: "idx_doc_changes_author")
+  @@map("doc_changes")
+}
+
+model DocComment {
   id           String    @id @default(uuid(7)) @db.Uuid
-  spaceId      String    @map("space_id") @db.Uuid
-  pageId       String    @map("page_id") @db.Uuid
-  page         Page      @relation(fields: [pageId, spaceId], references: [id, spaceId], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_comment_threads_page_space")
   docId        String    @map("doc_id") @db.Uuid
-  doc          PageDoc   @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_comment_threads_doc_id")
+  doc          PageDoc   @relation(fields: [docId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_doc_comments_doc_id")
   quote        String?   @db.Text
   startLine    Int       @map("start_line")
   startCol     Int       @map("start_col")
   endLine      Int       @map("end_line")
   endCol       Int       @map("end_col")
+  anchorStart  Bytes?    @map("anchor_start")
+  anchorEnd    Bytes?    @map("anchor_end")
+  baseDocRev   Int?      @map("base_doc_rev")
   isResolved   Boolean   @default(false) @map("is_resolved")
+  version      Int       @default(1)
   createdById  String?   @map("created_by_id") @db.Uuid
   resolvedById String?   @map("resolved_by_id") @db.Uuid
   resolvedAt   DateTime? @map("resolved_at") @db.Timestamptz(6)
+  deletedById  String?   @map("deleted_by_id") @db.Uuid
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  replies PageCommentReply[]
+  replies CommentReply[]
 
-  @@index([spaceId, docId, isResolved, createdAt], map: "idx_page_comments_lookup")
-  @@index([spaceId, startLine, createdAt], map: "idx_page_comments_space_line_created")
-  @@index([pageId, docId, isResolved, createdAt], map: "idx_page_comments_page_lookup")
-  @@index([docId, isResolved, createdAt(sort: Desc)], map: "idx_page_comments_doc_id")
-  @@index([createdById], map: "idx_page_comments_author")
-  @@map("page_comment_threads")
+  @@index([docId, deletedAt, isResolved, createdAt(sort: Desc)], map: "idx_doc_comments_doc_resolved")
+  @@index([createdById], map: "idx_doc_comments_author")
+  @@map("doc_comments")
 }
 
-model PageCommentReply {
-  id          String            @id @default(uuid(7)) @db.Uuid
-  threadId    String            @map("thread_id") @db.Uuid
-  thread      PageCommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade, map: "fk_page_comment_replies_thread_id")
-  content     String            @db.Text
-  createdById String?           @map("created_by_id") @db.Uuid
-  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+model CommentReply {
+  id          String     @id @default(uuid(7)) @db.Uuid
+  commentId   String     @map("comment_id") @db.Uuid
+  comment     DocComment @relation(fields: [commentId], references: [id], onDelete: Cascade, map: "fk_comment_replies_comment_id")
+  content     String     @db.Text
+  version     Int        @default(1)
+  createdById String?    @map("created_by_id") @db.Uuid
+  updatedById String?    @map("updated_by_id") @db.Uuid
+  deletedById String?    @map("deleted_by_id") @db.Uuid
+  deletedAt   DateTime?  @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([threadId, createdAt], map: "idx_page_comment_replies_thread")
-  @@map("page_comment_replies")
+  mentions CommentMention[]
+
+  @@index([commentId, deletedAt, createdAt], map: "idx_comment_replies_comment_created")
+  @@map("comment_replies")
+}
+
+model CommentMention {
+  replyId   String       @map("reply_id") @db.Uuid
+  reply     CommentReply @relation(fields: [replyId], references: [id], onDelete: Cascade, map: "fk_comment_mentions_reply_id")
+  userId    String       @map("user_id") @db.Uuid
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([replyId, userId])
+  @@index([userId, createdAt(sort: Desc)], map: "idx_comment_mentions_user_created")
+  @@map("comment_mentions")
 }

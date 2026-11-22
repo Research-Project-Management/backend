@@ -30,8 +30,6 @@ model Page {
   files          PageFile[]
   snapshots      PageSnapshot[]
   labels         PageSnapshotLabel[]
-  trackChanges   PageTrackChange[]
-  commentThreads PageCommentThread[]
 
   @@unique([id, spaceId], map: "uq_pages_id_space")
   @@index([spaceId, deletedAt, updatedAt(sort: Desc)], map: "idx_pages_space_updated")

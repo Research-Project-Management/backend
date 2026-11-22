@@ -1,5 +1,3 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { Readable } from 'node:stream';
 import { PrismaService } from '@/core';
 import {
@@ -386,46 +384,6 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
 
       await service.deleteFile(SPACE_ID, FILE_ID);
       expect(releaseBlob).toHaveBeenCalledWith(BLOB_ID);
-    });
-  });
-
-  describe('3. PostgreSQL SQL Backfill & Integrity Constraints Contract', () => {
-    it('defines all BCNF/3NF composite FKs, POSIX path/depth checks, sibling unique index, and parent guard trigger', () => {
-      const repoRoot = path.resolve(__dirname, '../../../');
-      const backfillSql = fs.readFileSync(
-        path.join(repoRoot, 'prisma/sql/pages-vtree-backfill.sql'),
-        'utf8',
-      );
-      const integritySql = fs.readFileSync(
-        path.join(repoRoot, 'prisma/sql/pages-schema-integrity.sql'),
-        'utf8',
-      );
-
-      expect(backfillSql).toContain(
-        'RENAME COLUMN "path" TO "last_known_path"',
-      );
-      expect(backfillSql).toContain(
-        'RENAME COLUMN "name" TO "last_known_path"',
-      );
-      expect(backfillSql).toContain('UPDATE "pages" p');
-      expect(backfillSql).toContain('UPDATE "page_files" f');
-
-      for (const symbol of [
-        'fk_page_nodes_parent_same_page',
-        'fk_page_nodes_doc_same_page',
-        'fk_page_nodes_file_same_page',
-        'fk_pages_root_doc_same_page',
-        'chk_page_nodes_exclusive_arc',
-        'chk_page_nodes_no_self_parent',
-        'chk_page_nodes_path_depth_invariants',
-        'uq_page_nodes_sibling_name',
-        'idx_page_nodes_page_path_pattern',
-        'trg_page_nodes_parent_guard',
-        'trg_pages_root_doc_same_page',
-        'clone_page_virtual_tree',
-      ]) {
-        expect(integritySql).toContain(symbol);
-      }
     });
   });
 

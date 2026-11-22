@@ -37,8 +37,9 @@ async function main() {
     await prisma.workItemState.deleteMany();
     await prisma.pageSnapshotLabel.deleteMany();
     await prisma.pageSnapshot.deleteMany();
-    await prisma.pageTrackChange.deleteMany();
-    await prisma.pageCommentThread.deleteMany();
+    await prisma.docChange.deleteMany();
+    await prisma.docComment.deleteMany();
+    await prisma.docReview.deleteMany();
     await prisma.pageNode.deleteMany();
     await prisma.pageFile.deleteMany();
     await prisma.pageDoc.deleteMany();
