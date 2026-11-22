@@ -7,16 +7,25 @@ import {
 } from '@nestjs/terminus';
 import { PrismaHealthIndicator } from './prisma.health';
 import { RedisCacheService } from '../redis/redis.service';
+import {
+  getDefaultResourceGovernor,
+  SystemResourceGovernor,
+} from '../resource/system-resource-governor';
 
 @ApiTags('Health')
 @Controller(['health', 'api/health'])
 export class HealthController {
+  private readonly governor: SystemResourceGovernor;
+
   constructor(
     private readonly health: HealthCheckService,
     private readonly prismaHealth: PrismaHealthIndicator,
     private readonly memory: MemoryHealthIndicator,
     @Optional() private readonly redisCache?: RedisCacheService,
-  ) {}
+    @Optional() resourceGovernor?: SystemResourceGovernor,
+  ) {
+    this.governor = resourceGovernor ?? getDefaultResourceGovernor();
+  }
 
   @Get()
   @HealthCheck()
@@ -24,10 +33,11 @@ export class HealthController {
     summary: 'Complete system health check (Database, Memory, Status)',
   })
   check() {
+    const budgets = this.governor.getTierBudgets();
     return this.health.check([
       () => this.prismaHealth.isHealthy('database'),
-      () => this.memory.checkHeap('memory_heap', 1024 * 1024 * 1024), // 1 GB heap limit
-      () => this.memory.checkRSS('memory_rss', 1536 * 1024 * 1024), // 1.5 GB RSS limit
+      () => this.memory.checkHeap('memory_heap', budgets.healthHeapLimitBytes),
+      () => this.memory.checkRSS('memory_rss', budgets.healthRssLimitBytes),
     ]);
   }
 

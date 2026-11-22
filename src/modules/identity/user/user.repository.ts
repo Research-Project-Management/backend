@@ -14,7 +14,11 @@ import {
   UserStatsResult,
   UserWithProfile,
 } from './types/user.type';
-import { formatBytes } from './utils/user.util';
+import {
+  formatBytes,
+  mergeAndEncryptEditorConfig,
+  sanitizeEditorConfigForClient,
+} from './utils/user.util';
 
 import { isUuid } from '@/core';
 
@@ -333,7 +337,7 @@ export class UserRepository implements IUserRepository {
     return {
       theme: settings.theme,
       locale: settings.locale,
-      editorConfig: settings.editorConfig ?? {},
+      editorConfig: sanitizeEditorConfigForClient(settings.editorConfig ?? {}),
     };
   }
 
@@ -349,28 +353,40 @@ export class UserRepository implements IUserRepository {
     });
 
     if (!existing) {
+      const nextEditorConfig =
+        settings.editorConfig !== undefined
+          ? mergeAndEncryptEditorConfig({}, settings.editorConfig)
+          : {};
       const created = await this.prisma.userSettings.create({
         data: {
           userId,
           theme: (settings.theme as ThemePreference) || ThemePreference.system,
           locale: settings.locale || 'en',
-          editorConfig: (settings.editorConfig as Prisma.InputJsonValue) ?? {},
+          editorConfig: nextEditorConfig,
         },
       });
       return {
         theme: created.theme,
         locale: created.locale,
-        editorConfig: created.editorConfig ?? {},
+        editorConfig: sanitizeEditorConfigForClient(created.editorConfig ?? {}),
       };
     }
+
+    const mergedEditorConfig =
+      settings.editorConfig !== undefined
+        ? mergeAndEncryptEditorConfig(
+            existing.editorConfig ?? {},
+            settings.editorConfig,
+          )
+        : undefined;
 
     const updated = await this.prisma.userSettings.update({
       where: { userId },
       data: {
         ...(settings.theme ? { theme: settings.theme } : {}),
         ...(settings.locale ? { locale: settings.locale } : {}),
-        ...(settings.editorConfig !== undefined
-          ? { editorConfig: settings.editorConfig }
+        ...(mergedEditorConfig !== undefined
+          ? { editorConfig: mergedEditorConfig }
           : {}),
       },
     });
@@ -378,7 +394,7 @@ export class UserRepository implements IUserRepository {
     return {
       theme: updated.theme,
       locale: updated.locale,
-      editorConfig: updated.editorConfig ?? {},
+      editorConfig: sanitizeEditorConfigForClient(updated.editorConfig ?? {}),
     };
   }
 

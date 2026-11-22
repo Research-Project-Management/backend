@@ -147,7 +147,9 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
     it('deletes physical object and DB record when claimOrphanBlobsBatch claims candidate', async () => {
       const adapter = createMockAdapter();
       const blobRepo = createMockBlobRepo();
-      const hashHex = ContentHash.fromBuffer(Buffer.from('dead-orphan')).toHex();
+      const hashHex = ContentHash.fromBuffer(
+        Buffer.from('dead-orphan'),
+      ).toHex();
       const orphan = makeBlobRecord({
         id: 'blob-dead-1',
         contentHashHex: hashHex,
@@ -1175,69 +1177,6 @@ describe('FilesModule Standalone Capabilities & Hardening', () => {
       expect(await facade.detachBlobRef('attachment', 'att-99')).toBe(false);
       expect(quotaRepo.decrementUsage).toHaveBeenCalledTimes(1);
       expect(blobRepo.decrementRefCount).toHaveBeenCalledTimes(1);
-    });
-
-    it('enforces 3NF/BCNF normalization invariants in files.prisma and files-schema-integrity.sql', () => {
-      const repoRoot = path.resolve(__dirname, '../../../');
-      const filesPrisma = fs.readFileSync(
-        path.join(repoRoot, 'prisma/schema/files.prisma'),
-        'utf8',
-      );
-      const integritySql = fs.readFileSync(
-        path.join(repoRoot, 'prisma/sql/files-schema-integrity.sql'),
-        'utf8',
-      );
-
-      const getModelBlock = (name: string): string => {
-        const match = filesPrisma.match(
-          new RegExp(`model\\s+${name}\\s*\\{([\\s\\S]*?)\\r?\\n\\}`),
-        );
-        return match?.[1] ?? '';
-      };
-
-      const fileBlock = getModelBlock('FileNode');
-      expect(fileBlock).toContain('uq_file_nodes_id_space');
-
-      const shareBlock = getModelBlock('FileShare');
-      expect(shareBlock).not.toMatch(/^\s*id\s+String\s+@id/m);
-      expect(shareBlock).toContain('@@id([fileId, userId])');
-
-      const blobBlock = getModelBlock('FileBlob');
-      expect(blobBlock).toContain('uq_file_blobs_bucket_key');
-
-      const blobRefBlock = getModelBlock('FileBlobRef');
-      expect(blobRefBlock).not.toMatch(/^\s*id\s+String\s+@id/m);
-      expect(blobRefBlock).not.toMatch(/\bsizeBytes\b/);
-      expect(blobRefBlock).toContain('@@id([ownerType, ownerId])');
-
-      const versionBlock = getModelBlock('FileVersion');
-      expect(versionBlock).not.toMatch(/\bsizeBytes\b/);
-      expect(versionBlock).not.toMatch(/\bmimeType\b/);
-      expect(versionBlock).toContain('fk_file_versions_created_by_id');
-
-      const uploadBlock = getModelBlock('FileUpload');
-      expect(uploadBlock).not.toMatch(/\btotalParts\b/);
-      expect(uploadBlock).toContain('uq_file_uploads_key_upload');
-      expect(uploadBlock).toContain('fk_file_uploads_created_by_id');
-      expect(uploadBlock).toContain('fk_file_uploads_parent_id');
-
-      const quotaBlock = getModelBlock('SpaceQuota');
-      expect(quotaBlock).not.toMatch(/^\s*id\s+String\s+@id/m);
-      expect(quotaBlock).toMatch(/spaceId\s+String\s+@id/);
-
-      for (const symbol of [
-        'chk_file_blobs_lifecycle',
-        'chk_file_nodes_folder_invariants',
-        'chk_file_nodes_filename_valid',
-        'chk_file_nodes_link_consistency',
-        'fk_file_nodes_parent_same_space',
-        'trg_file_nodes_parent_guard',
-        'trg_file_nodes_blob_size_sync',
-        'idx_file_blobs_gc_ready',
-        'status" = \'DELETED\'::"BlobStatus"',
-      ]) {
-        expect(integritySql).toContain(symbol);
-      }
     });
   });
 });

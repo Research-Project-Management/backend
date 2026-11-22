@@ -30,7 +30,7 @@ import {
   LibraryConfigService,
 } from '@/modules/library/core/config/library.config';
 import { SubsystemUnavailableException } from '@/modules/library/core/errors/domain.exception';
-import { shouldRunWorkerConsumers } from '@/core';
+import { shouldRunWorkerConsumers, getDefaultResourceGovernor } from '@/core';
 import { OutboxMetrics } from './outbox-metrics.service';
 import { OutboxDispatcher } from './outbox-dispatcher.service';
 import { OutboxQueueConsumer, OutboxBullProcessor } from './outbox.processor';
@@ -55,7 +55,9 @@ export class OutboxWorker
   >();
   private defaultHandler?: OutboxDispatchHandler;
   private readonly maxRetries = 5;
-  private static readonly CONCURRENCY = 5;
+  private static readonly CONCURRENCY =
+    Number(process.env.OUTBOX_CONCURRENCY) ||
+    getDefaultResourceGovernor().getTierBudgets().outboxConcurrency;
   private static readonly GC_INTERVAL_MS = 60 * 60 * 1000;
   private readonly workerId: string;
   private readonly repo: OutboxRepository;

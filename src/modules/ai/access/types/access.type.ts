@@ -15,6 +15,12 @@ export interface ChatOwnershipRecord {
   title: string;
 }
 
+export interface LlmOverridePayload {
+  api_key: string;
+  model?: string;
+  base_url?: string;
+}
+
 export interface ChatTurnAccess {
   spaceId: string;
   projectId: string | null;
@@ -22,6 +28,7 @@ export interface ChatTurnAccess {
   titleHint?: string | null;
   resolvedDocumentIds: string[];
   existingChat: ChatOwnershipRecord | null;
+  llmOverride?: LlmOverridePayload | null;
 }
 
 export interface ResolvedPaperTarget {

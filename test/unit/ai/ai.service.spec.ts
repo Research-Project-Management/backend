@@ -23,6 +23,11 @@ import {
   translateEngineSseFrame,
 } from '@/modules/ai/engine/domain/stream.mapper';
 import type { StreamCompletionResult } from '@/modules/ai/engine/types/engine.type';
+import {
+  mergeAndEncryptEditorConfig,
+  resolveDecryptedLlmOverride,
+  sanitizeEditorConfigForClient,
+} from '@/modules/identity/user/utils/user.util';
 
 interface MockChatRecord {
   id: string;
@@ -841,6 +846,86 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       expect(widgets[1]).toMatchObject({
         type: 'metric_summary',
         title: 'Workload Summary',
+      });
+    });
+
+    it('maps experiment artifact provenance onto editor_patches widget cleanly', () => {
+      const widgets = mapArtifactsToWidgets({
+        editor_patches: [
+          {
+            id: 'patch-exp-1',
+            file_path: 'main.tex',
+            kind: 'insert_after',
+            title: 'Insert benchmark table',
+            search_text: '\\section{Experiments}',
+            replace_text: '\\begin{table}...\\end{table}',
+          },
+        ],
+        provenance: [
+          {
+            repo: 'flux-lab/vision-exp',
+            path: 'eval/metrics.csv',
+            commit_sha: 'a8f2c3e4b5d6e7f8a8f2c3e4b5d6e7f8a8f2c3e4',
+            url: 'https://github.com/flux-lab/vision-exp/blob/a8f2c3e/eval/metrics.csv',
+          },
+          {
+            repo: '',
+            path: 'invalid.csv',
+          },
+        ],
+      });
+
+      expect(widgets).toHaveLength(1);
+      expect(widgets[0]).toMatchObject({
+        type: 'editor_patches',
+        title: 'Proposed LaTeX Edit',
+        provenance: [
+          {
+            repo: 'flux-lab/vision-exp',
+            path: 'eval/metrics.csv',
+            commitSha: 'a8f2c3e4b5d6e7f8a8f2c3e4b5d6e7f8a8f2c3e4',
+            url: 'https://github.com/flux-lab/vision-exp/blob/a8f2c3e/eval/metrics.csv',
+          },
+        ],
+      });
+    });
+
+    it('encrypts BYOK API key at rest, masks client view, and decrypts llm_override for AI Engine', () => {
+      const stored = mergeAndEncryptEditorConfig(
+        { vimMode: true },
+        {
+          aiByok: {
+            enabled: true,
+            provider: 'openrouter',
+            model: 'anthropic/claude-3.7-sonnet',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            apiKey: 'sk-or-v1-secret987654321',
+          },
+        },
+      ) as Record<string, unknown>;
+
+      const storedByok = stored.aiByok as Record<string, unknown>;
+      expect(storedByok.encryptedApiKey).toBeDefined();
+      expect(storedByok.encryptedApiKey).not.toContain('secret987654321');
+      expect(storedByok.apiKeyHint).toBe('sk-o••••4321');
+
+      const clientSafe = sanitizeEditorConfigForClient(
+        stored as never,
+      ) as Record<string, unknown>;
+      expect(clientSafe.aiByok).toEqual({
+        enabled: true,
+        provider: 'openrouter',
+        model: 'anthropic/claude-3.7-sonnet',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        hasApiKey: true,
+        apiKeyHint: 'sk-o••••4321',
+      });
+
+      const resolved = resolveDecryptedLlmOverride(stored);
+      expect(resolved).toEqual({
+        api_key: 'sk-or-v1-secret987654321',
+        model: 'anthropic/claude-3.7-sonnet',
+        base_url: 'https://openrouter.ai/api/v1',
       });
     });
   });

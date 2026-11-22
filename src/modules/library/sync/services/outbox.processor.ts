@@ -12,6 +12,7 @@ import {
   LIBRARY_OUTBOX_JOB,
   OUTBOX_REGISTRY_PORT,
 } from '@/modules/library/core';
+import { getDefaultResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 
 export interface IOutboxEventProcessor {
   processEventById(
@@ -20,7 +21,11 @@ export interface IOutboxEventProcessor {
   ): Promise<boolean>;
 }
 
-@Processor(LIBRARY_OUTBOX_QUEUE, { concurrency: 5 })
+const resolvedOutboxConcurrency =
+  Number(process.env.OUTBOX_CONCURRENCY) ||
+  getDefaultResourceGovernor().getTierBudgets().outboxConcurrency;
+
+@Processor(LIBRARY_OUTBOX_QUEUE, { concurrency: resolvedOutboxConcurrency })
 export class OutboxQueueConsumer
   extends WorkerHost
   implements OnApplicationBootstrap, OnApplicationShutdown

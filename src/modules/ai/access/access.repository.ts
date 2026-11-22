@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
+import { resolveDecryptedLlmOverride } from '@/modules/identity/user/utils/user.util';
 import { isValidUuid } from './domain/scope.mapper';
 import type {
   ChatOwnershipRecord,
+  LlmOverridePayload,
   PageLookupRecord,
   SpaceRecord,
 } from './types/access.type';
@@ -225,5 +227,18 @@ export class AccessRepository {
       })
       .catch(() => null);
     return member !== null;
+  }
+
+  async findUserLlmOverride(
+    userId: string,
+  ): Promise<LlmOverridePayload | null> {
+    if (!userId || !this.prisma.userSettings?.findUnique) return null;
+    const row = await this.prisma.userSettings
+      .findUnique({
+        where: { userId },
+        select: { editorConfig: true },
+      })
+      .catch(() => null);
+    return resolveDecryptedLlmOverride(row?.editorConfig);
   }
 }

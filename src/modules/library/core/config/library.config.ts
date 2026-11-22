@@ -1,5 +1,6 @@
 import { registerAs, ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
+import { getDefaultResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 
 interface LibraryConfig {
   app: {
@@ -121,7 +122,9 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
       captureQueue:
         process.env.LIBRARY_INGESTION_QUEUE_CAPTURE ||
         'flux_library_ingestion_capture',
-      concurrency: Number(process.env.INGESTION_QUEUE_CONCURRENCY) || 4,
+      concurrency:
+        Number(process.env.INGESTION_QUEUE_CONCURRENCY) ||
+        getDefaultResourceGovernor().getTierBudgets().ingestionConcurrency,
     },
     extraction: {
       pdfMaxPages: Number(process.env.PDF_MAX_PAGES) || 100,

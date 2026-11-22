@@ -5,6 +5,7 @@ import { CacheModule } from './infrastructure/redis/cache.module';
 import { LoggerModule } from './logger/logger.module';
 import { IdempotencyModule } from './infrastructure/idempotency/idempotency.module';
 import { HealthModule } from './infrastructure/health/health.module';
+import { ResourceModule } from './infrastructure/resource/resource.module';
 import { GlobalExceptionFilter } from './http/filters/exception.filter';
 import { TransformInterceptor } from './http/interceptors/transform.interceptor';
 import { RateLimitConfigService } from './http/rate-limit/rate-limit.config';
@@ -13,6 +14,7 @@ import { UserRateLimitGuard } from './http/rate-limit/user-rate-limit.guard';
 @Global()
 @Module({
   imports: [
+    ResourceModule,
     PrismaModule,
     CacheModule,
     LoggerModule,
@@ -30,6 +32,7 @@ import { UserRateLimitGuard } from './http/rate-limit/user-rate-limit.guard';
     },
   ],
   exports: [
+    ResourceModule,
     PrismaModule,
     CacheModule,
     LoggerModule,

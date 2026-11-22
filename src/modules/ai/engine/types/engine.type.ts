@@ -64,7 +64,22 @@ export interface FrontendEditorPatchItem {
   warnings?: string[];
 }
 
-export type FrontendResponseWidget = Record<string, unknown>;
+export interface FrontendProvenanceItem {
+  repo: string;
+  path: string;
+  commitSha: string;
+  url: string;
+}
+
+export interface FrontendEditorPatchesWidget extends Record<string, unknown> {
+  type: 'editor_patches';
+  title: string;
+  patches: FrontendEditorPatchItem[];
+  provenance?: FrontendProvenanceItem[];
+}
+
+export type FrontendResponseWidget =
+  FrontendEditorPatchesWidget | Record<string, unknown>;
 
 export interface EngineChatResponse {
   content: string;

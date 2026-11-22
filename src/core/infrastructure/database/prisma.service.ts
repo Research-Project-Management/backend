@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
+import { getDefaultResourceGovernor } from '../resource/system-resource-governor';
 
 declare global {
   interface BigInt {
@@ -41,9 +42,11 @@ export class PrismaService
     }
 
     // High performance pool options tailored for high-throughput Postgres connection handling
+    const defaultPoolMax =
+      getDefaultResourceGovernor().getTierBudgets().dbPoolMax;
     const pool = new Pool({
       connectionString,
-      max: Number(process.env.DB_POOL_MAX) || 20,
+      max: Number(process.env.DB_POOL_MAX) || defaultPoolMax,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
       statement_timeout: 30000,

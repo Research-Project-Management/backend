@@ -277,6 +277,7 @@ export class ChatService {
       documentIds: turnAccess.resolvedDocumentIds,
       dto,
       delegationToken,
+      llmOverride: turnAccess.llmOverride,
     });
 
     return {

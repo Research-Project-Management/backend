@@ -1,7 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { CacheModule, HealthModule, LoggerModule, PrismaModule } from './core';
+import {
+  CacheModule,
+  HealthModule,
+  LoggerModule,
+  PrismaModule,
+  ResourceModule,
+} from './core';
 import { RealtimeServerModule } from './modules/realtime/server/module';
 
 @Module({
@@ -15,6 +21,7 @@ import { RealtimeServerModule } from './modules/realtime/server/module';
       delimiter: '.',
       maxListeners: 100,
     }),
+    ResourceModule,
     PrismaModule,
     CacheModule,
     LoggerModule,

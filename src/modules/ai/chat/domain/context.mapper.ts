@@ -2,6 +2,7 @@ import type {
   EngineChatRequest,
   EngineMessage,
 } from '../../engine/types/engine.type';
+import type { LlmOverridePayload } from '../../access/types/access.type';
 import type { QueryDto } from '../dto/query.dto';
 import { sanitizeMessageContent, sanitizeMessageRole } from './session.mapper';
 
@@ -83,6 +84,7 @@ export function buildEngineChatRequest(params: {
   dto: QueryDto;
   prependSystemMessage?: string;
   delegationToken?: string;
+  llmOverride?: LlmOverridePayload | null;
 }): EngineChatRequest {
   const { dto } = params;
   const normalizedMsgs = extractNormalizedMessages(dto);
@@ -171,6 +173,9 @@ export function buildEngineChatRequest(params: {
   }
   if (documentStructure) context.document_structure = documentStructure;
   if (dto.useRag !== undefined) context.use_rag = dto.useRag;
+  if (params.llmOverride?.api_key) {
+    context.llm_override = params.llmOverride;
+  }
 
   const allowedDomains = Array.isArray(context.allowed_domains)
     ? context.allowed_domains

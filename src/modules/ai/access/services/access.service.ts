@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { AccessRepository } from '../access.repository';
 import type {
   ChatOwnershipRecord,
   ChatTurnAccess,
@@ -14,6 +15,7 @@ export class AccessService {
   constructor(
     private readonly spaceAccess: SpaceAccessService,
     private readonly documentAccess: DocumentAccessService,
+    @Optional() private readonly repo?: AccessRepository,
   ) {}
 
   resolveSpace(
@@ -52,19 +54,23 @@ export class AccessService {
     pageId?: string;
     documentIds?: string[];
   }): Promise<ChatTurnAccess> {
-    const [existingChat, resolvedDocIds, scope] = await Promise.all([
-      this.spaceAccess.verifyChatOwnership(params.userId, params.chatId),
-      params.documentIds && params.documentIds.length > 0
-        ? this.documentAccess.resolveVectorDocumentIds(params.documentIds)
-        : Promise.resolve<string[]>([]),
-      params.pageId
-        ? this.spaceAccess.resolvePageScope(
-            params.userId,
-            params.pageId,
-            params.spaceId,
-          )
-        : this.spaceAccess.resolveSpace(params.userId, params.spaceId),
-    ]);
+    const [existingChat, resolvedDocIds, scope, llmOverride] =
+      await Promise.all([
+        this.spaceAccess.verifyChatOwnership(params.userId, params.chatId),
+        params.documentIds && params.documentIds.length > 0
+          ? this.documentAccess.resolveVectorDocumentIds(params.documentIds)
+          : Promise.resolve<string[]>([]),
+        params.pageId
+          ? this.spaceAccess.resolvePageScope(
+              params.userId,
+              params.pageId,
+              params.spaceId,
+            )
+          : this.spaceAccess.resolveSpace(params.userId, params.spaceId),
+        this.repo
+          ? this.repo.findUserLlmOverride(params.userId)
+          : Promise.resolve(null),
+      ]);
 
     const pageScope =
       params.pageId &&
@@ -79,6 +85,7 @@ export class AccessService {
       titleHint: pageScope?.titleHint,
       resolvedDocumentIds: resolvedDocIds,
       existingChat,
+      ...(llmOverride ? { llmOverride } : {}),
     };
   }
 }

@@ -6,10 +6,15 @@ import {
   AI_JOB_INGEST_FILE,
   AI_KNOWLEDGE_QUEUE,
 } from '../../ai.constant';
+import { getDefaultResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 import { KnowledgeIngestService } from '../services/ingest.service';
 import type { KnowledgeFileJobData } from '../types/knowledge.type';
 
-@Processor(AI_KNOWLEDGE_QUEUE, { concurrency: 2 })
+const resolvedAiKnowledgeConcurrency =
+  Number(process.env.AI_KNOWLEDGE_CONCURRENCY) ||
+  getDefaultResourceGovernor().getTierBudgets().aiKnowledgeConcurrency;
+
+@Processor(AI_KNOWLEDGE_QUEUE, { concurrency: resolvedAiKnowledgeConcurrency })
 export class KnowledgeQueueProcessor
   extends WorkerHost
   implements OnApplicationBootstrap

@@ -192,12 +192,12 @@ export class ProjectResourceResolver {
           request.body.commentId) ||
         (typeof request.body?.threadId === 'string' && request.body.threadId);
       if (commentId && isUUID(commentId)) {
-        const thread = await this.prisma.pageCommentThread.findUnique({
+        const thread = await this.prisma.docComment.findUnique({
           where: { id: commentId },
-          select: { spaceId: true },
+          select: { doc: { select: { spaceId: true } } },
         });
-        if (thread?.spaceId) {
-          resolvedResourceSpaces.set(`thread:${commentId}`, thread.spaceId);
+        if (thread?.doc?.spaceId) {
+          resolvedResourceSpaces.set(`thread:${commentId}`, thread.doc.spaceId);
         } else {
           // WorkItem comment check
           const comment = await this.prisma.workItemComment.findUnique({
@@ -223,14 +223,17 @@ export class ProjectResourceResolver {
         (typeof request.body?.suggestionId === 'string' &&
           request.body.suggestionId);
       if (changeId && isUUID(changeId)) {
-        const change = await (this.prisma as any).pageTrackChange
+        const change = await this.prisma.docChange
           ?.findUnique?.({
             where: { id: changeId },
-            select: { spaceId: true, docId: true },
+            select: { docId: true, doc: { select: { spaceId: true } } },
           })
           .catch(() => null);
-        if (change?.spaceId) {
-          resolvedResourceSpaces.set(`trackChange:${changeId}`, change.spaceId);
+        if (change?.doc?.spaceId) {
+          resolvedResourceSpaces.set(
+            `trackChange:${changeId}`,
+            change.doc.spaceId,
+          );
           if (!authoritativePageId && change.docId) {
             authoritativePageId = change.docId;
           }
@@ -243,16 +246,20 @@ export class ProjectResourceResolver {
           request.params.replyId) ||
         (typeof request.body?.replyId === 'string' && request.body.replyId);
       if (replyId && isUUID(replyId)) {
-        const reply = await (this.prisma as any).pageCommentReply
+        const reply = await this.prisma.commentReply
           ?.findUnique?.({
             where: { id: replyId },
-            select: { thread: { select: { spaceId: true, docId: true } } },
+            select: {
+              comment: {
+                select: { docId: true, doc: { select: { spaceId: true } } },
+              },
+            },
           })
           .catch(() => null);
-        if (reply?.thread?.spaceId) {
+        if (reply?.comment?.doc?.spaceId) {
           resolvedResourceSpaces.set(
             `commentReply:${replyId}`,
-            reply.thread.spaceId,
+            reply.comment.doc.spaceId,
           );
         }
       }

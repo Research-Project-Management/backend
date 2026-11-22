@@ -133,7 +133,7 @@ jobs:
             docker compose up -d be
 
             # Run Prisma migrations inside backend container
-            docker compose exec -T be npx prisma db push --skip-generate || docker compose exec -T be npx prisma migrate deploy || true
+            docker compose exec -T be npx prisma migrate deploy
 
             # Clean up dangling images to save VPS storage
             docker image prune -f

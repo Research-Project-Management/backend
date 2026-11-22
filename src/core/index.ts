@@ -1,6 +1,10 @@
 // Core Module
 export * from './core.module';
 
+// Infrastructure - Resource Governor
+export * from './infrastructure/resource/resource.module';
+export * from './infrastructure/resource/system-resource-governor';
+
 // Infrastructure - Database
 export * from './infrastructure/database/prisma.module';
 export * from './infrastructure/database/prisma.service';

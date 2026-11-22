@@ -1,6 +1,7 @@
 import {
   EngineCitation,
   FrontendEditorPatchItem,
+  FrontendProvenanceItem,
   FrontendResponseWidget,
   FrontendSourceItem,
   TranslatedSseFrame,
@@ -148,6 +149,36 @@ function normalizeEditorPatch(
   };
 }
 
+export function normalizeProvenanceList(
+  raw: unknown,
+): FrontendProvenanceItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: FrontendProvenanceItem[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const rec = entry as Record<string, unknown>;
+    const repo = typeof rec.repo === 'string' ? rec.repo.trim() : '';
+    const path = typeof rec.path === 'string' ? rec.path.trim() : '';
+    const commitSha =
+      typeof rec.commit_sha === 'string' && rec.commit_sha.trim()
+        ? rec.commit_sha.trim()
+        : typeof rec.commitSha === 'string' && rec.commitSha.trim()
+          ? rec.commitSha.trim()
+          : '';
+    const url = typeof rec.url === 'string' ? rec.url.trim() : '';
+    if (
+      !repo ||
+      !path ||
+      !commitSha ||
+      (!url.startsWith('https://') && !url.startsWith('http://'))
+    ) {
+      continue;
+    }
+    items.push({ repo, path, commitSha, url });
+  }
+  return items;
+}
+
 export function mapArtifactsToWidgets(
   rawArtifacts: unknown,
 ): FrontendResponseWidget[] {
@@ -168,6 +199,7 @@ export function mapArtifactsToWidgets(
     const patches = artifacts.editor_patches
       .map((item, idx) => normalizeEditorPatch(item, idx))
       .filter((p): p is FrontendEditorPatchItem => p !== null);
+    const provenance = normalizeProvenanceList(artifacts.provenance);
     if (patches.length > 0) {
       widgets.push({
         type: 'editor_patches',
@@ -176,6 +208,7 @@ export function mapArtifactsToWidgets(
             ? 'Proposed LaTeX Edit'
             : `Proposed LaTeX Edits (${patches.length})`,
         patches,
+        ...(provenance.length > 0 ? { provenance } : {}),
       });
     }
   }
@@ -343,12 +376,18 @@ export function translateEngineSseFrame(
       const tool = typeof payload?.tool === 'string' ? payload.tool : undefined;
       const agent =
         typeof payload?.agent === 'string' ? payload.agent : undefined;
+      const rawInput = payload?.input;
+      const input =
+        rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
+          ? (rawInput as Record<string, unknown>)
+          : undefined;
       return {
         clientFrames: [
           `data: [ACTION]${JSON.stringify({
             type: 'tool_start',
             tool,
             agent,
+            ...(input ? { input } : {}),
             status: 'calling',
           })}\n\n`,
         ],
@@ -360,6 +399,10 @@ export function translateEngineSseFrame(
       const agent =
         typeof payload?.agent === 'string' ? payload.agent : undefined;
       const isError = payload?.status === 'error';
+      const error =
+        typeof payload?.error === 'string' && payload.error.trim()
+          ? payload.error.trim()
+          : undefined;
       return {
         clientFrames: [
           `data: [ACTION]${JSON.stringify({
@@ -368,6 +411,7 @@ export function translateEngineSseFrame(
             agent,
             status: isError ? 'error' : 'done',
             success: !isError,
+            ...(error ? { error } : {}),
           })}\n\n`,
         ],
       };
@@ -389,6 +433,14 @@ export function translateEngineSseFrame(
               : {}),
           })}\n\n`,
         ],
+      };
+    }
+
+    case 'reasoning.delta': {
+      const delta = typeof payload?.delta === 'string' ? payload.delta : '';
+      if (!delta) return { clientFrames: [] };
+      return {
+        clientFrames: [`data: ${JSON.stringify({ type: 'reasoning', delta })}\n\n`],
       };
     }
 

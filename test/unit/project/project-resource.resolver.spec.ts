@@ -24,7 +24,7 @@ describe('ProjectResourceResolver', () => {
       pageSnapshot: {
         findUnique: jest.fn(),
       },
-      pageCommentThread: {
+      docComment: {
         findUnique: jest.fn(),
       },
       pageFile: {
