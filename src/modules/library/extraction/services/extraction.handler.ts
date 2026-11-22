@@ -26,8 +26,8 @@ import {
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
 import { ReferenceMatcherService } from './reference-matcher.service';
-import { ExtractionMetadataSynchronizer } from './extraction-metadata.synchronizer';
-import { isRejectedCitedIdentifier } from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
+import { ExtractionMetadataSynchronizer } from './metadata-sync.service';
+import { isRejectedCitedIdentifier } from '@/modules/library/extraction/domain/metadata-merge.policy';
 import type { ClaimedAttachmentRecord } from '@/modules/library/core/types/extraction.types';
 
 export const EXTRACTION_EVENT_TYPES = {

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { Prisma, ReadStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import {
@@ -926,7 +926,6 @@ function evaluateDefaultFieldStrategy(
     : evalJsonField(normalizedField, operator, strVal);
 }
 
-@Injectable()
 export class ConditionEvaluatorEngine {
   private validateGroupStructure(
     group: SavedSearchConditionGroup,

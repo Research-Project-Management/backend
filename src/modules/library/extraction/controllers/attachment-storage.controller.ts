@@ -30,7 +30,7 @@ import {
   InitiateMultipartDto,
   CompleteMultipartDto,
   SAFE_ATTACHMENT_URL_REGEX,
-} from '@/modules/library/extraction/dto/annotations.dto';
+} from '@/modules/library/extraction/dto/attachments.dto';
 import { MAX_SAFE_HTTP_PAYLOAD_BYTES } from '@/modules/library/core';
 
 /**

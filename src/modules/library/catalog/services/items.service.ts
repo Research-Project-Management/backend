@@ -31,18 +31,15 @@ import {
   ISearchFacade,
 } from '@/modules/library/core';
 import { RedisCacheService } from '@/core';
-import {
-  SchemaValidatorService,
-  ItemCacheCoordinator,
-} from './schema-validator.service';
+import { SchemaValidatorService } from './schema-validator.service';
+import { ItemCacheCoordinator } from './item-cache.service';
 import {
   executeBulkSoftDeleteInTx,
   executeBulkRestoreInTx,
   executeBulkPurgeInTx,
   executeEmptyTrashInTx,
   executePurgeExpiredTrashInTx,
-} from '../repositories/command-bulk.operations';
-export type { ItemTransactionContext };
+} from '../repositories/command-bulk.repository';
 @Injectable()
 export class ItemService {
   private readonly logger = new Logger(ItemService.name);

@@ -4,7 +4,7 @@ import {
   SingleFlightCoalescer,
 } from '@/modules/library/core';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import { ItemFulltextService } from '@/modules/library/catalog/services/item-relations.service';
+import { ItemFulltextService } from '@/modules/library/catalog/services/relations.service';
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 
 export interface ReaderBootstrapOptions {

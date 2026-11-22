@@ -7,7 +7,7 @@ import { ItemMetadata } from '@/modules/library/core';
 import { XmpParser } from '@/modules/library/extraction/providers/pdf-outline.extractor';
 import { RegexExtractor } from '@/modules/library/core/domain/regex.domain';
 import { LayoutExtractor } from '@/modules/library/extraction/providers/layout.extractor';
-import { PdfTextMetadataExtractor } from '@/modules/library/extraction/providers/pdf-text-metadata.extractor';
+import { PdfTextMetadataExtractor } from '@/modules/library/extraction/providers/pdf-text.extractor';
 import {
   FieldExtractionProvenance,
   IPdfExtractionTier,

@@ -38,14 +38,14 @@ import {
   SingleFlightCoalescer,
 } from '@/modules/library/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
-import { ItemCacheCoordinator } from './schema-validator.service';
+import { ItemCacheCoordinator } from './item-cache.service';
 import {
   validateCollectionReorderNoCycle,
   executeAssignItemsToCollection,
   executeDeleteCollectionWithCascade,
   executeCopyCollectionSubtree,
   transferCollectionItemMembershipsInTx,
-} from '@/modules/library/catalog/repositories/collection-membership.operations';
+} from '@/modules/library/catalog/repositories/collection-members.repository';
 @Injectable()
 export class CollectionsService {
   private readonly singleFlight = new SingleFlightCoalescer();

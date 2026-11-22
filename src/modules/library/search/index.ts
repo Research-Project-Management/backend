@@ -8,11 +8,12 @@ export * from './dto/search-items.dto';
 export * from './types/search.types';
 
 // Services
+export * from './services/search.facade';
 export * from './services/search.service';
 
 // Repositories & SQL Builders
 export * from './repositories/search.repository';
-export * from './repositories/search-sql.operations';
+export * from './repositories/search-sql.repository';
 
 // Domain
 export * from './domain/item-search.policy';

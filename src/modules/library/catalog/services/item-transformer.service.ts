@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemsMapper } from '@/modules/library/core';
 import { TypeConversionPreview } from '@/modules/library/core/types/bibliographic.types';
 import { ItemFieldDefinition } from '@/modules/library/core/types/schema.types';

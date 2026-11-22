@@ -1,5 +1,5 @@
 import { Prisma, IngestionStatus } from '@prisma/client';
-import { BadRequestException } from '@nestjs/common';
+import { DomainValidationException } from '@/modules/library/core/errors/domain.exception';
 import { isUUID } from 'class-validator';
 import {
   asMetaObject,
@@ -94,7 +94,7 @@ export function parseRunScope(
     const rawProject = normalizeProjectSpaceId(scope.projectId);
     const resolvedUserId = scope.userId || fallbackUserId;
     if (!resolvedUserId)
-      throw new BadRequestException(
+      throw new DomainValidationException(
         'User context (userId) is required for ingestion run operations',
       );
     return {
@@ -111,7 +111,7 @@ export function parseRunScope(
   );
   const resolvedUserId = fallbackUserId || (!isProject && str ? str : '');
   if (!resolvedUserId)
-    throw new BadRequestException(
+    throw new DomainValidationException(
       'User context (userId) is required for ingestion run operations',
     );
   return {

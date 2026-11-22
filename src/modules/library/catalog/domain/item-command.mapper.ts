@@ -26,13 +26,14 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import {
   isUuid,
+  deriveFirstAuthor,
   extractExtraKeyValues,
-  normalizeItemIdentifiers,
+} from '@/modules/library/core';
+import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
   prepareNotesToCreate,
   prepareAttachmentsToCreate,
-  deriveFirstAuthor,
   prepareContributorsToCreate,
   applyManualEditProvenanceLocks,
   ResolvedTag,
@@ -40,6 +41,7 @@ import {
   IGNORED_SYSTEM_KEYS,
 } from './creator-tag.mapper';
 import {
+  normalizeItemIdentifiers,
   buildDeduplicatedIdentifiers,
   buildCollectionItemsUpdatePatch,
   syncMetadataIdentifierAliases,
@@ -49,19 +51,6 @@ import {
   applyMetadataProvenanceAndTelemetry,
   cleanExtraFromClearedIds,
 } from './identifier-change.domain';
-
-export * from './creator-tag.mapper';
-export type { ResolvedTag, ImportSourceItem };
-export {
-  ITEM_COLUMN_METADATA_FIELDS,
-  IDENTIFIER_URI_BUILDERS,
-  buildDeduplicatedIdentifiers,
-  calculateIdentifierChanges,
-  buildMyPublicationMetadata,
-  buildCollectionItemsUpdatePatch,
-  syncMetadataIdentifierAliases,
-  cleanExtraFromClearedIds,
-};
 
 interface CanonicalCommandFields {
   itemType: string;

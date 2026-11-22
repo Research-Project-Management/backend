@@ -15,7 +15,7 @@ import {
   UpdateSavedSearchDto,
   PreviewSavedSearchDto,
   ExecuteSavedSearchQueryDto,
-} from '@/modules/library/catalog/dto/collections.dto';
+} from '@/modules/library/catalog/dto/saved-searches.dto';
 import { ItemsMapper } from '@/modules/library/core';
 import {
   SavedSearchConditionGroup,

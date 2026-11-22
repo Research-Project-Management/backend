@@ -38,7 +38,7 @@ import { FILES_PORT, IFilesPort } from '@/modules/files';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
-} from '@/modules/library/extraction/dto/annotations.dto';
+} from '@/modules/library/extraction/dto/attachments.dto';
 import { AttachmentRenamerService } from './attachment-renamer.service';
 
 export type { CreateAttachmentInput };

@@ -11,21 +11,19 @@ import {
 } from './types/ingestion.types';
 
 // Controllers
-import {
-  IngestionController,
-  CurationController,
-  RetractionController,
-  FeedsController,
-} from './controllers/ingestion.controller';
+import { IngestionController } from './controllers/ingestion.controller';
+import { CurationController } from './controllers/curation.controller';
+import { RetractionController } from './controllers/retraction.controller';
+import { FeedsController } from './controllers/feeds.controller';
 import { FeedsService, FeedsEngine } from './services/feeds.service';
 
 import { IngestionService } from './services/ingestion.service';
 import { PipelineService } from './services/pipeline.service';
 import { PipelineSideEffectsService } from './services/pipeline-side-effects.service';
-import { PipelineBatchExecutor } from './services/pipeline-batch.executor';
+import { PipelineBatchExecutor } from './services/pipeline-batch.service';
 import { MetadataResolverService } from './services/metadata-resolver.service';
-import { IngestionRunReporterService } from './services/ingestion-saga.orchestrator';
-import { IngestionSagaOrchestrator } from './services/ingestion-saga.orchestrator';
+import { IngestionRunReporterService } from './services/ingestion-saga.service';
+import { IngestionSagaOrchestrator } from './services/ingestion-saga.service';
 import { QueueService, IngestionQueueConsumer } from './services/queue.service';
 import { UrlCaptureService } from './services/url-capture.service';
 import { FeedRetrievalService } from './services/feed-retrieval.service';
@@ -40,9 +38,11 @@ import { RetractionService } from './services/retraction.service';
 import {
   QualityService,
   IngestionVerifierService,
+} from './services/ingestion-verifier.service';
+import {
   IngestionFacade,
   INGESTION_FACADE,
-} from './services/ingestion-verifier.service';
+} from './services/ingestion.facade';
 import { RetractionDatabaseService } from './services/retraction-database.service';
 import { RetractionSyncService } from './services/retraction.service';
 import { RetractionSeederService } from './services/retraction-seeder.service';
@@ -51,12 +51,12 @@ import {
   WebFetchLadderService,
   WebMirrorResolverService,
 } from './services/web-fetch-ladder.service';
-import { DomainRateLimiterService } from './services/feed-retrieval.service';
+import { DomainRateLimiterService } from './services/domain-rate-limiter.service';
 
 // Repositories
 import { IngestionRepository } from './repositories/ingestion.repository';
 import { DuplicateMergeRepository } from './repositories/duplicate-merge.repository';
-import { MetadataCache } from './services/retraction-seeder.service';
+import { MetadataCache } from './services/metadata-cache.service';
 import { RetractionRepository } from './repositories/retraction.repository';
 import { FeedsRepository } from './repositories/feeds.repository';
 
@@ -86,11 +86,11 @@ import { UrlCaptureProvider } from './providers/url-capture.provider';
 import { CrossRefProvider } from './providers/crossref.provider';
 import { ArxivProvider } from './providers/arxiv.provider';
 import { PubMedProvider } from './providers/pubmed.provider';
-import { OpenLibraryProvider } from './providers/semantic-scholar.provider';
+import { OpenLibraryProvider } from './providers/openlibrary.provider';
 import { OpenAlexProvider } from './providers/openalex.provider';
-import { UnpaywallProvider } from './providers/semantic-scholar.provider';
-import { RetractionScannerProvider } from './providers/base-metadata.provider';
-import { DblpProvider } from './providers/arxiv.provider';
+import { UnpaywallProvider } from './providers/unpaywall.provider';
+import { RetractionScannerProvider } from './providers/retraction-scanner.provider';
+import { DblpProvider } from './providers/dblp.provider';
 import { SemanticScholarProvider } from './providers/semantic-scholar.provider';
 import { RetractionItemEventsSubscriber } from './services/retraction-seeder.service';
 

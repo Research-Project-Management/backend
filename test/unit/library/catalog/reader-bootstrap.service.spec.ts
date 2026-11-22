@@ -1,6 +1,6 @@
 import { ReaderBootstrapService } from '@/modules/library/catalog/services/reader-bootstrap.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import { ItemFulltextService } from '@/modules/library/catalog/services/item-relations.service';
+import { ItemFulltextService } from '@/modules/library/catalog/services/relations.service';
 
 describe('ReaderBootstrapService (Document-Scoped BFF Bootstrap)', () => {
   const USER_ID = '11111111-1111-4111-8111-111111111111';

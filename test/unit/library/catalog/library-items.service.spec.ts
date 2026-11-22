@@ -10,7 +10,7 @@ import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
 } from '@/modules/library/catalog/repositories/command.repository';
-import { ItemRelationsService } from '@/modules/library/catalog/services/item-relations.service';
+import { ItemRelationsService } from '@/modules/library/catalog/services/relations.service';
 
 describe('Library Items — Authoritative Backend & Sanitization', () => {
   describe('sanitizeItemTitle (Domain Utility)', () => {

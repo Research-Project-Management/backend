@@ -3,8 +3,6 @@ import { isUuid } from './title.domain';
 import { normalizeTags } from './tag.domain';
 import { resolveSpaceId } from './specification.domain';
 
-export * from './bibliographic-reconciler.domain';
-
 export async function resolveOrCreateAutomaticTagsInClient(
   db: Prisma.TransactionClient,
   userId: string,

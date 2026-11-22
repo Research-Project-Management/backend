@@ -25,7 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { AnnotationType } from '@/modules/library/core/types/extraction.types';
 import { normalizeProjectSpaceId } from '@/modules/library/core';
-import { PdfAnnotationImporterService } from '@/modules/library/extraction/services/pdf-annotation-importer.service';
+import { PdfAnnotationImporterService } from '@/modules/library/extraction/services/pdf-annotations.service';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   CreateAnnotationDto,

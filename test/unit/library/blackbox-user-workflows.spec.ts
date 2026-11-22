@@ -47,8 +47,8 @@ import {
   planMergedItemRelations,
 } from '@/modules/library/ingestion/domain/duplicate-merge.domain';
 import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
-import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { ItemTransformer } from '@/modules/library/catalog/services/item-transformer.service';
 import { ConditionEvaluatorEngine } from '@/modules/library/catalog/domain/condition-evaluator.policy';
 import { ReadingStatus } from '@/modules/library/catalog/types/catalog.types';
 import {
@@ -58,8 +58,8 @@ import {
   shouldAutoAdvanceToReading,
   isValidStateTransition,
 } from '@/modules/library/catalog/domain/state.domain';
+import { buildImportItemPayload } from '@/modules/library/catalog/domain/creator-tag.mapper';
 import {
-  buildImportItemPayload,
   buildCommandCreateInput,
   buildCommandUpdateInput,
 } from '@/modules/library/catalog/domain/item-command.mapper';

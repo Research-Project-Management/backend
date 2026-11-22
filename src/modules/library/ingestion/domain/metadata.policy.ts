@@ -1,5 +1,5 @@
-import { isIP } from 'node:net';
 import { BaseDomainException } from '@/modules/library/core/errors/domain.exception';
+import { isIpLiteral } from '@/modules/library/core/domain/regex.domain';
 import {
   ProviderName,
   QueryType,
@@ -161,7 +161,7 @@ export class MetadataRoutingPolicy {
     }
 
     const guard = ssrfGuard ?? this.ssrfGuard;
-    if (isIP(hostname) && guard.isPrivateOrReservedIp(hostname)) {
+    if (isIpLiteral(hostname) && guard.isPrivateOrReservedIp(hostname)) {
       throw new SsrfBlockedDomainException(
         `SSRF Protection: Blocked request to restricted IP "${hostname}"`,
       );

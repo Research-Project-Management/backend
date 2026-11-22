@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import {
   AnnotationType,
   RectCoords,
@@ -173,7 +172,6 @@ export function normalizeRectCoordsToBoxes(rc: unknown): NormalizedRectBox[] {
  * AnnotationNormalizer — Deep Module for annotation payload formatting,
  * coordinate bounding box validation, and sanitize processing.
  */
-@Injectable()
 export class AnnotationNormalizer {
   /**
    * Validates and normalizes hex color strings to lowercase canonical form.

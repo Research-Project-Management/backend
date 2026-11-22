@@ -1,5 +1,5 @@
 import { DuplicateDetectorService } from './duplicate-detector.service';
-import { RetractionScannerProvider } from '../providers/base-metadata.provider';
+import { RetractionScannerProvider } from '../providers/retraction-scanner.provider';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import {
   Injectable,

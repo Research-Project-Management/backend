@@ -30,9 +30,6 @@ import {
   resolveCreateDefaultTagType,
 } from '@/modules/library/catalog/domain/item-command.mapper';
 
-export { buildTagTypeMap };
-export type { ResolvedTag };
-
 export async function resolveOrCreateTags(
   client: Prisma.TransactionClient | PrismaService,
   userId: string,
@@ -562,8 +559,6 @@ export async function setMyPublicationInClient(
     include: buildCommandMutationInclude(userId),
   });
 }
-
-export { disambiguateCitationKey, disambiguateCitationKey as disambiguate };
 
 export async function resolveCreateItemRelations(
   client: Prisma.TransactionClient | PrismaService,

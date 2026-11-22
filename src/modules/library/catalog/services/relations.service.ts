@@ -26,7 +26,7 @@ import {
   SingleFlightCoalescer,
   sortLockKeys,
 } from '@/modules/library/core';
-import { ItemCacheCoordinator } from './schema-validator.service';
+import { ItemCacheCoordinator } from './item-cache.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
 import { FILES_PORT, IFilesPort } from '@/modules/files';

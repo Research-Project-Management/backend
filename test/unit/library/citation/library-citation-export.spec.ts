@@ -2,7 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { ExportsService } from '@/modules/library/citation/services/exports.service';
 import { CitationService } from '@/modules/library/citation/services/citation.service';
 import { ExportsRepository } from '@/modules/library/citation/repositories/exports.repository';
-import { CitationFacade } from '@/modules/library/citation/services/exports.service';
+import { CitationFacade } from '@/modules/library/citation/services/citation.facade';
 import { LibraryFacade } from '@/modules/library/library.module';
 
 describe('Library Citation Export & Facade Integration (Overleaf BibTeX Parity)', () => {

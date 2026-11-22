@@ -1,7 +1,3 @@
-import type { Prisma } from '@prisma/client';
-
-export * from '@/modules/library/core/types/extraction.types';
-
 export interface ExtractionSyncAttachmentInput {
   id: string;
   itemId: string;
@@ -69,27 +65,6 @@ export interface ExtractionSyncDocumentInput {
       { source?: string; confidence?: number; extractedAt?: string }
     >;
   };
-}
-
-export interface ExtractedMetadataSyncPlan {
-  itemPatch: Prisma.LibraryItemUpdateInput;
-  metaPatch: Record<string, unknown>;
-  extractedIdentifiers: Array<{
-    type: string;
-    value: string;
-    canonicalUri: string;
-  }>;
-  creatorsToSync: Array<{
-    creatorType?: string;
-    fullName?: string;
-    name?: string;
-    firstName?: string;
-    lastName?: string;
-    fieldMode?: number;
-  }>;
-  primaryRole: string;
-  tagsToSync: string[];
-  notesToSync: Array<{ content: string; type?: string }>;
 }
 
 export interface FieldExtractionProvenance {

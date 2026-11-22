@@ -1,4 +1,4 @@
-import { resolveProviderFieldWeight } from './metadata-coalesce.policy';
+import { resolveProviderFieldWeight } from './reconciler.domain';
 
 import { TypeConversionPreview } from '@/modules/library/core/types/bibliographic.types';
 

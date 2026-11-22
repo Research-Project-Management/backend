@@ -5,30 +5,30 @@ import { FilesModule } from '@/modules/files';
 
 // Controllers
 import { ItemsController } from './controllers/items.controller';
-import { LibraryWorkspaceController } from './controllers/library-workspace.controller';
-import { ItemCurationController } from './controllers/collections.controller';
+import { LibraryWorkspaceController } from './controllers/workspace.controller';
+import { ItemCurationController } from './controllers/curation.controller';
 import { CollectionsController } from './controllers/collections.controller';
-import { TagController } from './controllers/notes.controller';
-import { TypeController } from './controllers/library-workspace.controller';
+import { TagController } from './controllers/tags.controller';
+import { TypeController } from './controllers/types.controller';
 import {
   StateController,
   StateBatchController,
-} from './controllers/library-workspace.controller';
-import { SavedSearchesController } from './controllers/notes.controller';
+} from './controllers/state.controller';
+import { SavedSearchesController } from './controllers/saved-searches.controller';
 import { NoteController } from './controllers/notes.controller';
 
 // Services
 import { ItemService } from './services/items.service';
-import { ItemCacheCoordinator } from './services/schema-validator.service';
+import { ItemCacheCoordinator } from './services/item-cache.service';
 import { ItemQueryService } from './services/item-query.service';
-import { ItemFulltextService } from './services/item-relations.service';
-import { ItemTypeConversionService } from './services/item-type-conversion.service';
-import { ItemCurationService } from './services/item-curation.service';
-import { ItemRelationsService } from './services/item-relations.service';
+import { ItemFulltextService } from './services/relations.service';
+import { ItemTypeConversionService } from './services/type-conversion.service';
+import { ItemCurationService } from './services/curation.service';
+import { ItemRelationsService } from './services/relations.service';
 import { CollectionsService } from './services/collections.service';
 import { TagsService } from './services/tags.service';
-import { TypesService } from './services/schema-validator.service';
-import { LibraryBootstrapService } from './services/library-bootstrap.service';
+import { TypesService } from './services/types.service';
+import { LibraryBootstrapService } from './services/bootstrap.service';
 import { ReaderBootstrapService } from './services/reader-bootstrap.service';
 import { ReaderWriteBehindService } from './services/reader-write-behind.service';
 import { StateService } from './services/state.service';
@@ -41,18 +41,16 @@ import { TrashMaintenanceService } from './services/trash-maintenance.service';
 import { TreeEngine } from './domain/state.domain';
 import { ConditionEvaluatorEngine } from './domain/condition-evaluator.policy';
 import { ItemsMapper } from '@/modules/library/core';
-import { ItemTransformer } from './services/item.transformer';
+import { ItemTransformer } from './services/item-transformer.service';
 
 // Repositories
 import { CommandRepository } from './repositories/command.repository';
-import {
-  QueryRepository,
-  ItemMatchQueryRepository,
-  ItemListQueryRepository,
-} from './repositories/query.repository';
+import { QueryRepository } from './repositories/query.repository';
+import { ItemMatchQueryRepository } from './repositories/item-match-query.repository';
+import { ItemListQueryRepository } from './repositories/item-list-query.repository';
 import { CollectionsRepository } from './repositories/collections.repository';
 import { TagsRepository } from './repositories/tags.repository';
-import { StateRepository } from './repositories/saved-searches.repository';
+import { StateRepository } from './repositories/state.repository';
 import { SavedSearchesRepository } from './repositories/saved-searches.repository';
 import { NotesRepository } from './repositories/notes.repository';
 
@@ -60,7 +58,7 @@ import { NotesRepository } from './repositories/notes.repository';
 import {
   CatalogFacade,
   CATALOG_FACADE,
-} from './services/library-bootstrap.service';
+} from './services/catalog.facade';
 import { ITEM_CACHE_INVALIDATOR } from '@/modules/library/core';
 
 @Global()

@@ -1,6 +1,6 @@
-import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { SchemaValidatorService } from '@/modules/library/catalog/services/schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
+import { ItemTransformer } from '@/modules/library/catalog/services/item-transformer.service';
 
 describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', () => {
   let typesService: TypesService;
@@ -172,8 +172,10 @@ describe('Library Zotero Schema & Metadata — Single Source of Truth Suite', ()
       const {
         resolveCanonicalCommandFields,
         buildMetadataPartial,
-        normalizeItemIdentifiers,
       } = await import('@/modules/library/catalog/domain/item-command.mapper');
+      const { normalizeItemIdentifiers } = await import(
+        '@/modules/library/catalog/domain/identifier-change.domain'
+      );
 
       const updateData = {
         itemType: 'bookSection',

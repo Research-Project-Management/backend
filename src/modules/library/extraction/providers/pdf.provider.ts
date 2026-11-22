@@ -14,7 +14,7 @@ import { LayoutExtractor } from '@/modules/library/extraction/providers/layout.e
 import {
   PdfTextMetadataExtractor,
   extractPdfOutlineSections,
-} from './pdf-text-metadata.extractor';
+} from './pdf-text.extractor';
 
 export type { ExtractedPdfMetadata, ExtractedPdfDocument };
 

@@ -24,7 +24,7 @@ import { cleanSingleTag } from '@/modules/library/core/domain/tag.domain';
 
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
-import { ItemCacheCoordinator } from './schema-validator.service';
+import { ItemCacheCoordinator } from './item-cache.service';
 
 @Injectable()
 export class TagsService {

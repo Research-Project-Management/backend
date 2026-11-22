@@ -31,7 +31,7 @@ import {
 import {
   clearRunStatusTransition,
   transitionRunToFailedIfActive,
-} from './ingestion-saga.orchestrator';
+} from './ingestion-saga.service';
 
 interface QueuedIngestionJob {
   runId: string;

@@ -55,9 +55,7 @@ export class OutboxWorker
   >();
   private defaultHandler?: OutboxDispatchHandler;
   private readonly maxRetries = 5;
-  private static readonly CONCURRENCY =
-    Number(process.env.OUTBOX_CONCURRENCY) ||
-    getDefaultResourceGovernor().getTierBudgets().outboxConcurrency;
+  private static readonly CONCURRENCY = libraryConfig().outbox.concurrency;
   private static readonly GC_INTERVAL_MS = 60 * 60 * 1000;
   private readonly workerId: string;
   private readonly repo: OutboxRepository;

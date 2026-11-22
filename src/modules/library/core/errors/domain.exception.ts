@@ -170,6 +170,15 @@ export class ConfigurationException extends BaseDomainException {
   }
 }
 
+export class DomainValidationException extends BaseDomainException {
+  override readonly code = 'LIBRARY_VALIDATION_ERROR';
+  override readonly statusCode = HttpStatus.BAD_REQUEST;
+
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, details);
+  }
+}
+
 /**
  * Formal Typed Registry of all Domain Events produced within the Library Bounded Context.
  * Resides in Shared Kernel to decouple submodules (Catalog, Extraction, Ingestion, Search)

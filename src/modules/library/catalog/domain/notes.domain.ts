@@ -4,8 +4,6 @@
 import { parseAnnotationSortIndex as canonicalParseAnnotationSortIndex } from '@/modules/library/core';
 import { stripNoteHtml } from '@/modules/library/core/domain/renamer.domain';
 
-export { stripNoteHtml };
-
 interface NoteAnnotationSource {
   id?: string;
   attachmentId?: string;

@@ -8,6 +8,8 @@ import { SearchController } from './controllers/search.controller';
 import {
   SearchFacade,
   SEARCH_FACADE,
+} from './services/search.facade';
+import {
   SearchService,
   FullTextProvider,
   SearchEventsSubscriber,

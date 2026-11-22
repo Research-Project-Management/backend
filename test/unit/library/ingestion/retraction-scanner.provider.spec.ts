@@ -1,4 +1,4 @@
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import { RetractionDatabaseService } from '@/modules/library/ingestion/services/retraction-database.service';
 
 describe('RetractionScannerProvider', () => {

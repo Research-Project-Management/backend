@@ -235,9 +235,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
         normalized.endsWith('/catalog/services/items.service.ts') ||
         normalized.endsWith('/catalog/services/item-query.service.ts') ||
         normalized.endsWith('/catalog/services/collections.service.ts') ||
-        normalized.endsWith(
-          '/extraction/services/pdf-annotation-importer.service.ts',
-        ) ||
+        normalized.endsWith('/extraction/services/pdf-annotations.service.ts') ||
         normalized.endsWith(
           '/extraction/services/attachment-renamer.service.ts',
         ) ||
@@ -1357,7 +1355,7 @@ describe('Library Architecture & Design Compliance Guardrails', () => {
 
     const commandRelationsPath = path.join(
       libraryRoot,
-      'catalog/repositories/command-relations.operations.ts',
+      'catalog/repositories/command-relations.repository.ts',
     );
     const commandRelationsContent = fs.readFileSync(
       commandRelationsPath,

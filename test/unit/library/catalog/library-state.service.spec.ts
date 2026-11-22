@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StateService } from '@/modules/library/catalog/services/state.service';
-import { StateRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
+import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 import {
   ReadingStatus,
   StateData,

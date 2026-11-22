@@ -26,19 +26,25 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import {
   isUuid,
+  disambiguateCitationKey,
+} from '@/modules/library/core';
+import {
   cleanSingleIdentifier,
   normalizeItemIdentifiers,
+} from '@/modules/library/catalog/domain/identifier-change.domain';
+import {
   resolveExtraPlainText,
   extractNonColumnExtraFields,
   prepareNotesToCreate,
+} from '@/modules/library/catalog/domain/creator-tag.mapper';
+import {
   buildCommandCreateInput,
   buildCommandUpdateInput,
 } from '@/modules/library/catalog/domain/item-command.mapper';
-import { CommandBulkOperations } from './command-bulk.operations';
+import { CommandBulkOperations } from './command-bulk.repository';
 import {
   resolveOrCreateTags,
   syncTagsForCatalogItem,
-  disambiguateCitationKey,
   syncCreatedIdentifiers,
   syncUpdatedIdentifiers,
   resolveCreateItemRelations,
@@ -47,7 +53,7 @@ import {
   removeItemRelationInClient,
   setMyPublicationInClient,
   buildCommandMutationInclude,
-} from './command-relations.operations';
+} from './command-relations.repository';
 export {
   isUuid,
   cleanSingleIdentifier,

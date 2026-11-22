@@ -12,7 +12,7 @@ import {
   LIBRARY_OUTBOX_JOB,
   OUTBOX_REGISTRY_PORT,
 } from '@/modules/library/core';
-import { getDefaultResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
+import { libraryConfig } from '@/modules/library/core/config/library.config';
 
 export interface IOutboxEventProcessor {
   processEventById(
@@ -21,9 +21,7 @@ export interface IOutboxEventProcessor {
   ): Promise<boolean>;
 }
 
-const resolvedOutboxConcurrency =
-  Number(process.env.OUTBOX_CONCURRENCY) ||
-  getDefaultResourceGovernor().getTierBudgets().outboxConcurrency;
+const resolvedOutboxConcurrency = libraryConfig().outbox.concurrency;
 
 @Processor(LIBRARY_OUTBOX_QUEUE, { concurrency: resolvedOutboxConcurrency })
 export class OutboxQueueConsumer

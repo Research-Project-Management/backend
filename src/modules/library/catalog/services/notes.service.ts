@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './schema-validator.service';
+import { ItemCacheCoordinator } from './item-cache.service';
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import {
   CreateNoteData,

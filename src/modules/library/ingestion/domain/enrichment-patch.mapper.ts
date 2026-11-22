@@ -1,4 +1,5 @@
-import { Logger } from '@nestjs/common';
+type DomainLogger = { log(message: string): void; warn(message: string): void };
+
 import {
   SCHEMA_V42_DATA,
   CANONICAL_BIBLIOGRAPHIC_COLUMN_AND_ALIAS_KEYS,
@@ -1118,7 +1119,7 @@ export async function materializeDeduplicatedNotes(params: {
   itemId: string;
   notes?: unknown[];
   createdItem?: Record<string, unknown> | null;
-  logger?: Logger;
+  logger?: DomainLogger;
 }): Promise<void> {
   const {
     catalogGateway,
@@ -1231,7 +1232,7 @@ export async function executeDuplicateItemEnrichment<
       createdItem?: Record<string, unknown> | null,
     ) => Promise<unknown>;
   };
-  logger?: Logger;
+  logger?: DomainLogger;
 }): Promise<{
   item: TItem & { wasPreExistingMatch: true };
   patchedFields: string[];

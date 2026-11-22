@@ -21,7 +21,7 @@ import {
   buildExtractedMetadataSyncPlan,
   ExtractionSyncAttachmentInput,
   ExtractionSyncDocumentInput,
-} from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
+} from '@/modules/library/extraction/domain/metadata-merge.policy';
 import type {
   ClaimedAttachmentRecord,
   FullTextOffloadDocument,

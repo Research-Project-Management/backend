@@ -28,7 +28,7 @@ import {
   HttpClient,
   normalizeProjectSpaceId,
 } from '@/modules/library/core';
-import { DoiContentNegotiationService } from './doi-content-negotiation.service';
+import { DoiContentNegotiationService } from './doi-negotiation.service';
 import { CslEngineService } from './csl-engine.service';
 import { CslJsonMapper } from '@/modules/library/citation/domain/csl-json.mapper';
 import { CslRepositoryService } from './csl-repository.service';
@@ -36,9 +36,6 @@ import {
   QueryResolverService,
   MetadataPortResolveResult,
 } from './query-resolver.service';
-
-export type { ReferenceData };
-export { QueryResolverService };
 
 @Injectable()
 export class CitationService {

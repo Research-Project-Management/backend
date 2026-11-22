@@ -13,7 +13,7 @@ import {
   ProviderResult,
 } from '@/modules/library/ingestion/types/metadata.types';
 import { normalizeArxivId, normalizeDoi } from '@/modules/library/core';
-import { DomainRateLimiterService } from './feed-retrieval.service';
+import { DomainRateLimiterService } from './domain-rate-limiter.service';
 
 interface BatchableArxivProvider extends MetadataProvider {
   resolveBatch(

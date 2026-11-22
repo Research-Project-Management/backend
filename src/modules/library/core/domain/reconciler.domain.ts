@@ -616,7 +616,7 @@ export function isBetterAuthorListCandidate(
   return candLen > bestLen || candFullGiven > bestFullGiven;
 }
 
-export function selectAuthoritativeCreatorVariant<
+function selectAuthoritativeCreatorVariant<
   T extends { sourceProvider?: string; val: unknown; isUserOverride?: boolean },
 >(sortedVariants: T[]): T {
   const firstNonEmpty =
@@ -656,7 +656,7 @@ export function selectAuthoritativeCreatorVariant<
   return best;
 }
 
-export function mergeReconciledTagArrays(arrays: unknown[]): string[] {
+function mergeReconciledTagArrays(arrays: unknown[]): string[] {
   const candidateTags: string[] = [];
   for (const arr of arrays)
     if (Array.isArray(arr))
@@ -665,7 +665,7 @@ export function mergeReconciledTagArrays(arrays: unknown[]): string[] {
   return normalizeTags(candidateTags);
 }
 
-export function mergeReconciledNotesArrays(
+function mergeReconciledNotesArrays(
   arrays: unknown[],
   normalizeToObject = false,
 ): unknown[] {
@@ -718,7 +718,7 @@ export function mergeReconciledNotesArrays(
   return merged;
 }
 
-export function mergeReconciledExtraText(variants: unknown[]): string {
+function mergeReconciledExtraText(variants: unknown[]): string {
   return mergeExtraTextLines(variants);
 }
 

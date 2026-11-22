@@ -25,7 +25,7 @@ import {
   buildSearchFtsSqlQuery,
   buildSearchTrgmFallbackSqlQuery,
   escapeLikePattern,
-} from './search-sql.operations';
+} from './search-sql.repository';
 
 export type { SearchOptions, FacetResult };
 

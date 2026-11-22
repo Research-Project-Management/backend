@@ -1,14 +1,16 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   SearchService,
-  SearchFacade,
-  SEARCH_FACADE,
   SearchItemsQueryDto,
   SearchPageAnchorsQueryDto,
+} from '@/modules/library/search/services/search.service';
+import {
+  SearchFacade,
+  SEARCH_FACADE,
   type ISearchFacade,
   type SearchOptions,
   type FacetResult,
-} from '@/modules/library/search/services/search.service';
+} from '@/modules/library/search/services/search.facade';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';

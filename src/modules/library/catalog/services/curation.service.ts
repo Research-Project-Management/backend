@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
-import { ItemCacheCoordinator } from './schema-validator.service';
+import { ItemCacheCoordinator } from './item-cache.service';
 import { ItemQueryService } from './item-query.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
@@ -28,11 +28,8 @@ import {
 import {
   ImportSourceItem,
   buildImportItemPayload,
-} from '@/modules/library/catalog/domain/item-command.mapper';
-import { executeEmptyTrashInTx } from '../repositories/command-bulk.operations';
-
-export type { ImportSourceItem };
-export { buildImportItemPayload };
+} from '@/modules/library/catalog/domain/creator-tag.mapper';
+import { executeEmptyTrashInTx } from '../repositories/command-bulk.repository';
 
 interface CslItemData {
   id?: string;

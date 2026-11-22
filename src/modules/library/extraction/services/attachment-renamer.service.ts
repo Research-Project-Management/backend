@@ -28,7 +28,7 @@ import { AttachmentsRepository } from '@/modules/library/extraction/repositories
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,
-} from '@/modules/library/extraction/dto/annotations.dto';
+} from '@/modules/library/extraction/dto/attachments.dto';
 import { UserId, AttachmentId, ProjectId } from '@/modules/library/core';
 
 @Injectable()

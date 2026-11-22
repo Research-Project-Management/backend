@@ -18,7 +18,7 @@ import {
   getContactEmail,
   getUserAgent,
 } from '@/modules/library/core';
-import { DoiContentNegotiationService } from './doi-content-negotiation.service';
+import { DoiContentNegotiationService } from './doi-negotiation.service';
 import { normalizeTags } from '@/modules/library/core/domain/tag.domain';
 
 export interface MetadataPortResolveResult {

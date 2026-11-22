@@ -8,9 +8,6 @@ import {
   ExportItemRecord,
 } from '../types/citation.types';
 
-export { EXPORT_CHUNK_SIZE, EXPORT_MAX_ITEMS };
-export type { ExportItemRecord };
-
 /**
  * ExportsRepository — CQRS Read-Side Optimized Data Store for Bulk Citation Export & Custom CSL Styles.
  * Serves read-only projection streaming to prevent N+1 queries across thousands of items.

@@ -1,16 +1,16 @@
 import { TransactionService } from '@/modules/library/sync';
 import { ItemService as ItemsService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import { ItemFulltextService } from '@/modules/library/catalog/services/item-relations.service';
+import { ItemFulltextService } from '@/modules/library/catalog/services/relations.service';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
-import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
+import { ItemTransformer } from '@/modules/library/catalog/services/item-transformer.service';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
-import { CatalogFacade } from '@/modules/library/catalog/services/library-bootstrap.service';
-import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
+import { CatalogFacade } from '@/modules/library/catalog/services/catalog.facade';
+import { ItemCurationService } from '@/modules/library/catalog/services/curation.service';
 import { LibraryFacade } from '@/modules/library/library.module';
 import { LIBRARY_EVENT_TYPES } from '@/modules/library/core';
 

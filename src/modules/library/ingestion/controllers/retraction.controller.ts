@@ -1,0 +1,136 @@
+﻿import { Controller, Get, Post, Delete, Param, Query, Body, UseGuards, ForbiddenException } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
+import { ProjectAccessGuard, ProjectRoles, RequireOperator } from '@/modules/project/access';
+import { FlagRetractionDto, BatchCheckRetractionDto, SyncRetractionDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { RetractionService } from '@/modules/library/ingestion/services/retraction.service';
+
+@ApiTags('Library Retraction')
+@ApiBearerAuth()
+@Controller([
+  'api/v1/library/retraction',
+  'api/v1/spaces/:spaceId/library/retraction',
+])
+@UseGuards(JwtAuthGuard, ProjectAccessGuard)
+export class RetractionController {
+  private lastForceSeedAt = 0;
+  private static readonly FORCE_SEED_COOLDOWN_MS = 15 * 60 * 1000;
+
+  constructor(private readonly service: RetractionService) {}
+
+  @Get('database/stats')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async getDatabaseStats() {
+    return this.service.getDatabaseStats();
+  }
+
+  @Post('database/seed')
+  @RequireOperator()
+  @ProjectRoles('owner')
+  async seedDatabase(
+    @CurrentUser('id') _userId: string,
+    @CurrentUser('role') role?: string,
+    @Body('force') force?: boolean,
+  ) {
+    if (role !== 'admin' && role !== 'superadmin' && role !== 'system') {
+      throw new ForbiddenException(
+        'System administrator privilege is required to seed the global retraction database',
+      );
+    }
+    const allowForce =
+      Boolean(force) &&
+      (role === 'superadmin' || role === 'system') &&
+      Date.now() - this.lastForceSeedAt >
+        RetractionController.FORCE_SEED_COOLDOWN_MS;
+    if (allowForce) {
+      this.lastForceSeedAt = Date.now();
+    }
+    return this.service.seedDatabase(allowForce);
+  }
+
+  @Get('items')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async getRetractedItems(
+    @CurrentUser('id') userId: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.getRetractedItems(userId, effectiveProjectId);
+  }
+
+  @Get('stats')
+  @ProjectRoles('owner', 'coordinator', 'contributor', 'reviewer')
+  async getStats(
+    @CurrentUser('id') userId: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.getStats(userId, effectiveProjectId);
+  }
+
+  @Post('check-all')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  async checkLibrary(
+    @CurrentUser('id') userId: string,
+    @Body() dto: BatchCheckRetractionDto,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.checkLibrary(userId, dto, effectiveProjectId);
+  }
+
+  @Post('sync')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  async syncLibrary(
+    @CurrentUser('id') userId: string,
+    @Body() dto?: SyncRetractionDto,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.syncLibrary(userId, effectiveProjectId, {
+      maxDays: dto?.maxDays ? Number(dto.maxDays) : undefined,
+      limit: dto?.limit ? Number(dto.limit) : undefined,
+    });
+  }
+
+  @Post('items/:itemId/check')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  async checkItem(
+    @CurrentUser('id') userId: string,
+    @Param('itemId') itemId: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.checkItem(userId, itemId, effectiveProjectId);
+  }
+
+  @Post('items/:itemId/flag')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  async setManualFlag(
+    @CurrentUser('id') userId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: FlagRetractionDto,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.setManualFlag(userId, itemId, dto, effectiveProjectId);
+  }
+
+  @Delete('items/:itemId/flag')
+  @ProjectRoles('owner', 'coordinator', 'contributor')
+  async removeManualFlag(
+    @CurrentUser('id') userId: string,
+    @Param('itemId') itemId: string,
+    @Query('spaceId') queryProjectId?: string,
+    @Param('spaceId') paramProjectId?: string,
+  ) {
+    const effectiveProjectId = paramProjectId || queryProjectId;
+    return this.service.removeManualFlag(userId, itemId, effectiveProjectId);
+  }
+}

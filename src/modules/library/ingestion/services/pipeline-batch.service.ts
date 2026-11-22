@@ -9,7 +9,7 @@ import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import { MetadataCandidate } from '@/modules/library/ingestion/types/metadata.types';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.domain';
-import { IngestionSagaSession } from './ingestion-saga.orchestrator';
+import { IngestionSagaSession } from './ingestion-saga.service';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { mapPayloadToSource } from '@/modules/library/ingestion/domain/enrichment-patch.mapper';
 import {

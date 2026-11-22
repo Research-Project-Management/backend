@@ -5,6 +5,7 @@ export * from './services/item-lifecycle.subscriber';
 
 // Controllers
 export * from './controllers/attachments.controller';
+export * from './controllers/telemetry.controller';
 export * from './controllers/attachment-storage.controller';
 export * from './controllers/annotations.controller';
 
@@ -12,9 +13,9 @@ export * from './controllers/annotations.controller';
 export * from './services/attachments.service';
 export * from './services/attachment-renamer.service';
 export * from './services/annotations.service';
-export * from './services/pdf-annotation-importer.service';
+export * from './services/pdf-annotations.service';
 export * from './services/web-snapshot.service';
-export * from './services/extraction-metadata.synchronizer';
+export * from './services/metadata-sync.service';
 export * from './services/extraction.handler';
 
 // Repositories
@@ -29,10 +30,11 @@ export * from './domain/annotations.domain';
 // Providers & Extractors
 export * from './providers/pdf.provider';
 export * from './providers/pdf-metadata.extractor';
-export * from './providers/pdf-text-metadata.extractor';
+export * from './providers/pdf-text.extractor';
 export * from './providers/pdf-outline.extractor';
 export * from './providers/layout.extractor';
 
 // DTOs & Types
 export * from './dto/annotations.dto';
+export * from './dto/attachments.dto';
 export * from './types/pdf-extraction.types';

@@ -4,14 +4,14 @@ export * from './library.module';
 export {
   CatalogFacade,
   CATALOG_FACADE,
-} from './catalog/services/library-bootstrap.service';
-export type { ICatalogFacade } from './catalog/services/library-bootstrap.service';
+} from './catalog/services/catalog.facade';
+export type { ICatalogFacade } from './catalog/services/catalog.facade';
 
 export {
   CitationFacade,
   CITATION_FACADE,
-} from './citation/services/exports.service';
-export type { ICitationFacade } from './citation/services/exports.service';
+} from './citation/services/citation.facade';
+export type { ICitationFacade } from './citation/services/citation.facade';
 
 export {
   ExtractionFacade,
@@ -22,8 +22,8 @@ export type { IExtractionFacade } from './extraction/services/reference-matcher.
 export {
   IngestionFacade,
   INGESTION_FACADE,
-} from './ingestion/services/ingestion-verifier.service';
-export type { IIngestionFacade } from './ingestion/services/ingestion-verifier.service';
+} from './ingestion/services/ingestion.facade';
+export type { IIngestionFacade } from './ingestion/services/ingestion.facade';
 
-export { SearchFacade, SEARCH_FACADE } from './search/services/search.service';
-export type { ISearchFacade } from './search/services/search.service';
+export { SearchFacade, SEARCH_FACADE } from './search/services/search.facade';
+export type { ISearchFacade } from './search/services/search.facade';

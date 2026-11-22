@@ -10,7 +10,7 @@ import {
   resolveOrCreateTags,
   syncSpaceLabelsToLibraryTags,
   syncLibraryTagToSpaceLabel,
-} from '@/modules/library/catalog/repositories/command-relations.operations';
+} from '@/modules/library/catalog/repositories/command-relations.repository';
 
 @Injectable()
 export class TagsRepository {

@@ -34,6 +34,7 @@ interface LibraryConfig {
     maxRetries: number;
     leaseMs: number;
     workerEnabled?: string;
+    concurrency: number;
   };
   ingestion: {
     priorityQueue: string;
@@ -111,6 +112,9 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
         Number(process.env.OUTBOX_LEASE_MS || process.env.OUTBOX_LOCK_TTL_MS) ||
         30000,
       workerEnabled: process.env.OUTBOX_WORKER_ENABLED,
+      concurrency:
+        Number(process.env.OUTBOX_CONCURRENCY) ||
+        getDefaultResourceGovernor().getTierBudgets().outboxConcurrency,
     },
     ingestion: {
       priorityQueue:
@@ -196,7 +200,7 @@ export class LibraryConfigService {
   }
 }
 
-export function escapeRedisGlob(segment: string): string {
+function escapeRedisGlob(segment: string): string {
   return String(segment ?? '').replace(/([*?[\]\\])/g, '\\$1');
 }
 

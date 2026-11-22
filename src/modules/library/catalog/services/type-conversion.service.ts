@@ -7,8 +7,9 @@ import {
 import { Prisma } from '@prisma/client';
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { TypesService, ItemCacheCoordinator } from './schema-validator.service';
-import { ItemTransformer } from '@/modules/library/catalog/services/item.transformer';
+import { TypesService } from './types.service';
+import { ItemCacheCoordinator } from './item-cache.service';
+import { ItemTransformer } from '@/modules/library/catalog/services/item-transformer.service';
 import { ItemsMapper } from '@/modules/library/core';
 import {
   ItemDetail,

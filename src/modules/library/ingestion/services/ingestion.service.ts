@@ -47,7 +47,7 @@ import {
 import {
   IngestionRunReporterService,
   IngestionRunProgressResult,
-} from './ingestion-saga.orchestrator';
+} from './ingestion-saga.service';
 import { isRetryableIngestionError } from '@/modules/library/ingestion/types/metadata.types';
 
 @Injectable()

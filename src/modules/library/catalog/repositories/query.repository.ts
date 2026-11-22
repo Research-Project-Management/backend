@@ -24,15 +24,6 @@ import {
 } from './item-match-query.repository';
 import { ItemListQueryRepository } from './item-list-query.repository';
 
-export type { ItemFilterOptions } from './notes.repository';
-export {
-  buildItemWhereClause,
-  buildItemSearchCondition,
-} from './notes.repository';
-export type { MatchCandidateResult } from './item-match-query.repository';
-export { ItemMatchQueryRepository } from './item-match-query.repository';
-export { ItemListQueryRepository } from './item-list-query.repository';
-
 export async function hydrateOffloadedMetadataPayload(
   raw: Record<string, unknown>,
   filesPort?: IFilesPort,

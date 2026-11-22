@@ -15,8 +15,6 @@ import {
 import { ITEM_COLUMN_METADATA_FIELDS } from '@/modules/library/catalog/types/catalog.types';
 import { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 
-export { extractExtraKeyValues, ITEM_COLUMN_METADATA_FIELDS };
-
 const SAFE_PROVENANCE_AND_TELEMETRY_KEYS = [
   'isFilenameTitle',
   'disambiguationWarning',

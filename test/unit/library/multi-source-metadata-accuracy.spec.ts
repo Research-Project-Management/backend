@@ -5,7 +5,7 @@ import {
   verifyTitleLookupCorroboration,
   verifyCandidateMatch,
   isSameCanonicalIdentifier,
-} from '../../../src/modules/library/core/domain/metadata-coalesce.policy';
+} from '../../../src/modules/library/core/domain/reconciler.domain';
 import { MetadataResolverService } from '../../../src/modules/library/ingestion/services/metadata-resolver.service';
 import { BibtexParser } from '../../../src/modules/library/ingestion/parsers/bibtex.parser';
 import { RisParser } from '../../../src/modules/library/ingestion/parsers/ris.parser';
@@ -13,7 +13,7 @@ import { XmlLegacyFormatsParser } from '../../../src/modules/library/ingestion/p
 import {
   buildExtractedMetadataSyncPlan,
   sanitizeExtractedItemUpdateAgainstFreshState,
-} from '../../../src/modules/library/extraction/domain/extraction-metadata-merge.policy';
+} from '../../../src/modules/library/extraction/domain/metadata-merge.policy';
 import {
   buildEnrichmentPatch,
   buildReResolvePatch,

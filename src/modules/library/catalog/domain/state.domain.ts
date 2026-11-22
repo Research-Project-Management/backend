@@ -4,7 +4,7 @@ import {
   VALID_READING_TRANSITIONS,
   CollectionTreeNode,
 } from '@/modules/library/catalog/types/catalog.types';
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { collectDescendantCollectionIds } from '@/modules/library/core';
 
 export function isValidStateTransition(
@@ -412,7 +412,6 @@ export function sanitizeCollectionDescription(
  * Encapsulates tree synthesis, cycle detection (direct & indirect ancestor traversal),
  * and subtree operations behind a concise, pure deterministic interface.
  */
-@Injectable()
 export class TreeEngine {
   /**
    * Transforms a flat list of collections into a nested recursive tree structure.

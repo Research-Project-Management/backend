@@ -2,7 +2,7 @@ import { cleanAbstractText } from './text.domain';
 import { isInstitutionName, splitAuthorString } from './author.domain';
 import { resolveCanonicalArxivCategory } from './tag.domain';
 import { CANONICAL_IDENTIFIER_URI_BUILDERS } from './identifier.domain';
-import { isRejectedCitedIdentifier } from './metadata-coalesce.policy';
+import { isRejectedCitedIdentifier } from './reconciler.domain';
 import { ItemProvenancePolicy } from './item-provenance.domain';
 import {
   getEffectiveBaseFieldMap,

@@ -5,7 +5,6 @@ import {
 } from '@/modules/library/citation/types/citation.types';
 import { cleanBibliographicText } from '@/modules/library/core';
 import { CslJsonMapper } from './csl-json.mapper';
-import { Injectable } from '@nestjs/common';
 
 export interface RawCslWorkInput {
   message?: RawCslWorkInput;
@@ -450,7 +449,6 @@ export const SUPPORTED_CITATION_STYLES: ReadonlyArray<StyleSummary> = [
 
 export const MAX_DYNAMIC_CSL_STYLES = 200;
 
-@Injectable()
 export class CslStyleRegistry {
   private readonly styleMap = new Map<CitationStyleId, StyleSummary>();
   private readonly staticStyleIds = new Set<string>();

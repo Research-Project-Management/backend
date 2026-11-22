@@ -8,7 +8,7 @@ import {
   synchronizeVenueBaseFields,
   buildBibliographicMutationPayload,
   harmonizeFields,
-} from '@/modules/library/core/domain/bibliographic-reconciler.domain';
+} from '@/modules/library/core/domain/reconciler.domain';
 import {
   previewItemTypeConversion,
   buildTypeConversionUpdatePayload,
@@ -18,8 +18,8 @@ import {
   validateAndSanitizeSchemaItem,
   validateAndHarmonizeSchemaCreators,
   isSchemaValidItemType,
-} from '@/modules/library/catalog/services/schema-validator.service';
-import { IngestionSagaOrchestrator } from '@/modules/library/ingestion/services/ingestion-saga.orchestrator';
+} from '@/modules/library/catalog/domain/item-schema.policy';
+import { IngestionSagaOrchestrator } from '@/modules/library/ingestion/services/ingestion-saga.service';
 import type { ItemDetail } from '@/modules/library/core/types/bibliographic.types';
 
 describe('BibliographicReconciler & TypeConversion Domain Suite', () => {

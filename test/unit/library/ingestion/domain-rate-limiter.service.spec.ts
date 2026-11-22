@@ -1,4 +1,4 @@
-import { DomainRateLimiterService } from '@/modules/library/ingestion/services/feed-retrieval.service';
+import { DomainRateLimiterService } from '@/modules/library/ingestion/services/domain-rate-limiter.service';
 
 describe('DomainRateLimiterService', () => {
   let service: DomainRateLimiterService;

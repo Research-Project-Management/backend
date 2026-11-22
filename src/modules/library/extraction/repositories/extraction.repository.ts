@@ -15,7 +15,7 @@ import {
   isRejectedCitedIdentifier,
   disambiguateCitationKey,
   resolveOrCreateTags,
-} from '@/modules/library/extraction/domain/extraction-metadata-merge.policy';
+} from '@/modules/library/extraction/domain/metadata-merge.policy';
 
 @Injectable()
 export class ExtractionRepository {

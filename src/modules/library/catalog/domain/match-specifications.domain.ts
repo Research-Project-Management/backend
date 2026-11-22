@@ -6,14 +6,7 @@ import {
   OrSpecification,
   NotSpecification,
 } from '@/modules/library/core';
-
-export type { ISpecification };
-export {
-  CompositeSpecification,
-  AndSpecification,
-  OrSpecification,
-  NotSpecification,
-};
+import { asMetaRecord } from '@/modules/library/core/domain/text.domain';
 
 interface ExactMatchCandidateInput {
   cleanDoi: string | null;
@@ -55,13 +48,6 @@ interface IExactMatchSpecification {
   buildFallbackEvidence(
     input: ExactMatchCandidateInput,
   ): Record<string, string> | null;
-}
-
-function asMetaRecord(raw: unknown): Record<string, unknown> {
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, unknown>;
-  }
-  return {};
 }
 
 function stripArxivVersion(arxivId: string): string {

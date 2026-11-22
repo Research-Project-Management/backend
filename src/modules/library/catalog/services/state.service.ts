@@ -5,8 +5,8 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { StateRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
-import { UpdateStateDto } from '@/modules/library/catalog/dto/collections.dto';
+import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
+import { UpdateStateDto } from '@/modules/library/catalog/dto/state.dto';
 import {
   StateData,
   ReadingStatus,
@@ -33,10 +33,8 @@ import {
 } from '@/modules/library/catalog/domain/state.domain';
 import { RedisCacheService } from '@/core';
 import { AccessService, Permission } from '@/modules/project/access';
-import { ItemCacheCoordinator } from './schema-validator.service';
+import { ItemCacheCoordinator } from './item-cache.service';
 import { ReaderWriteBehindService } from './reader-write-behind.service';
-
-export { pickPreferredMergedState };
 
 @Injectable()
 export class StateService {

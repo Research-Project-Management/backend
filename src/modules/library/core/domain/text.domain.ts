@@ -11,6 +11,12 @@ import {
   MATH_BLOCK_REGEX,
 } from './text.lexicon';
 
+export function asMetaRecord(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+}
+
 function safeFromCodePoint(code: number): string {
   if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return '';
   if (code >= 0xd800 && code <= 0xdfff) return '';

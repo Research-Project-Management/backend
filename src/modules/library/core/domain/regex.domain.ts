@@ -628,3 +628,13 @@ export class RegexExtractor {
     return result;
   }
 }
+
+const IPV4_PATTERN =
+  /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+
+export function isIpLiteral(hostname: string): boolean {
+  if (!hostname) return false;
+  if (IPV4_PATTERN.test(hostname)) return true;
+  // IPv6 literal contains ':' and only hex digits / ':' / '.' (mapped)
+  return hostname.includes(':') && /^[0-9a-f:.]+$/i.test(hostname);
+}

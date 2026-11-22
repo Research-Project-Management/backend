@@ -11,7 +11,7 @@ import { FilesModule } from '@/modules/files';
 import { AttachmentController } from './controllers/attachments.controller';
 import { AttachmentStorageController } from './controllers/attachment-storage.controller';
 import { AnnotationsController } from './controllers/annotations.controller';
-import { ExtractionTelemetryController } from './controllers/attachments.controller';
+import { ExtractionTelemetryController } from './controllers/telemetry.controller';
 
 // Facades
 import {
@@ -24,9 +24,9 @@ import { AttachmentsService } from './services/attachments.service';
 import { AttachmentRenamerService } from './services/attachment-renamer.service';
 import { WebSnapshotService } from './services/web-snapshot.service';
 import { AnnotationsService } from './services/annotations.service';
-import { PdfAnnotationImporterService } from './services/pdf-annotation-importer.service';
+import { PdfAnnotationImporterService } from './services/pdf-annotations.service';
 import { ReferenceMatcherService } from './services/reference-matcher.service';
-import { ExtractionMetadataSynchronizer } from './services/extraction-metadata.synchronizer';
+import { ExtractionMetadataSynchronizer } from './services/metadata-sync.service';
 
 // Repositories
 import { AttachmentsRepository } from './repositories/attachments.repository';
@@ -36,7 +36,7 @@ import { AnnotationsRepository } from './repositories/annotations.repository';
 // Providers & Infrastructure
 import { PdfProvider } from './providers/pdf.provider';
 import { PdfMetadataExtractor } from './providers/pdf-metadata.extractor';
-import { PdfTextMetadataExtractor } from './providers/pdf-text-metadata.extractor';
+import { PdfTextMetadataExtractor } from './providers/pdf-text.extractor';
 import {
   ExtractionHandler,
   EXTRACTION_EVENT_TYPES,

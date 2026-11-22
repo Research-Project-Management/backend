@@ -2,14 +2,16 @@ export * from './citation.module';
 
 // Controllers
 export * from './controllers/citation.controller';
+export * from './controllers/exports.controller';
 
 // Services & Facade
 export * from './services/citation.service';
 export * from './services/csl-repository.service';
 export * from './services/csl-engine.service';
 export * from './services/csl-style-formatter.service';
-export * from './services/doi-content-negotiation.service';
+export * from './services/doi-negotiation.service';
 export * from './services/pdf-baker.service';
+export * from './services/citation.facade';
 export * from './services/exports.service';
 
 // Repositories

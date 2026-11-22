@@ -1,3 +1,4 @@
+import { asMetaRecord } from '@/modules/library/core/domain/text.domain';
 import { Prisma } from '@prisma/client';
 import {
   normalizeDoi,
@@ -50,12 +51,6 @@ interface FreshItemExtractionTarget {
   publicationTitle?: string | null;
   itemType?: string | null;
   metadata?: unknown;
-}
-
-function asMetaRecord(raw: unknown): Record<string, unknown> {
-  return raw && typeof raw === 'object' && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : {};
 }
 
 function canExtractionOverwriteItemType(

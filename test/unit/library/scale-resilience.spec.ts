@@ -1,7 +1,7 @@
 import { SingleFlightCoalescer } from '@/modules/library/core/resilience/circuit-breaker';
 import { TransactionService } from '@/modules/library/sync/services/transaction.service';
-import { LibraryBootstrapService } from '@/modules/library/catalog/services/library-bootstrap.service';
-import { TypesService } from '@/modules/library/catalog/services/schema-validator.service';
+import { LibraryBootstrapService } from '@/modules/library/catalog/services/bootstrap.service';
+import { TypesService } from '@/modules/library/catalog/services/types.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
 import { CollectionsService } from '@/modules/library/catalog/services/collections.service';
 import { TagsService } from '@/modules/library/catalog/services/tags.service';
@@ -11,7 +11,7 @@ import { ChangeLogRepository } from '@/modules/library/sync/repositories/changel
 import { QueryRepository } from '@/modules/library/catalog/repositories/query.repository';
 import { ItemListQueryRepository } from '@/modules/library/catalog/repositories/item-list-query.repository';
 import { CommandRepository } from '@/modules/library/catalog/repositories/command.repository';
-import { executeCopyCollectionSubtree } from '@/modules/library/catalog/repositories/collection-membership.operations';
+import { executeCopyCollectionSubtree } from '@/modules/library/catalog/repositories/collection-members.repository';
 import { TreeEngine } from '@/modules/library/catalog/domain/state.domain';
 
 describe('Library High-Concurrency & 1k-10k User Scale Resilience', () => {

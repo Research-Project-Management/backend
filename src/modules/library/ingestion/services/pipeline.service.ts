@@ -18,7 +18,7 @@ import {
   isPreExistingMatchItem,
 } from '@/modules/library/ingestion/stages/commit.stage';
 import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
   LibraryItemSource,
   CATALOG_FACADE,
@@ -29,7 +29,7 @@ import {
 } from '@/modules/library/core';
 import { IngestionStatus } from '@prisma/client';
 import { IngestionRunAggregate } from '@/modules/library/ingestion/domain/ingestion-run.domain';
-import { IngestionSagaOrchestrator } from './ingestion-saga.orchestrator';
+import { IngestionSagaOrchestrator } from './ingestion-saga.service';
 import {
   sanitizeOverrides,
   mapPayloadToSource,
@@ -39,7 +39,7 @@ import {
   isRetryableIngestionError,
 } from '@/modules/library/ingestion/types/metadata.types';
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
-import { PipelineBatchExecutor } from './pipeline-batch.executor';
+import { PipelineBatchExecutor } from './pipeline-batch.service';
 import { UrlCaptureService } from './url-capture.service';
 import { IFilesPort, FILES_PORT } from '@/modules/files';
 
@@ -49,7 +49,7 @@ import {
   getSubmissionPayloadSize,
   markRunStatusTransitioned,
   createSingleItemExecutionLog,
-} from './ingestion-saga.orchestrator';
+} from './ingestion-saga.service';
 
 @Injectable()
 export class PipelineService {

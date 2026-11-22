@@ -29,22 +29,13 @@ import {
 } from '@/modules/library/catalog/dto/items.dto';
 import { ItemService } from '@/modules/library/catalog/services/items.service';
 import { ItemQueryService } from '@/modules/library/catalog/services/item-query.service';
-import { ItemCurationService } from '@/modules/library/catalog/services/item-curation.service';
+import { ItemCurationService } from '@/modules/library/catalog/services/curation.service';
 import {
   RequestWithAccessHint,
   ItemsListQuery,
   extractRequestAccessHint,
   buildGetItemsOptions,
-  LibraryPermissionsController,
-} from './library-workspace.controller';
-
-export {
-  type RequestWithAccessHint,
-  ItemsListQuery,
-  extractRequestAccessHint,
-  buildGetItemsOptions,
-  LibraryPermissionsController,
-};
+} from './workspace.controller';
 
 @ApiTags('Library Items')
 @ApiBearerAuth('JWT-auth')

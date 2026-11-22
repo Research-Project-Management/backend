@@ -217,22 +217,6 @@ export function normalizeProjectSpaceId(
   return isProjectSpaceId(projectId, userId) ? projectId.trim() : undefined;
 }
 
-export function resolveCanonicalScopeKey(scope: {
-  userId?: string | null;
-  projectId?: string | null;
-}): string {
-  const validProjectId = normalizeProjectSpaceId(scope.projectId, scope.userId);
-  if (validProjectId) return `proj:${validProjectId}`;
-  const cleanUserId =
-    typeof scope.userId === 'string' ? scope.userId.trim() : '';
-  if (!cleanUserId) {
-    throw new ConfigurationException(
-      'Scope resolution requires either a valid projectId or userId',
-    );
-  }
-  return `user:${cleanUserId}`;
-}
-
 export function resolveSpaceId(scope: {
   userId?: string | null;
   projectId?: string | null;
@@ -691,8 +675,7 @@ interface ItemDenormalizedCountClient {
   };
 }
 
-const SPEC_UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isUuid } from './title.domain';
 
 /**
  * Shared repository helper to recount and synchronize denormalized `attachmentCount`,
@@ -705,7 +688,7 @@ export async function syncItemDenormalizedCountsInClient(
 ): Promise<void> {
   const itemClient = db?.libraryItem ?? db?.item;
   if (!itemId || !itemClient) return;
-  if (options?.requireUuid && !SPEC_UUID_REGEX.test(itemId)) return;
+  if (options?.requireUuid && !isUuid(itemId)) return;
 
   const syncAttachments = options?.attachments ?? false;
   const syncNotes = options?.notes ?? false;

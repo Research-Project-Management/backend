@@ -17,7 +17,7 @@ import {
 } from '@/modules/library/core';
 import { invalidateIngestionItemCache } from '@/modules/library/ingestion/repositories/duplicate-merge.repository';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
   RetractionDatabaseService,
   RetractionDatabaseStats,

@@ -2,18 +2,16 @@ import { Global, Module } from '@nestjs/common';
 import { CoreModule } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
 import { FilesModule } from '@/modules/files';
-import { CitationFacade, CITATION_FACADE } from './services/exports.service';
+import { CitationFacade, CITATION_FACADE } from './services/citation.facade';
 
 // Presentation
 import { CitationController } from './controllers/citation.controller';
-import { ExportsController } from './controllers/citation.controller';
+import { ExportsController } from './controllers/exports.controller';
 
 // Services
-import {
-  CitationService,
-  QueryResolverService,
-} from './services/citation.service';
-import { DoiContentNegotiationService } from './services/doi-content-negotiation.service';
+import { CitationService } from './services/citation.service';
+import { QueryResolverService } from './services/query-resolver.service';
+import { DoiContentNegotiationService } from './services/doi-negotiation.service';
 import {
   CslEngineService,
   CslLocaleLoaderService,

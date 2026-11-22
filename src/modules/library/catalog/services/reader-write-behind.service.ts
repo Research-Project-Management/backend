@@ -8,7 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
-import { StateRepository } from '@/modules/library/catalog/repositories/saved-searches.repository';
+import { StateRepository } from '@/modules/library/catalog/repositories/state.repository';
 
 export interface BufferedReadingProgress {
   currentPage?: number;

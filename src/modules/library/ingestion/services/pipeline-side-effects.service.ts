@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/base-metadata.provider';
+import { RetractionScannerProvider } from '@/modules/library/ingestion/providers/retraction-scanner.provider';
 import {
   CATALOG_FACADE,
   ICatalogFacade,

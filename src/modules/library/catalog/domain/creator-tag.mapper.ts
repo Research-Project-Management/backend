@@ -31,18 +31,6 @@ import {
 } from '@/modules/library/core/types/bibliographic.types';
 import { getFileContentPath } from '@/modules/files';
 
-export {
-  buildTipTapDocFromText,
-  isUuid,
-  deriveFirstAuthor,
-  ITEM_COLUMN_METADATA_FIELDS,
-};
-export {
-  cleanSingleIdentifier,
-  extractExtraKeyValues,
-  normalizeItemIdentifiers,
-} from './identifier-change.domain';
-
 export interface ResolvedTag {
   id: string;
   type: TagType;
@@ -364,8 +352,6 @@ export function extractNonColumnExtraFields(
   }
   return result;
 }
-
-export { convertHtmlToMarkdown };
 
 export function prepareNotesToCreate(
   notes: unknown,

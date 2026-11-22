@@ -21,7 +21,7 @@ import {
   MetadataRoutingPolicy,
   SsrfBlockedDomainException,
 } from '@/modules/library/ingestion/domain/metadata.policy';
-import { DomainRateLimiterService } from './feed-retrieval.service';
+import { DomainRateLimiterService } from './domain-rate-limiter.service';
 import {
   deriveDoiFromPublisherUrl,
   deriveDirectPdfUrl,

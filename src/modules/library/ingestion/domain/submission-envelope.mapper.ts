@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { DomainValidationException } from '@/modules/library/core/errors/domain.exception';
 import {
   IngestionSubmissionEnvelope,
   SubmissionPayload,
@@ -321,7 +321,7 @@ export class SubmissionEnvelopeFactory {
   static buildPayloadFromDto(dto: IngestionSubmissionInput): SubmissionPayload {
     const strategy = SUBMISSION_DTO_PAYLOAD_STRATEGIES[dto.kind];
     if (!strategy) {
-      throw new BadRequestException(
+      throw new DomainValidationException(
         'Unknown ingestion kind: ' + String((dto as { kind?: unknown }).kind),
       );
     }
@@ -395,7 +395,7 @@ export class SubmissionEnvelopeFactory {
       typeof command.source === 'string' ? command.source.toLowerCase() : '';
     const strategy = COMMAND_PAYLOAD_STRATEGIES[sourceKey];
     if (!strategy) {
-      throw new BadRequestException(
+      throw new DomainValidationException(
         `Unsupported ingestion source: ${String((command as { source?: unknown }).source)}`,
       );
     }

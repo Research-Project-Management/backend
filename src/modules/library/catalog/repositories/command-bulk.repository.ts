@@ -7,8 +7,8 @@ import {
   LIBRARY_EVENT_TYPES,
   TransactionHelpers,
   ItemsMapper,
+  isUuid,
 } from '@/modules/library/core';
-import { isUuid } from '@/modules/library/catalog/domain/item-command.mapper';
 
 export interface ICommandBulkRepositoryPort {
   softDeleteMany(

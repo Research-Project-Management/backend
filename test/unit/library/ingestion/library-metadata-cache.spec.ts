@@ -1,4 +1,4 @@
-import { MetadataCache } from '@/modules/library/ingestion/services/retraction-seeder.service';
+import { MetadataCache } from '@/modules/library/ingestion/services/metadata-cache.service';
 import { MetadataService } from '@/modules/library/ingestion/services/metadata.service';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
 import { ResolvedMetadata } from '@/modules/library/ingestion/types/metadata.types';
