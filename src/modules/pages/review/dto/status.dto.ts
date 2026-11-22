@@ -6,18 +6,7 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { REVIEW_STATUSES, type ReviewStatus } from '../domain';
-
-export {
-  REVIEW_STATUSES,
-  REVIEW_TRANSITIONS,
-  ReviewTransitionPolicy,
-  isReviewTransitionAllowed,
-  reviewTransitionPolicy,
-  type ReviewPolicySpec,
-  type ReviewStatus,
-  type ReviewTransitionCandidate,
-} from '../domain';
+import { REVIEW_STATUSES, type ReviewStatus } from '../domain/review.policy';
 
 export class UpdateReviewStatusDto {
   @ApiProperty({ enum: REVIEW_STATUSES })

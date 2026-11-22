@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/manuscripts/core/utils/zip-builder.ts
  * Canonical, zero-dependency PKZIP 2.0 binary packing and streaming utilities
  * powered by Node.js built-in zlib (Shared Kernel of Manuscripts).
@@ -21,7 +21,7 @@ export function crc32(data: Buffer | string): number {
 /**
  * Converts a JavaScript Date into MS-DOS 16-bit time and date fields for PKZIP headers.
  */
-export function toDosDateTime(d: Date = new Date()): {
+function toDosDateTime(d: Date = new Date()): {
   time: number;
   date: number;
 } {
@@ -40,7 +40,7 @@ export function toDosDateTime(d: Date = new Date()): {
 /**
  * Normalizes a relative archive path and strips path-traversal sequences.
  */
-export function sanitizeZipPath(relPath: string): string {
+function sanitizeZipPath(relPath: string): string {
   return relPath
     .replace(/\\/g, '/')
     .split('/')
@@ -58,7 +58,7 @@ export interface ZipEntry {
 /**
  * Packs a 30-byte PKZIP 2.0 Local File Header.
  */
-export function packLocalFileHeader(params: {
+function packLocalFileHeader(params: {
   compressionMethod: number;
   dosTime: number;
   dosDate: number;
@@ -85,7 +85,7 @@ export function packLocalFileHeader(params: {
 /**
  * Packs a 46-byte PKZIP 2.0 Central Directory File Header.
  */
-export function packCentralDirectoryHeader(params: {
+function packCentralDirectoryHeader(params: {
   compressionMethod: number;
   dosTime: number;
   dosDate: number;
@@ -119,7 +119,7 @@ export function packCentralDirectoryHeader(params: {
 /**
  * Packs a 22-byte PKZIP 2.0 End of Central Directory (EOCD) record.
  */
-export function packEndOfCentralDirectory(params: {
+function packEndOfCentralDirectory(params: {
   totalEntries: number;
   cdSize: number;
   cdStartOffset: number;

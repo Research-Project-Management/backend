@@ -407,6 +407,7 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
   userId?: string;
   authorizedProjectId?: string;
   realtimeService?: RealtimeFacade;
+  onSupersede?: (compileTargetId: string) => void;
   logger: Logger;
 }): Promise<CompilePipelineResult> {
   const {
@@ -416,6 +417,7 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
     userId,
     authorizedProjectId,
     realtimeService,
+    onSupersede,
     logger,
   } = params;
 
@@ -436,6 +438,7 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
 
   const existingJobId = activeQueueJobIds.get(compileTargetId);
   if (existingJobId) {
+    onSupersede?.(compileTargetId);
     try {
       const oldJob = await compileQueue.getJob(existingJobId);
       if (oldJob) {

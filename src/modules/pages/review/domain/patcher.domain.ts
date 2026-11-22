@@ -3,9 +3,9 @@
  * inline text changes across document lines.
  */
 
-import { TrackChange } from './change.entity';
-import { TextRange, TextRangeProps } from './text-range';
-import { StaleAnchorError } from './errors';
+import { TrackChange } from './change.domain';
+import { TextRange, TextRangeProps } from './text-range.domain';
+import { StaleAnchorError } from './review.errors';
 
 export interface PatchResult {
   lines: string[];

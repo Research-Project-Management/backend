@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+﻿import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SystemResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 import {
@@ -70,7 +70,7 @@ export const PAGES_DOMAIN_EVENTS = {
 
 export type PagesRateBucket = 'cursor' | 'update' | 'joinLeave';
 
-export const PAGES_RATE_CLASS_MAP: Readonly<Record<string, PagesRateBucket>> =
+const PAGES_RATE_CLASS_MAP: Readonly<Record<string, PagesRateBucket>> =
   Object.freeze({
     [PAGES_EVENTS.DOC_CURSOR]: 'cursor',
     [PAGES_EVENTS.YJS_SYNC_STEP_1]: 'update',
@@ -101,7 +101,7 @@ export const PAGES_PRESENCE_COLORS: readonly string[] = Object.freeze([
   '#D946EF',
 ]);
 
-export const PAGES_PERSONAL_SPACE_ALIASES: ReadonlySet<string> = new Set([
+const PAGES_PERSONAL_SPACE_ALIASES: ReadonlySet<string> = new Set([
   'personal',
   'me',
   'user',

@@ -18,7 +18,19 @@ export * from './diagnostics';
 export * from './clsi';
 
 // Subsystem 4: Review & Versioning
-export * from './review';
+export * from './review/review.module';
+export * from './review/review.events';
+export * from './review/review.repository';
+export * from './review/services/comments.service';
+export * from './review/services/suggestions.service';
+export * from './review/services/status.service';
+export * from './review/domain/change.domain';
+export * from './review/domain/comment.domain';
+export * from './review/domain/text-range.domain';
+export * from './review/domain/patcher.domain';
+export * from './review/domain/review.errors';
+export * from './review/domain/review.policy';
+export * from './review/domain/review.mapper';
 export * from './project-history';
 
 // Subsystem 5: Academic Authoring & Packaging

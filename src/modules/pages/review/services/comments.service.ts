@@ -18,17 +18,21 @@ import {
   ResourceAccessPolicy,
   Role,
 } from '@/modules/project/access';
-import { CommentReply, CommentThread, TextRange } from '../domain';
-import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
-import { ReviewRepository, extractMentionUserIds } from '../review.repository';
+import { CommentReply, CommentThread } from '../domain/comment.domain';
 import {
-  assertCanModifyItem,
   decodeAnchorBase64,
   encodeAnchorBase64,
-  resolveReviewTarget,
+  extractMentionUserIds,
   toCommentDto,
+} from '../domain/review.mapper';
+import {
+  assertCanModifyItem,
   validateCommentLines,
-} from './scope.helper';
+} from '../domain/review.policy';
+import { TextRange } from '../domain/text-range.domain';
+import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
+import { ReviewRepository } from '../review.repository';
+import { resolveReviewTarget } from './review-target.resolver';
 
 @Injectable()
 export class CommentsService {

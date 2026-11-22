@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/manuscripts/export-import/domain/latex.transpiler.ts
  * Pure in-process domain functions for resolving LaTeX child document macros
  * (\input, \include, \subfile) and transpiling LaTeX into Markdown, HTML, and DOCX buffers.
@@ -384,7 +384,7 @@ export function resolveIncludedLatexContent(
  * allowing new formats (e.g. `.bib`, `.rst`, `.odt`) to be registered without modifying
  * `transpileLatexDocumentForExport`.
  */
-export interface ExportFormatContext {
+interface ExportFormatContext {
   rawFilename: string;
   baseName: string;
   content: string;
@@ -396,7 +396,7 @@ export interface IExportFormatStrategy {
   transpile(ctx: ExportFormatContext): ExportFormattedDocResult;
 }
 
-export class DocxExportStrategy implements IExportFormatStrategy {
+class DocxExportStrategy implements IExportFormatStrategy {
   public readonly format = 'docx';
 
   public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
@@ -428,7 +428,7 @@ export class MarkdownExportStrategy implements IExportFormatStrategy {
   }
 }
 
-export class HtmlExportStrategy implements IExportFormatStrategy {
+class HtmlExportStrategy implements IExportFormatStrategy {
   public readonly format = 'html';
 
   public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
@@ -443,7 +443,7 @@ export class HtmlExportStrategy implements IExportFormatStrategy {
   }
 }
 
-export class PlainTexExportStrategy implements IExportFormatStrategy {
+class PlainTexExportStrategy implements IExportFormatStrategy {
   public readonly format = 'tex';
   public readonly aliases = ['latex'] as const;
 
@@ -458,7 +458,7 @@ export class PlainTexExportStrategy implements IExportFormatStrategy {
   }
 }
 
-export class ExportFormatRegistry {
+class ExportFormatRegistry {
   private readonly strategies = new Map<string, IExportFormatStrategy>();
   private readonly fallbackStrategy: IExportFormatStrategy;
 
@@ -495,7 +495,7 @@ export class ExportFormatRegistry {
   }
 }
 
-export const defaultExportFormatRegistry = new ExportFormatRegistry();
+const defaultExportFormatRegistry = new ExportFormatRegistry();
 
 /**
  * Pure transpilation of a LaTeX document (with optional child document resolution)

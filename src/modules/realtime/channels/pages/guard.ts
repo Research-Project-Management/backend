@@ -1,4 +1,4 @@
-import {
+﻿import {
   CanActivate,
   CustomDecorator,
   ExecutionContext,
@@ -33,13 +33,13 @@ export const WS_ACCESS_LEVEL_KEY = 'ws:access_level';
 export const WsAccess = (level: WsAccessLevel): CustomDecorator<string> =>
   SetMetadata(WS_ACCESS_LEVEL_KEY, level);
 
-export interface WsAccessPayload {
+interface WsAccessPayload {
   spaceId?: string;
   pageId?: string;
   docId?: string;
 }
 
-export interface WsAccessEvaluationContext {
+interface WsAccessEvaluationContext {
   client: Socket;
   event?: string;
   requiredLevel: WsAccessLevel;
@@ -48,7 +48,7 @@ export interface WsAccessEvaluationContext {
   realtimeAccess: RealtimeAccessService;
 }
 
-export function assertRealtimeAccessDecision(
+function assertRealtimeAccessDecision(
   decision: 'allowed' | 'denied' | 'unavailable',
   deniedMessage: string,
   requiredLevel?: WsAccessLevel,
@@ -66,7 +66,7 @@ export function assertRealtimeAccessDecision(
   }
 }
 
-export interface IWsEventAccessRule {
+interface IWsEventAccessRule {
   readonly name: string;
   matches(ctx: WsAccessEvaluationContext): boolean;
   authorize(ctx: WsAccessEvaluationContext): Promise<boolean>;
@@ -170,7 +170,7 @@ const ActiveDocScopedAccessRule: IWsEventAccessRule = {
   },
 };
 
-export const DEFAULT_PAGES_ACCESS_RULES: readonly IWsEventAccessRule[] = [
+const DEFAULT_PAGES_ACCESS_RULES: readonly IWsEventAccessRule[] = [
   ProjectJoinAccessRule,
   DocJoinAccessRule,
   ActiveDocScopedAccessRule,

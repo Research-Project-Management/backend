@@ -3,10 +3,8 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { DocModifiedError } from '@/modules/pages/docstore/domain/doc.errors';
-import {
-  toSuggestionDto,
-  validateSuggestionRange,
-} from '@/modules/pages/review/services/scope.helper';
+import { toSuggestionDto } from '@/modules/pages/review/domain/review.mapper';
+import { validateSuggestionRange } from '@/modules/pages/review/domain/review.policy';
 import { YjsUpdateValidator } from '@/modules/realtime/channels/pages/yjs/sync';
 import { YjsService } from '@/modules/realtime/channels/pages/yjs/engine';
 import { RealtimeValidationFailedException } from '@/modules/realtime/core/errors';
@@ -33,18 +31,18 @@ import type {
   PageSnapshotCollectorAdapter,
   PageSnapshotRestorerAdapter,
 } from '@/modules/pages/project-history/adapters/project-history.adapters';
+import { TrackChange } from '@/modules/pages/review/domain/change.domain';
+import { LinePatcher } from '@/modules/pages/review/domain/patcher.domain';
 import {
   ChangeNotFoundError,
-  LinePatcher,
   ResolvedThreadError,
   StaleAnchorError,
-  TextRange,
   ThreadNotFoundError,
-  TrackChange,
-} from '@/modules/pages/review/domain';
-import type { DocPatcher } from '@/modules/pages/review/doc-patcher.adapter';
+} from '@/modules/pages/review/domain/review.errors';
+import { TextRange } from '@/modules/pages/review/domain/text-range.domain';
+import type { DocPatcher } from '@/modules/pages/review/adapters/doc-patcher.adapter';
 import type { ReviewRepository } from '@/modules/pages/review/review.repository';
-import { extractMentionUserIds } from '@/modules/pages/review/review.repository';
+import { extractMentionUserIds } from '@/modules/pages/review/domain/review.mapper';
 import { REVIEW_EVENTS } from '@/modules/pages/review/review.events';
 import { CommentsService } from '@/modules/pages/review/services/comments.service';
 import { SuggestionsService } from '@/modules/pages/review/services/suggestions.service';

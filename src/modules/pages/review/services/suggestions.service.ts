@@ -12,23 +12,21 @@ import { AuthenticatedRequest, isUuid } from '@/core';
 import { PageService } from '@/modules/pages/core/services/page.service';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
-import { DocPatcher } from '../doc-patcher.adapter';
+import { DocPatcher } from '../adapters/doc-patcher.adapter';
+import { TrackChange } from '../domain/change.domain';
+import { LinePatcher } from '../domain/patcher.domain';
+import { PatchConflictError, StaleAnchorError } from '../domain/review.errors';
 import {
-  LinePatcher,
-  PatchConflictError,
-  StaleAnchorError,
-  TextRange,
-  TrackChange,
-} from '../domain';
-import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
-import { ReviewMapper, ReviewRepository } from '../review.repository';
-import {
+  ReviewMapper,
   decodeAnchorBase64,
   encodeAnchorBase64,
-  resolveReviewTarget,
   toSuggestionDto,
-  validateSuggestionRange,
-} from './scope.helper';
+} from '../domain/review.mapper';
+import { validateSuggestionRange } from '../domain/review.policy';
+import { TextRange } from '../domain/text-range.domain';
+import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
+import { ReviewRepository } from '../review.repository';
+import { resolveReviewTarget } from './review-target.resolver';
 
 export interface CreateSuggestionInput {
   type?: string;

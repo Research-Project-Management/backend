@@ -238,6 +238,9 @@ export class ClsiService implements OnModuleDestroy {
       userId,
       authorizedProjectId,
       realtimeService: this.realtimeService,
+      onSupersede: (compileTargetId) => {
+        this.fairQueue.cancel(compileTargetId);
+      },
       logger: this.logger,
     });
   }
@@ -367,6 +370,7 @@ export class ClsiService implements OnModuleDestroy {
             dto.stopOnFirstError ?? false,
           ].join('|'),
         )}`;
+        this.fairQueue.registerFingerprint(scratchWorkspaceId, cacheKey);
         const cacheable = !!(dto.useCache && plan.hasMainContent);
 
         if (cacheable && this.cache) {

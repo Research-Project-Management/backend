@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
-import { InvalidChangeError } from './errors';
-import { TextRange } from './text-range';
+import { InvalidChangeError } from './review.errors';
+import { TextRange } from './text-range.domain';
 
 export type ChangeType = 'insert' | 'delete';
 export type ChangeStatus = 'pending' | 'accepted' | 'rejected';

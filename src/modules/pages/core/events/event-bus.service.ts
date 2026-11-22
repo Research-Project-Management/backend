@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/manuscripts/core/events/event-bus.service.ts
  *
  * Centralized Domain Event Bus for the Manuscripts Subsystem (DDD Domain Interactions).
@@ -16,7 +16,7 @@ import {
   NOOP_LIVE_COLLABORATION,
 } from '../ports/live-collaboration.port';
 
-export type PageMutationSource =
+type PageMutationSource =
   | 'rest-docstore'
   | 'track-changes'
   | 'history-restore'
@@ -26,7 +26,7 @@ export type PageMutationSource =
   | 'template-hydration'
   | 'yjs-flush';
 
-export interface PageDocumentMutatedEvent {
+interface PageDocumentMutatedEvent {
   type: 'manuscript.document.mutated';
   projectId: string;
   docId: string;
@@ -37,7 +37,7 @@ export interface PageDocumentMutatedEvent {
   occurredAt: number;
 }
 
-export interface PageNodesDeletedEvent {
+interface PageNodesDeletedEvent {
   type: 'manuscript.nodes.deleted';
   projectId: string;
   deletedDocIds: string[];
@@ -46,7 +46,7 @@ export interface PageNodesDeletedEvent {
   occurredAt: number;
 }
 
-export interface PageHistoryRestoredEvent {
+interface PageHistoryRestoredEvent {
   type: 'manuscript.history.restored';
   projectId: string;
   pageId?: string;
@@ -58,10 +58,10 @@ export interface PageHistoryRestoredEvent {
   occurredAt: number;
 }
 
-export type PageDomainEvent =
+type PageDomainEvent =
   PageDocumentMutatedEvent | PageNodesDeletedEvent | PageHistoryRestoredEvent;
 
-export type PageDomainEventHandler<
+type PageDomainEventHandler<
   T extends PageDomainEvent = PageDomainEvent,
 > = (event: T) => Promise<void> | void;
 

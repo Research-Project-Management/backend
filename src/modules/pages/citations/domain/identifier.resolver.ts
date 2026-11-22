@@ -1,4 +1,4 @@
-/**
+﻿/**
  * citations/domain/identifier.resolver.ts
  * Resolver resolving DOI, arXiv, and ISBN identifiers via public academic APIs
  * (CrossRef Content Negotiation, arXiv Atom Export API, and OpenLibrary Books API).
@@ -61,7 +61,7 @@ const CROSSREF_TYPE_MAP: Record<string, { type: string; container?: string }> =
     'posted-content': { type: 'misc', container: 'howpublished' },
   };
 
-export type FetchLikeFn = (
+type FetchLikeFn = (
   url: string,
   init?: RequestInit,
 ) => Promise<Response>;
@@ -83,7 +83,7 @@ function formatCrossrefPersonList(
 /**
  * Decorator Pattern: Wraps a fetch implementation with timeout and transient 5xx retry.
  */
-export function createResilientFetch(
+function createResilientFetch(
   baseFetch: FetchLikeFn = (url, init) => fetch(url, init),
   options: { timeoutMs?: number; maxRetries?: number } = {},
 ): FetchLikeFn {
@@ -126,7 +126,7 @@ export function createResilientFetch(
 /**
  * Chain of Responsibility Pattern: Academic Identifier Resolution Handler
  */
-export interface IIdentifierHandler {
+interface IIdentifierHandler {
   readonly name: string;
   setNext(handler: IIdentifierHandler): IIdentifierHandler;
   handle(identifier: IdentifierVo): Promise<BibEntry | null>;
@@ -164,7 +164,7 @@ export abstract class BaseIdentifierHandler implements IIdentifierHandler {
  * Builds a citation key "<family><year><firstTitleWord>" restricted to
  * [A-Za-z0-9_:.-]; falls back to a sanitized identifier-based key.
  */
-export function buildResolvedCitationKey(
+function buildResolvedCitationKey(
   family: string | undefined,
   year: string | undefined,
   title: string,
@@ -184,7 +184,7 @@ export function buildResolvedCitationKey(
   return sanitizeCitationKey(fallback.replace(/\//g, '_')) || 'ref';
 }
 
-export class CrossrefBibtexHandler extends BaseIdentifierHandler {
+class CrossrefBibtexHandler extends BaseIdentifierHandler {
   public readonly name = 'CrossrefBibtexContentNegotiation';
 
   constructor(
@@ -227,7 +227,7 @@ export class CrossrefBibtexHandler extends BaseIdentifierHandler {
   }
 }
 
-export class CrossrefJsonHandler extends BaseIdentifierHandler {
+class CrossrefJsonHandler extends BaseIdentifierHandler {
   public readonly name = 'CrossrefRestJsonApi';
 
   constructor(private readonly fetchFn: FetchLikeFn) {
@@ -327,7 +327,7 @@ export class CrossrefJsonHandler extends BaseIdentifierHandler {
   }
 }
 
-export class ArxivHandler extends BaseIdentifierHandler {
+class ArxivHandler extends BaseIdentifierHandler {
   public readonly name = 'ArxivAtomExportApi';
 
   constructor(private readonly fetchFn: FetchLikeFn) {
@@ -408,7 +408,7 @@ export class ArxivHandler extends BaseIdentifierHandler {
   }
 }
 
-export interface OpenLibraryBookItem {
+interface OpenLibraryBookItem {
   title?: string;
   publish_date?: string;
   authors?: Array<{ name?: string }>;
@@ -418,7 +418,7 @@ export interface OpenLibraryBookItem {
   url?: string;
 }
 
-export class OpenLibraryIsbnHandler extends BaseIdentifierHandler {
+class OpenLibraryIsbnHandler extends BaseIdentifierHandler {
   public readonly name = 'OpenLibraryBooksApi';
 
   constructor(private readonly fetchFn: FetchLikeFn) {

@@ -32,212 +32,148 @@ import { CommentsService } from '../services/comments.service';
 
 @ApiTags('Manuscripts - Pages Review & Comments')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/pages')
+@Controller('api/v1/pages/docs/:docId/comments')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class CommentsController {
   constructor(private readonly commentsService: CommentsService) {}
 
-  @Get([
-    'pages/:pageId/comments',
-    'docs/:docId/comments',
-    'spaces/:spaceId/docs/:docId/comments',
-  ])
+  @Get()
   async list(
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
+    @Param('docId') docId: string,
     @Query('status') status?: string,
-    @Param('spaceId') spaceId?: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
   ) {
-    return this.commentsService.list(
-      docId || pageId || '',
-      status,
-      spaceId,
-      authSpace,
-    );
+    return this.commentsService.list(docId, status, undefined, authSpace);
   }
 
-  @Post([
-    'pages/:pageId/comments',
-    'docs/:docId/comments',
-    'spaces/:spaceId/docs/:docId/comments',
-  ])
+  @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(
+    @Param('docId') docId: string,
     @Body() body: CreateCommentDto,
     @Req() req: AuthenticatedRequest,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
   ) {
-    return this.commentsService.create(
-      docId || pageId || '',
-      body,
-      req,
-      spaceId,
-      authSpace,
-    );
+    return this.commentsService.create(docId, body, req, undefined, authSpace);
   }
 
-  @Patch([
-    'pages/:pageId/comments/:commentId',
-    'docs/:docId/comments/:commentId',
-    'spaces/:spaceId/docs/:docId/comments/:commentId',
-  ])
+  @Patch(':commentId')
   async update(
+    @Param('docId') docId: string,
     @Param('commentId') commentId: string,
     @Body() body: UpdateCommentDto,
     @Req() req: AuthenticatedRequest,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     return this.commentsService.update(
-      docId || pageId || '',
+      docId,
       commentId,
       body,
       req,
-      spaceId,
+      undefined,
       authSpace,
       role,
     );
   }
 
-  @Delete([
-    'pages/:pageId/comments/:commentId',
-    'docs/:docId/comments/:commentId',
-    'spaces/:spaceId/docs/:docId/comments/:commentId',
-  ])
+  @Delete(':commentId')
   @HttpCode(HttpStatus.OK)
   async remove(
+    @Param('docId') docId: string,
     @Param('commentId') commentId: string,
     @Req() req: AuthenticatedRequest,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     return this.commentsService.remove(
-      docId || pageId || '',
+      docId,
       commentId,
       req,
-      spaceId,
+      undefined,
       authSpace,
       role,
     );
   }
 
-  @Post([
-    'pages/:pageId/comments/:commentId/reply',
-    'pages/:pageId/comments/:commentId/replies',
-    'docs/:docId/comments/:commentId/reply',
-    'docs/:docId/comments/:commentId/replies',
-    'spaces/:spaceId/docs/:docId/comments/:commentId/reply',
-    'spaces/:spaceId/docs/:docId/comments/:commentId/replies',
-  ])
+  @Post(':commentId/replies')
   @HttpCode(HttpStatus.CREATED)
   async addReply(
+    @Param('docId') docId: string,
     @Param('commentId') commentId: string,
     @Body() body: ReplyDto,
     @Req() req: AuthenticatedRequest,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
   ) {
     return this.commentsService.addReply(
-      docId || pageId || '',
+      docId,
       commentId,
       body,
       req,
-      spaceId,
+      undefined,
       authSpace,
     );
   }
 
-  @Patch([
-    'pages/:pageId/comments/:commentId/replies/:replyId',
-    'docs/:docId/comments/:commentId/replies/:replyId',
-    'spaces/:spaceId/docs/:docId/comments/:commentId/replies/:replyId',
-  ])
-  @RequireRole(Role.REVIEWER)
+  @Patch(':commentId/replies/:replyId')
   @HttpCode(HttpStatus.OK)
   async updateReply(
+    @Param('docId') docId: string,
     @Param('commentId') commentId: string,
     @Param('replyId') replyId: string,
     @Body() body: ReplyDto,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @Req() req?: AuthenticatedRequest,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     return this.commentsService.updateReply(
-      docId || pageId || '',
+      docId,
       commentId,
       replyId,
       body,
-      spaceId,
+      undefined,
       req,
       authSpace,
       role,
     );
   }
 
-  @Delete([
-    'pages/:pageId/comments/:commentId/replies/:replyId',
-    'docs/:docId/comments/:commentId/replies/:replyId',
-    'spaces/:spaceId/docs/:docId/comments/:commentId/replies/:replyId',
-  ])
-  @RequireRole(Role.REVIEWER)
+  @Delete(':commentId/replies/:replyId')
   @HttpCode(HttpStatus.OK)
   async deleteReply(
+    @Param('docId') docId: string,
     @Param('commentId') commentId: string,
     @Param('replyId') replyId: string,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @Req() req?: AuthenticatedRequest,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
     @CurrentRole() role?: Role,
   ) {
     return this.commentsService.deleteReply(
-      docId || pageId || '',
+      docId,
       commentId,
       replyId,
-      spaceId,
+      undefined,
       req,
       authSpace,
       role,
     );
   }
 
-  @Patch([
-    'pages/:pageId/comments/:commentId/resolve',
-    'docs/:docId/comments/:commentId/resolve',
-    'spaces/:spaceId/docs/:docId/comments/:commentId/resolve',
-  ])
+  @Patch(':commentId/resolve')
   @RequireRole(Role.CONTRIBUTOR)
   async resolve(
+    @Param('docId') docId: string,
     @Param('commentId') commentId: string,
     @Body() body: ResolveCommentDto,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
     @CurrentUser('id') currentUserId?: string,
   ) {
     return this.commentsService.resolve(
-      docId || pageId || '',
+      docId,
       commentId,
       body,
-      spaceId,
+      undefined,
       authSpace,
       currentUserId,
     );

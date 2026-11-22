@@ -15,20 +15,16 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { ReviewRoundInfo } from '@/modules/pages/docstore/domain';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 import { Role } from '@/modules/project/access';
-import {
-  UpdateReviewStatusDto,
-  reviewTransitionPolicy,
-} from '../dto/status.dto';
+import { reviewTransitionPolicy } from '../domain/review.policy';
+import { UpdateReviewStatusDto } from '../dto/status.dto';
 import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
+import { ReviewRepository } from '../review.repository';
 import {
-  ReviewRepository,
-  type DocReviewWithRound,
-} from '../review.repository';
-import {
-  resolveReviewTarget,
   toCommentDto,
   toSuggestionDto,
-} from './scope.helper';
+  type DocReviewWithRound,
+} from '../domain/review.mapper';
+import { resolveReviewTarget } from './review-target.resolver';
 
 @Injectable()
 export class ReviewStatusService {

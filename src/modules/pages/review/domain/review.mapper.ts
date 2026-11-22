@@ -6,7 +6,9 @@ import {
   ReviewRound,
 } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import { CommentReply, CommentThread, TextRange, TrackChange } from '../domain';
+import { TrackChange } from './change.domain';
+import { CommentReply, CommentThread } from './comment.domain';
+import { TextRange } from './text-range.domain';
 
 const MENTION_TOKEN_REGEX =
   /@\[[^\]]+\]\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/gi;

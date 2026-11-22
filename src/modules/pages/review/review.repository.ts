@@ -2,12 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, ReviewStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
-import {
-  ChangeStatus,
-  CommentReply,
-  CommentThread,
-  TrackChange,
-} from './domain';
+import { ChangeStatus, TrackChange } from './domain/change.domain';
+import { CommentReply, CommentThread } from './domain/comment.domain';
 import {
   ReviewMapper,
   extractMentionUserIds,
@@ -15,15 +11,7 @@ import {
   type ChangeWithDoc,
   type DocReviewWithRound,
   type ThreadWithReplies,
-} from './mappers/review.mapper';
-
-export {
-  ReviewMapper,
-  extractMentionUserIds,
-  type ChangeWithDoc,
-  type DocReviewWithRound,
-  type ThreadWithReplies,
-};
+} from './domain/review.mapper';
 
 @Injectable()
 export class ReviewRepository {

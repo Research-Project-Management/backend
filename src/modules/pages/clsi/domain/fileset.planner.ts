@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/manuscripts/clsi/domain/fileset.planner.ts
  * Pure in-process planning of the file set and content-independent fingerprint
  * handed to the LaTeX compilation pipeline.
@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 import { TexEngineDetector } from './tex-engine.detector';
 import type { CompileValidationIssue } from './clsi.ports';
 
-export type FileSource =
+type FileSource =
   | {
       kind: 'db';
       docId: string;
@@ -18,7 +18,7 @@ export type FileSource =
     }
   | { kind: 'inline'; content: string; token: string };
 
-export interface ManifestNode {
+interface ManifestNode {
   id: string;
   docId: string | null;
   fileId?: string | null;
@@ -28,7 +28,7 @@ export interface ManifestNode {
   isRootDoc: boolean;
 }
 
-export interface ManifestDoc {
+interface ManifestDoc {
   id: string;
   path: string | null;
   rev: number;
@@ -45,7 +45,7 @@ export interface ManifestFile {
   updatedAt?: Date;
 }
 
-export interface FileSetInput {
+interface FileSetInput {
   nodes: ManifestNode[];
   docs: ManifestDoc[];
   binaryFiles?: ManifestFile[];
@@ -99,7 +99,7 @@ const dbSource = (doc: ManifestDoc): FileSource => ({
 const isEmpty = (s: FileSource | undefined): boolean =>
   !s || (s.kind === 'inline' ? s.content.length === 0 : s.sizeBytes === 0);
 
-export function fingerprintFileSet(
+function fingerprintFileSet(
   files: Map<string, FileSource>,
   binaryTokens?: Map<string, string>,
 ): string {

@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
-import { InvalidReplyError, InvalidThreadError } from './errors';
-import { TextRange } from './text-range';
+import { InvalidReplyError, InvalidThreadError } from './review.errors';
+import { TextRange } from './text-range.domain';
 
 export interface CommentReplyProps {
   id?: string;

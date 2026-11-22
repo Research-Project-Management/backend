@@ -1183,5 +1183,198 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
       };
       expect(body.engine).toBeUndefined();
     });
+
+    it('CompileQueueService prioritizes manual builds ahead of queued auto builds across projects', async () => {
+      const queue = new CompileQueueService({
+        maxConcurrentCompiles: 1,
+        maxQueueLength: 10,
+        autoShedThreshold: 8,
+      });
+
+      const executionOrder: string[] = [];
+      let releaseActive!: () => void;
+      const activeStarted = new Promise<void>((resolve) => {
+        void queue.schedule('proj-active', 'user-1', undefined, async () => {
+          executionOrder.push('proj-active');
+          resolve();
+          await new Promise<void>((done) => {
+            releaseActive = done;
+          });
+          return 'active-done';
+        });
+      });
+      await activeStarted;
+
+      const autoB = queue.schedule(
+        'proj-auto-b',
+        'user-b',
+        undefined,
+        async () => {
+          executionOrder.push('proj-auto-b');
+          return 'b-done';
+        },
+        { priority: 'auto' },
+      );
+
+      const autoC = queue.schedule(
+        'proj-auto-c',
+        'user-c',
+        undefined,
+        async () => {
+          executionOrder.push('proj-auto-c');
+          return 'c-done';
+        },
+        { priority: 'auto' },
+      );
+
+      const manualD = queue.schedule(
+        'proj-manual-d',
+        'user-d',
+        undefined,
+        async () => {
+          executionOrder.push('proj-manual-d');
+          return 'd-done';
+        },
+        { priority: 'manual' },
+      );
+
+      releaseActive();
+      await Promise.all([autoB, autoC, manualD]);
+
+      expect(executionOrder).toEqual([
+        'proj-active',
+        'proj-manual-d',
+        'proj-auto-b',
+        'proj-auto-c',
+      ]);
+      queue.onModuleDestroy();
+    });
+
+    it('CompileQueueService transfers wait-queue slot reservation in-place, promotes auto->manual, and does not double-count rate limit when superseding a queued build', async () => {
+      const queue = new CompileQueueService({
+        maxConcurrentCompiles: 1,
+        maxQueueLength: 10,
+        autoShedThreshold: 8,
+        maxCompilesPerMinute: 2,
+      });
+
+      const executionOrder: string[] = [];
+      let releaseHolder!: () => void;
+      const holderStarted = new Promise<void>((resolve) => {
+        void queue.schedule('proj-holder', 'user-h', undefined, async () => {
+          resolve();
+          await new Promise<void>((done) => {
+            releaseHolder = done;
+          });
+          return 'holder';
+        });
+      });
+      await holderStarted;
+
+      // proj-target enters wait queue at position #1 (as auto)
+      const firstQueuedPromise = queue.schedule(
+        'proj-target',
+        'user-t',
+        undefined,
+        async () => {
+          executionOrder.push('proj-target-v1');
+          return 'v1';
+        },
+        { priority: 'auto' },
+      );
+
+      // proj-other enters wait queue at position #2 (as manual)
+      const otherQueuedPromise = queue.schedule(
+        'proj-other',
+        'user-o',
+        undefined,
+        async () => {
+          executionOrder.push('proj-other');
+          return 'other';
+        },
+        { priority: 'manual' },
+      );
+
+      // Supersede proj-target while still queued, upgrading priority to manual
+      const secondQueuedPromise = queue.schedule(
+        'proj-target',
+        'user-t',
+        undefined,
+        async () => {
+          executionOrder.push('proj-target-v2');
+          return 'v2';
+        },
+        { priority: 'manual' },
+      );
+
+      await expect(firstQueuedPromise).rejects.toMatchObject({
+        status: 409,
+      });
+
+      releaseHolder();
+      await expect(secondQueuedPromise).resolves.toBe('v2');
+      await expect(otherQueuedPromise).resolves.toBe('other');
+
+      // proj-target preserved its #1 manual turn ahead of proj-other
+      expect(executionOrder).toEqual(['proj-target-v2', 'proj-other']);
+
+      // Because v1 was superseded while still in the wait queue (0 CPU used),
+      // proj-target only consumed 1 of its 2 compiles/min budget and can run once more!
+      await expect(
+        queue.schedule('proj-target', 'user-t', undefined, async () => 'v3'),
+      ).resolves.toBe('v3');
+
+      queue.onModuleDestroy();
+    });
+
+    it('CompileQueueService coalesces concurrent identical-fingerprint compiles in the same project without aborting or re-running', async () => {
+      const queue = new CompileQueueService({
+        maxConcurrentCompiles: 2,
+        maxCompilesPerMinute: 2,
+      });
+
+      let runCount = 0;
+      let releaseBuild!: () => void;
+      let markStarted!: () => void;
+      const buildStarted = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+
+      const userAPromise = queue.schedule(
+        'proj-collab',
+        'user-a',
+        undefined,
+        async () => {
+          runCount++;
+          queue.registerFingerprint('proj-collab', 'fp-identical-123');
+          markStarted();
+          await new Promise<void>((done) => {
+            releaseBuild = done;
+          });
+          return { pdf: 'shared-pdf-bytes' };
+        },
+      );
+      await buildStarted;
+
+      // User B in the same project triggers compile with the exact same fingerprint while User A's build is running
+      const userBPromise = queue.schedule(
+        'proj-collab',
+        'user-b',
+        undefined,
+        async () => {
+          runCount++;
+          return { pdf: 'should-not-run-twice' };
+        },
+        { fingerprint: 'fp-identical-123' },
+      );
+
+      releaseBuild();
+      const [resA, resB] = await Promise.all([userAPromise, userBPromise]);
+      expect(resA).toEqual({ pdf: 'shared-pdf-bytes' });
+      expect(resB).toEqual({ pdf: 'shared-pdf-bytes' });
+      expect(runCount).toBe(1);
+
+      queue.onModuleDestroy();
+    });
   });
 });

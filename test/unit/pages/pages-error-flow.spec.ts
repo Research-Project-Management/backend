@@ -100,7 +100,7 @@ import {
   ResolvedThreadError,
   StaleAnchorError,
   ThreadNotFoundError,
-} from '@/modules/pages/review/domain';
+} from '@/modules/pages/review/domain/review.errors';
 import { PagesFacade } from '@/modules/pages/pages.facade';
 import {
   WsAllExceptionsFilter,

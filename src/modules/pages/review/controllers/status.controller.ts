@@ -30,69 +30,45 @@ import { ReviewStatusService } from '../services/status.service';
 export class ReviewStatusController {
   constructor(private readonly statusService: ReviewStatusService) {}
 
-  @Get([
-    'spaces/:spaceId/review-overview',
-    'pages/:pageId/review-overview',
-    'docs/:docId/review-overview',
-  ])
-  @RequireRole(Role.REVIEWER)
+  @Get(['spaces/:spaceId/review-overview', 'pages/:pageId/review-overview'])
   async getOverview(
     @Param('spaceId') spaceId?: string,
     @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
     @Req() req?: AuthenticatedRequest,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
   ) {
     const reqPageId = (req as { resolvedPageId?: string } | undefined)
       ?.resolvedPageId;
     return this.statusService.getOverview(
-      docId || pageId || spaceId || '',
+      pageId || spaceId || '',
       reqPageId,
       authSpace,
     );
   }
 
-  @Get([
-    'pages/:pageId/review-status',
-    'docs/:docId/review-status',
-    'spaces/:spaceId/docs/:docId/review-status',
-  ])
-  @RequireRole(Role.REVIEWER)
+  @Get('docs/:docId/review-status')
   async getStatus(
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
+    @Param('docId') docId: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
   ) {
-    return this.statusService.getStatus(
-      docId || pageId || '',
-      spaceId,
-      authSpace,
-    );
+    return this.statusService.getStatus(docId, undefined, authSpace);
   }
 
-  @Post([
-    'pages/:pageId/review-status',
-    'docs/:docId/review-status',
-    'spaces/:spaceId/docs/:docId/review-status',
-  ])
-  @RequireRole(Role.REVIEWER)
+  @Post('docs/:docId/review-status')
   @HttpCode(HttpStatus.OK)
   async updateStatus(
+    @Param('docId') docId: string,
     @Body() body: UpdateReviewStatusDto,
     @ResolvedSpace() authSpace: string | { id: string } | null,
     @CurrentRole() currentRole: Role,
-    @Param('pageId') pageId?: string,
-    @Param('docId') docId?: string,
-    @Param('spaceId') spaceId?: string,
     @CurrentUser('id') userId?: string,
   ) {
     return this.statusService.updateStatus(
-      docId || pageId || '',
+      docId,
       body,
       authSpace,
       currentRole,
-      spaceId,
+      undefined,
       userId,
     );
   }

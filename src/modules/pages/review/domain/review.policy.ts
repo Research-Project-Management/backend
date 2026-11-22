@@ -1,4 +1,6 @@
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ReviewRoundInfo } from '@/modules/pages/docstore/domain';
+import { Role } from '@/modules/project/access';
 
 export const REVIEW_STATUSES = [
   'draft',
@@ -117,3 +119,62 @@ export class ReviewTransitionPolicy {
 }
 
 export const reviewTransitionPolicy = new ReviewTransitionPolicy();
+
+export function validateCommentLines(
+  line?: number,
+  lineEnd?: number,
+): { startLine: number; endLine: number } {
+  const startLine = line ?? 1;
+  const endLine = lineEnd ?? startLine;
+  if (startLine < 1 || endLine < startLine) {
+    throw new BadRequestException(
+      'Invalid comment range: startLine must be >= 1 and endLine >= startLine',
+    );
+  }
+  return { startLine, endLine };
+}
+
+export function validateSuggestionRange(body: {
+  fromLine?: number;
+  toLine?: number;
+  fromColumn?: number;
+  toColumn?: number;
+}): {
+  startLine: number;
+  endLine: number;
+  startCol: number;
+  endCol: number;
+} {
+  const fromLine = body.fromLine ?? 1;
+  const toLine = body.toLine ?? fromLine;
+  const startCol = body.fromColumn ?? 0;
+  const endCol = body.toColumn ?? 0;
+  if (fromLine < 1 || toLine < fromLine || startCol < 0 || endCol < 0) {
+    throw new BadRequestException(
+      'Invalid suggestion range: startLine >= 1, endLine >= startLine, and columns >= 0 are required',
+    );
+  }
+  return {
+    startLine: fromLine - 1,
+    endLine: toLine - 1,
+    startCol,
+    endCol,
+  };
+}
+
+export function assertCanModifyItem(
+  authorId: string | null | undefined,
+  userId: string | null | undefined,
+  role: Role | undefined,
+  message: string,
+): void {
+  const isAuthor = authorId === userId;
+  const isPrivileged = role === Role.COORDINATOR || role === Role.OWNER;
+  if (!isAuthor && !isPrivileged) {
+    throw new ForbiddenException({
+      statusCode: 403,
+      code: 'ROLE_INSUFFICIENT',
+      message,
+    });
+  }
+}

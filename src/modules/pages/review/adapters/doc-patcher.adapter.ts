@@ -9,12 +9,9 @@ import { getRecordSpaceId } from '@/modules/pages/core/page-scope.helper';
 import { PageService } from '@/modules/pages/core/services/page.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
-import {
-  LinePatcher,
-  PatchConflictError,
-  PatchResult,
-  TrackChange,
-} from './domain';
+import { TrackChange } from '../domain/change.domain';
+import { LinePatcher, PatchResult } from '../domain/patcher.domain';
+import { PatchConflictError } from '../domain/review.errors';
 
 export interface DocPatchOutcome {
   lines: string[];

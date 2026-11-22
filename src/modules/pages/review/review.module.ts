@@ -4,7 +4,7 @@ import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { CommentsController } from './controllers/comments.controller';
 import { ReviewStatusController } from './controllers/status.controller';
 import { SuggestionsController } from './controllers/suggestions.controller';
-import { DocPatcher } from './doc-patcher.adapter';
+import { DocPatcher } from './adapters/doc-patcher.adapter';
 import { ReviewRepository } from './review.repository';
 import { CommentsService } from './services/comments.service';
 import { ReviewStatusService } from './services/status.service';
