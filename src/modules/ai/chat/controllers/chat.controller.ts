@@ -117,6 +117,18 @@ export class ChatController {
     return this.chatService.cancel(userId, chatId, spaceId);
   }
 
+  @Post('turns/:traceId/revert')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revert mutations recorded for an AI turn' })
+  async revertTurn(
+    @CurrentUser('id') userId: string,
+    @Param('traceId') traceId: string,
+    @Query('spaceId') spaceId?: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    return this.chatService.revertTurn(userId, traceId, spaceId, authorization);
+  }
+
   @Delete(['memory/:spaceId', 'memory'])
   @ApiOperation({ summary: 'Clear AI chat memory for user in space' })
   async clearMemory(

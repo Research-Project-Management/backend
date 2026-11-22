@@ -148,6 +148,12 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       }),
       resumeStream: jest.fn().mockResolvedValue(undefined),
       cancelThread: jest.fn().mockResolvedValue(undefined),
+      revertTurn: jest.fn().mockResolvedValue({
+        trace_id: 'trace-1',
+        space_id: mockUserId,
+        reverted_count: 0,
+        results: [],
+      }),
       deleteThread: jest
         .fn()
         .mockResolvedValue({ space_id: mockUserId, deleted: true }),

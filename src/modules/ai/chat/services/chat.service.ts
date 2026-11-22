@@ -218,6 +218,16 @@ export class ChatService {
     return { chatId, spaceId: scope.spaceId, status: 'cancelling' as const };
   }
 
+  async revertTurn(
+    userId: string,
+    traceId: string,
+    rawSpaceId?: string,
+    authorization?: string,
+  ) {
+    const scope = await this.accessService.resolveSpace(userId, rawSpaceId);
+    return this.engine.revertTurn(traceId, scope.spaceId, authorization);
+  }
+
   private async prepareChatTurn(
     userId: string,
     dto: QueryDto,

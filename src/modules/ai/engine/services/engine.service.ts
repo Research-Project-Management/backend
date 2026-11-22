@@ -18,6 +18,7 @@ import type {
   EngineKnowledgeSearchHit,
   EngineKnowledgeSearchInput,
   EngineResumeRequest,
+  EngineTurnRevertResponse,
   StreamOptions,
 } from '../types/engine.type';
 import { EngineHttpService } from './http.service';
@@ -145,6 +146,18 @@ export class EngineService implements IAiEnginePort {
     await this.http.requestJson<Record<string, unknown>>(
       `/threads/${encodeURIComponent(chatId)}/cancel?${qs}`,
       { method: 'POST', timeoutMs: 5000 },
+    );
+  }
+
+  async revertTurn(
+    traceId: string,
+    spaceId: string,
+    authToken?: string,
+  ): Promise<EngineTurnRevertResponse> {
+    const qs = new URLSearchParams({ space_id: spaceId }).toString();
+    return this.http.requestJson<EngineTurnRevertResponse>(
+      `/turns/${encodeURIComponent(traceId)}/revert?${qs}`,
+      { method: 'POST', timeoutMs: 30000, delegationToken: authToken },
     );
   }
 

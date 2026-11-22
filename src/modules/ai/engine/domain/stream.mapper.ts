@@ -236,6 +236,30 @@ export function mapArtifactsToWidgets(
     }
   }
 
+  if (
+    artifacts.revertible_turn &&
+    typeof artifacts.revertible_turn === 'object' &&
+    !Array.isArray(artifacts.revertible_turn)
+  ) {
+    const rt = artifacts.revertible_turn as Record<string, unknown>;
+    const traceId = typeof rt.trace_id === 'string' ? rt.trace_id.trim() : '';
+    const count = typeof rt.count === 'number' ? rt.count : 0;
+    const items = Array.isArray(rt.items) ? rt.items : [];
+    const spaceId = typeof rt.space_id === 'string' ? rt.space_id.trim() : '';
+    if (traceId && count > 0) {
+      widgets.push({
+        type: 'revertible_turn',
+        title: 'Undo AI changes',
+        data: {
+          traceId,
+          ...(spaceId ? { spaceId } : {}),
+          count,
+          items,
+        },
+      });
+    }
+  }
+
   return widgets;
 }
 
@@ -500,12 +524,27 @@ export function translateEngineSseFrame(
       };
     }
 
-    case 'run.cancelled':
+    case 'run.cancelled': {
+      const rawArtifacts =
+        payload?.artifacts &&
+        typeof payload.artifacts === 'object' &&
+        !Array.isArray(payload.artifacts)
+          ? (payload.artifacts as Record<string, unknown>)
+          : undefined;
+      const widgets = mapArtifactsToWidgets(rawArtifacts);
       return {
-        clientFrames: ['data: [DONE]\n\n'],
+        clientFrames: [
+          ...(widgets.length > 0
+            ? [`data: [META]${JSON.stringify({ widgets })}\n\n`]
+            : []),
+          'data: [DONE]\n\n',
+        ],
+        ...(rawArtifacts ? { artifacts: rawArtifacts } : {}),
+        ...(widgets.length > 0 ? { widgets } : {}),
         cancelled: true,
         finished: true,
       };
+    }
 
     case 'run.error': {
       const errorMessage =

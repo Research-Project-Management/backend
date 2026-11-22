@@ -10,6 +10,7 @@ import type {
   EngineKnowledgeSearchHit,
   EngineKnowledgeSearchInput,
   EngineResumeRequest,
+  EngineTurnRevertResponse,
   StreamOptions,
 } from './types/engine.type';
 
@@ -29,6 +30,11 @@ export interface IAiEnginePort {
     options?: StreamOptions,
   ): Promise<void>;
   cancelThread(spaceId: string, chatId: string): Promise<void>;
+  revertTurn(
+    traceId: string,
+    spaceId: string,
+    authToken?: string,
+  ): Promise<EngineTurnRevertResponse>;
   deleteThread(spaceId: string, chatId: string): Promise<EngineDeleteResponse>;
   deleteSpaceThreads(spaceId: string): Promise<EngineDeleteResponse>;
   ingestDocument(input: EngineIngestInput): Promise<EngineIngestResponse>;

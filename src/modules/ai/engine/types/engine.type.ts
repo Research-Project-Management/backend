@@ -177,6 +177,21 @@ export interface EngineThreadStateResponse {
   interrupts: unknown[];
 }
 
+export interface EngineRevertStepResult {
+  tool: string;
+  entity_id: string;
+  label?: string;
+  status: 'reverted' | 'already_gone' | 'failed';
+  error?: string;
+}
+
+export interface EngineTurnRevertResponse {
+  trace_id: string;
+  space_id: string;
+  reverted_count: number;
+  results: EngineRevertStepResult[];
+}
+
 export interface TranslatedSseFrame {
   clientFrames: string[];
   deltaText?: string;
