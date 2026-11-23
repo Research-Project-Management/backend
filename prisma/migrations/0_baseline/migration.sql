@@ -1637,7 +1637,7 @@ CREATE INDEX "annotations_created_by_id_deleted_at_idx" ON "public"."annotations
 CREATE INDEX "annotations_item_id_deleted_at_page_index_annotation_sort_i_idx" ON "public"."annotations"("item_id" ASC, "deleted_at" ASC, "page_index" ASC, "annotation_sort_index" ASC);
 
 -- CreateIndex
-CREATE INDEX "annotations_tags_idx" ON "public"."annotations" USING GIN ("tags" array_ops ASC);
+CREATE INDEX "annotations_tags_idx" ON "public"."annotations" USING GIN ("tags" array_ops);
 
 -- CreateIndex
 CREATE INDEX "attachment_reading_states_attachment_id_idx" ON "public"."attachment_reading_states"("attachment_id" ASC);
@@ -1874,7 +1874,7 @@ CREATE INDEX "friendships_requester_id_status_idx" ON "public"."friendships"("re
 CREATE UNIQUE INDEX "uq_friendship_pair" ON "public"."friendships"("requester_id" ASC, "addressee_id" ASC);
 
 -- CreateIndex
-CREATE INDEX "full_text_indexes_search_vector_idx" ON "public"."full_text_indexes" USING GIN ("search_vector" tsvector_ops ASC);
+CREATE INDEX "full_text_indexes_search_vector_idx" ON "public"."full_text_indexes" USING GIN ("search_vector" tsvector_ops);
 
 -- CreateIndex
 CREATE INDEX "idempotency_records_actor_id_idempotency_key_idx" ON "public"."idempotency_records"("actor_id" ASC, "idempotency_key" ASC);
@@ -1991,13 +1991,13 @@ CREATE INDEX "library_items_deleted_at_retraction_checked_at_idx" ON "public"."l
 CREATE INDEX "library_items_doi_deleted_at_idx" ON "public"."library_items"("doi" ASC, "deleted_at" ASC);
 
 -- CreateIndex
-CREATE INDEX "library_items_metadata_idx" ON "public"."library_items" USING GIN ("metadata" jsonb_ops ASC);
+CREATE INDEX "library_items_metadata_idx" ON "public"."library_items" USING GIN ("metadata" jsonb_ops);
 
 -- CreateIndex
 CREATE INDEX "library_items_retracted_active_partial_idx" ON "public"."library_items"("space_id" ASC);
 
 -- CreateIndex
-CREATE INDEX "library_items_search_vector_idx" ON "public"."library_items" USING GIN ("search_vector" tsvector_ops ASC);
+CREATE INDEX "library_items_search_vector_idx" ON "public"."library_items" USING GIN ("search_vector" tsvector_ops);
 
 -- CreateIndex
 CREATE INDEX "library_items_space_id_deleted_at_arxiv_id_idx" ON "public"."library_items"("space_id" ASC, "deleted_at" ASC, "arxiv_id" ASC);
@@ -2042,7 +2042,7 @@ CREATE INDEX "library_notes_item_id_deleted_at_updated_at_idx" ON "public"."libr
 CREATE INDEX "library_notes_space_id_deleted_at_updated_at_idx" ON "public"."library_notes"("space_id" ASC, "deleted_at" ASC, "updated_at" DESC);
 
 -- CreateIndex
-CREATE INDEX "library_notes_tags_idx" ON "public"."library_notes" USING GIN ("tags" array_ops ASC);
+CREATE INDEX "library_notes_tags_idx" ON "public"."library_notes" USING GIN ("tags" array_ops);
 
 -- CreateIndex
 CREATE INDEX "library_saved_searches_space_id_deleted_at_is_pinned_name_idx" ON "public"."library_saved_searches"("space_id" ASC, "deleted_at" ASC, "is_pinned" DESC, "name" ASC);
