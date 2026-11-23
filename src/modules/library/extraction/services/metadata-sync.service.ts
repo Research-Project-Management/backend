@@ -45,7 +45,7 @@ export class ExtractionMetadataSynchronizer {
     private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
   ) {}
 
   /**
@@ -328,7 +328,7 @@ export class ExtractionMetadataSynchronizer {
           if (creatorsToSync.length > 0 && existingContributorsCount === 0) {
             const validContributors = creatorsToSync
               .map((c, idx) => {
-                const cand = c as {
+                const candidate = c as {
                   creatorType?: string;
                   fullName?: string;
                   name?: string;
@@ -336,22 +336,30 @@ export class ExtractionMetadataSynchronizer {
                   lastName?: string;
                   fieldMode?: number;
                 };
-                const itemCreatorType = cand.creatorType || primaryRole;
+                const itemCreatorType = candidate.creatorType || primaryRole;
                 const rawName =
-                  cand.fullName ||
-                  cand.name ||
-                  `${cand.firstName || ''} ${cand.lastName || ''}`.trim();
+                  candidate.fullName ||
+                  candidate.name ||
+                  `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim();
                 const parsed = parseCreatorString(
                   rawName,
                   idx,
                   itemCreatorType,
                 );
-                const first = (cand.firstName || parsed.firstName || '').trim();
-                const last = (cand.lastName || parsed.lastName || '').trim();
+                const first = (
+                  candidate.firstName ||
+                  parsed.firstName ||
+                  ''
+                ).trim();
+                const last = (
+                  candidate.lastName ||
+                  parsed.lastName ||
+                  ''
+                ).trim();
                 const full =
-                  (cand.firstName || cand.lastName
-                    ? cand.fullName ||
-                      cand.name ||
+                  (candidate.firstName || candidate.lastName
+                    ? candidate.fullName ||
+                      candidate.name ||
                       [first, last].filter(Boolean).join(' ')
                     : parsed.fullName) ||
                   rawName ||
@@ -364,7 +372,7 @@ export class ExtractionMetadataSynchronizer {
                   itemId: attachment.itemId,
                   orderIndex: idx,
                   creatorType: itemCreatorType,
-                  fieldMode: cand.fieldMode ?? parsed.fieldMode ?? 0,
+                  fieldMode: candidate.fieldMode ?? parsed.fieldMode ?? 0,
                   firstName: first,
                   lastName: last,
                   fullName:
@@ -442,8 +450,8 @@ export class ExtractionMetadataSynchronizer {
           if (options?.skipCacheInvalidation) return;
           const invalidator = this.cacheCoordinator?.invalidateForWrite
             ? this.cacheCoordinator
-            : this.catalogGateway?.invalidateForWrite
-              ? this.catalogGateway
+            : this.catalogFacade?.invalidateForWrite
+              ? this.catalogFacade
               : undefined;
           if (invalidator?.invalidateForWrite && resolvedOwnerUserId) {
             await invalidator.invalidateForWrite({

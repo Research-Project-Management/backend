@@ -154,13 +154,13 @@ export class MetadataResolverService {
   constructor(
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(METADATA_PORT)
     private readonly metadataService?: MetadataPort,
     @Optional()
     @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
+    private readonly extractionFacade?: IExtractionFacade,
     @Optional() private readonly urlScraper?: UrlMetadataScraperService,
   ) {}
 
@@ -170,12 +170,12 @@ export class MetadataResolverService {
     options?: ReResolveMetadataOptions,
     projectId?: string,
   ): Promise<ReResolveMetadataResult> {
-    if (!this.catalogGateway) {
+    if (!this.catalogFacade) {
       throw new BadRequestException(
         'Catalog gateway is unavailable for metadata re-resolution',
       );
     }
-    const existingItem = await this.catalogGateway.getItem(
+    const existingItem = await this.catalogFacade.getItem(
       userId,
       itemId,
       projectId,
@@ -315,7 +315,7 @@ export class MetadataResolverService {
     let updated: ItemDetail | null = existingItem;
     if (updatedFields.length > 0) {
       const expectedVersion = options?.expectedVersion ?? existingItem.version;
-      updated = await this.catalogGateway.updateItem(
+      updated = await this.catalogFacade.updateItem(
         userId,
         itemId,
         updateData,
@@ -340,15 +340,15 @@ export class MetadataResolverService {
       Boolean(existingItem.fileId) ||
       (Array.isArray(existingItem.attachments) &&
         existingItem.attachments.some((rawAtt: unknown) => {
-          const att = rawAtt as {
+          const attachment = rawAtt as {
             fileId?: string | null;
             mimeType?: string | null;
             attachmentType?: string | null;
           } | null;
           return (
-            Boolean(att?.fileId) &&
-            (att?.mimeType === 'application/pdf' ||
-              att?.attachmentType === 'primary_pdf')
+            Boolean(attachment?.fileId) &&
+            (attachment?.mimeType === 'application/pdf' ||
+              attachment?.attachmentType === 'primary_pdf')
           );
         }));
 
@@ -358,7 +358,7 @@ export class MetadataResolverService {
       /^https?:\/\//i.test(candidateOaPdfUrl) &&
       !existingHasStoredPdf &&
       this.urlScraper &&
-      this.extractionGateway?.createAttachment
+      this.extractionFacade?.createAttachment
     ) {
       try {
         const scraped = await this.urlScraper.scrape(candidateOaPdfUrl, {
@@ -396,7 +396,7 @@ export class MetadataResolverService {
                   fallbackFilename,
                 )
               : fallbackFilename;
-          await this.extractionGateway.createAttachment(
+          await this.extractionFacade.createAttachment(
             {
               itemId,
               fileId: scraped.fileId,
@@ -413,7 +413,7 @@ export class MetadataResolverService {
           );
           oaPdfAttached = true;
           updated =
-            (await this.catalogGateway
+            (await this.catalogFacade
               .getItem(userId, itemId, projectId)
               .catch(() => updated)) || updated;
         }
@@ -465,12 +465,12 @@ export class MetadataResolverService {
     updatedFields: string[];
     rejectedCitedDoi?: string;
   }> {
-    if (!this.catalogGateway || !this.metadataService) {
+    if (!this.catalogFacade || !this.metadataService) {
       return { updated: false, updatedFields: [] };
     }
 
     const { userId, projectId, itemId, extractedMetadata } = payload;
-    const existingItem = await this.catalogGateway
+    const existingItem = await this.catalogFacade
       .getItem(userId, itemId, projectId || undefined)
       .catch(() => null);
     if (!existingItem) return { updated: false, updatedFields: [] };
@@ -546,7 +546,7 @@ export class MetadataResolverService {
           doi: null,
         };
         delete nextExtra.DOI;
-        await this.catalogGateway
+        await this.catalogFacade
           .updateItem(
             userId,
             itemId,
@@ -736,7 +736,7 @@ export class MetadataResolverService {
           nextExtra.isbn = null;
           delete nextExtra.ISBN;
         }
-        await this.catalogGateway
+        await this.catalogFacade
           .updateItem(
             userId,
             itemId,
@@ -793,7 +793,7 @@ export class MetadataResolverService {
     if (updatedFields.length === 0)
       return { updated: false, updatedFields: [] };
 
-    await this.catalogGateway.updateItem(userId, itemId, enrichPatch, {
+    await this.catalogFacade.updateItem(userId, itemId, enrichPatch, {
       expectedVersion: existingItem.version,
       projectId: projectId || undefined,
     });

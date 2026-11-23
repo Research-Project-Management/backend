@@ -58,7 +58,7 @@ export class OutboxWorker
   private static readonly CONCURRENCY = libraryConfig().outbox.concurrency;
   private static readonly GC_INTERVAL_MS = 60 * 60 * 1000;
   private readonly workerId: string;
-  private readonly repo: OutboxRepository;
+  private readonly outboxRepo: OutboxRepository;
 
   private pollTimer: NodeJS.Timeout | null = null;
   private gcTimer: NodeJS.Timeout | null = null;
@@ -66,7 +66,7 @@ export class OutboxWorker
   private isShuttingDown = false;
 
   constructor(
-    @Optional() private readonly outboxRepo?: OutboxRepository,
+    @Optional() outboxRepo?: OutboxRepository,
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly libraryConfigService?: LibraryConfigService,
     @Optional() private readonly metricsService?: OutboxMetrics,
@@ -76,13 +76,13 @@ export class OutboxWorker
     @Optional() private readonly changeLogRepo?: ChangeLogRepository,
   ) {
     this.workerId = `outbox-worker-${process.pid}-${randomUUID().slice(0, 8)}`;
-    if (!this.outboxRepo) {
+    if (!outboxRepo) {
       throw new SubsystemUnavailableException(
         'OutboxWorker requires OutboxRepository',
         { worker: 'SyncOutbox' },
       );
     }
-    this.repo = this.outboxRepo;
+    this.outboxRepo = outboxRepo;
 
     if (this.bullQueue) {
       this.bullQueue.on('error', (err: Error) => {
@@ -178,7 +178,7 @@ export class OutboxWorker
     eventId: string,
     options?: { rethrowOnRetryableFailure?: boolean },
   ): Promise<boolean> {
-    const initialEvent = await this.repo.findById(eventId);
+    const initialEvent = await this.outboxRepo.findById(eventId);
     if (!initialEvent || initialEvent.status === OutboxStatus.PUBLISHED) {
       return true;
     }
@@ -188,7 +188,7 @@ export class OutboxWorker
       (Number(this.configService?.get('OUTBOX_LEASE_MS')) ||
         libraryConfig().outbox.leaseMs);
 
-    const claimed = await this.repo.claimSingleEvent(
+    const claimed = await this.outboxRepo.claimSingleEvent(
       eventId,
       this.workerId,
       leaseMs,
@@ -197,7 +197,7 @@ export class OutboxWorker
     if (!claimed) return true;
 
     // Reload event after claim so retryCount, claimedBy, and leaseExpiresAt reflect the claim update
-    const event = (await this.repo.findById(eventId)) ?? initialEvent;
+    const event = (await this.outboxRepo.findById(eventId)) ?? initialEvent;
     if (event.status === OutboxStatus.PUBLISHED) {
       return true;
     }
@@ -255,8 +255,8 @@ export class OutboxWorker
     const heartbeatTimer = setInterval(() => {
       void (async () => {
         try {
-          if (!this.repo.renewLease) return;
-          const renewed = await this.repo.renewLease(
+          if (!this.outboxRepo.renewLease) return;
+          const renewed = await this.outboxRepo.renewLease(
             event.id,
             this.workerId,
             leaseMs,
@@ -315,7 +315,10 @@ export class OutboxWorker
         return { status: 'leaseLost' };
       }
 
-      const published = await this.repo.markPublished(event.id, this.workerId);
+      const published = await this.outboxRepo.markPublished(
+        event.id,
+        this.workerId,
+      );
       this.completedHandlersByEvent.delete(event.id);
       if (!published) return { status: 'fencingAborted' };
       if (options?.recordDispatchMetrics) {
@@ -351,7 +354,7 @@ export class OutboxWorker
       event,
       maxRetries: this.maxRetries,
       workerId: this.workerId,
-      repo: this.repo,
+      repo: this.outboxRepo,
       logger: this.logger,
       metricsService: this.metricsService,
     });
@@ -366,7 +369,7 @@ export class OutboxWorker
       err,
       maxRetries: this.maxRetries,
       workerId: this.workerId,
-      repo: this.repo,
+      repo: this.outboxRepo,
       logger: this.logger,
       metricsService: this.metricsService,
     });
@@ -430,7 +433,7 @@ export class OutboxWorker
     purgedTombstones: number;
   }> {
     return executeOutboxGarbageCollection({
-      repo: this.repo,
+      repo: this.outboxRepo,
       changeLogRepo: this.changeLogRepo,
       logger: this.logger,
     });
@@ -473,7 +476,7 @@ export class OutboxWorker
       registeredHandlers: Array.from(this.handlers.keys()),
       hasHandler: (et) => this.hasHandler(et),
       hasDefaultHandler: Boolean(this.defaultHandler),
-      repo: this.repo,
+      repo: this.outboxRepo,
       metricsService: this.metricsService,
     });
   }
@@ -520,7 +523,7 @@ export class OutboxWorker
     batchSize: number = 50,
     leaseMs: number = 60000,
   ): Promise<ClaimedOutboxEvent[]> {
-    return this.repo.claimBatch(batchSize, leaseMs, this.workerId);
+    return this.outboxRepo.claimBatch(batchSize, leaseMs, this.workerId);
   }
 
   private async processClaimedItem(
@@ -545,7 +548,7 @@ export class OutboxWorker
         `Reclaimed expired PROCESSING event ${event.id} (type: ${event.eventType}, previousWorker: ${event.claimedBy || 'unknown'})`,
       );
       if (event.retryCount >= this.maxRetries) {
-        await this.repo.markDeadLetter(
+        await this.outboxRepo.markDeadLetter(
           event.id,
           event.retryCount,
           'Lease expired repeatedly (poison event)',
@@ -626,9 +629,9 @@ export class OutboxWorker
     );
     const batchHeartbeatIntervalMs = Math.max(1000, Math.floor(leaseMs / 3));
     const batchHeartbeatTimer = setInterval(() => {
-      if (waitingEventIds.size === 0 || !this.repo.renewLease) return;
+      if (waitingEventIds.size === 0 || !this.outboxRepo.renewLease) return;
       for (const waitingId of Array.from(waitingEventIds)) {
-        void this.repo
+        void this.outboxRepo
           .renewLease(waitingId, this.workerId, leaseMs)
           .catch(() => undefined);
       }

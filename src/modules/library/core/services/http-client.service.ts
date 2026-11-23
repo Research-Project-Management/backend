@@ -161,13 +161,13 @@ export class HttpClient {
 
   constructor(
     private readonly ssrfGuard: SsrfGuardService,
-    private readonly resilience: ResilienceRegistryService,
-    private readonly config: LibraryConfigService,
+    private readonly resilienceRegistry: ResilienceRegistryService,
+    private readonly configService: LibraryConfigService,
   ) {}
 
   private getDefaultHeaders(): Record<string, string> {
     return {
-      'User-Agent': this.config.academic.userAgent,
+      'User-Agent': this.configService.academic.userAgent,
       Accept: 'application/json, text/plain, */*',
     };
   }
@@ -177,8 +177,10 @@ export class HttpClient {
     options: HttpRequestOptions = {},
     externalSignal?: AbortSignal,
   ): Promise<{ response: Response; finalUrl: string }> {
-    const timeoutMs = options.timeoutMs ?? this.config.http.defaultTimeoutMs;
-    const maxRedirects = options.maxRedirects ?? this.config.http.maxRedirects;
+    const timeoutMs =
+      options.timeoutMs ?? this.configService.http.defaultTimeoutMs;
+    const maxRedirects =
+      options.maxRedirects ?? this.configService.http.maxRedirects;
     const requireSsrf = options.requireSsrfCheck ?? true;
 
     const controller = new AbortController();
@@ -235,12 +237,13 @@ export class HttpClient {
     options: HttpRequestOptions = {},
   ): Promise<{ response: Response; finalUrl: string }> {
     const resilienceKey = options.resilienceKey ?? new URL(url).hostname;
-    return this.resilience.execute(
+    return this.resilienceRegistry.execute(
       resilienceKey,
       async () => {
         const result = await this.fetchWithRedirects(url, options);
         if (result.response.status >= 500 || result.response.status === 429) {
-          const breaker = this.resilience.getCircuitBreaker(resilienceKey);
+          const breaker =
+            this.resilienceRegistry.getCircuitBreaker(resilienceKey);
           breaker.recordFailure(true);
         }
         return result;

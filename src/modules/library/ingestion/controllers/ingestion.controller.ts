@@ -33,20 +33,8 @@ import {
   UnifiedIngestionDto,
   CaptureUrlDto,
   ConfirmCapturedUrlDto,
-  FetchAcademicFeedDto,
-  MergeDuplicatesDto,
-  BatchMergeDuplicatesDto,
-  DismissDuplicatesDto,
-  UpdateReviewCaseStatusDto,
-  FlagRetractionDto,
-  BatchCheckRetractionDto,
-  SyncRetractionDto,
-  SubscribeFeedDto,
-  UpdateFeedSubDto,
-  MarkItemReadDto,
-  MarkAllReadDto,
-  ImportOpmlDto,
 } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { FetchAcademicFeedDto } from '@/modules/library/ingestion/dto/feeds.dto';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import { UrlCaptureService } from '@/modules/library/ingestion/services/url-capture.service';
 import { FeedRetrievalService } from '@/modules/library/ingestion/services/feed-retrieval.service';

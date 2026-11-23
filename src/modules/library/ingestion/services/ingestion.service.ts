@@ -63,7 +63,7 @@ export class IngestionService {
     private readonly urlCapture: UrlCaptureService,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(FILES_PORT)
     private readonly filesPort?: IFilesPort,
@@ -75,11 +75,11 @@ export class IngestionService {
     @Optional()
     runReporter?: IngestionRunReporterService,
     @Optional()
-    private readonly redis?: RedisCacheService,
+    private readonly cache?: RedisCacheService,
   ) {
     this.metadataResolver =
       metadataResolver ??
-      new MetadataResolverService(this.catalogGateway, this.metadataService);
+      new MetadataResolverService(this.catalogFacade, this.metadataService);
     this.runReporter =
       runReporter ?? new IngestionRunReporterService(this.repo, this.queue);
   }
@@ -177,8 +177,8 @@ export class IngestionService {
     if (idempotencyKey) {
       const lockKey = `flux:lock:ingest:${envelope.userId}:${envelope.projectId ?? 'personal'}:${idempotencyKey}`;
 
-      if (this.redis?.isReady()) {
-        const lockToken = await this.redis.acquireLock(lockKey, 30000);
+      if (this.cache?.isReady()) {
+        const lockToken = await this.cache.acquireLock(lockKey, 30000);
         if (!lockToken) {
           // Lock held by concurrent pod/process: wait briefly for existing run to be committed
           await new Promise((resolve) => setTimeout(resolve, 300));
@@ -196,7 +196,7 @@ export class IngestionService {
           try {
             return await this.executeSubmit(envelope, idempotencyKey, options);
           } finally {
-            await this.redis.releaseLock(lockKey, lockToken);
+            await this.cache.releaseLock(lockKey, lockToken);
           }
         }
       }
@@ -478,8 +478,8 @@ export class IngestionService {
     }
 
     if (submissionRes.deduplicated && submissionRes.existingItemId) {
-      const item = this.catalogGateway
-        ? await this.catalogGateway
+      const item = this.catalogFacade
+        ? await this.catalogFacade
             .getItem(
               envelope.userId!,
               submissionRes.existingItemId,
@@ -542,8 +542,8 @@ export class IngestionService {
     );
     const itemId = updatedRun?.itemId ?? undefined;
     const item =
-      itemId && this.catalogGateway
-        ? await this.catalogGateway
+      itemId && this.catalogFacade
+        ? await this.catalogFacade
             .getItem(envelope.userId!, itemId, projectId || undefined)
             .catch(() => undefined)
         : undefined;

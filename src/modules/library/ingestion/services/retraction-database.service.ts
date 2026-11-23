@@ -50,7 +50,7 @@ export class RetractionDatabaseService implements OnModuleInit {
 
   constructor(
     private readonly repo: RetractionRepository,
-    @Optional() private readonly redisCache?: RedisCacheService,
+    @Optional() private readonly cache?: RedisCacheService,
   ) {}
 
   private getRedisDoiKey(cleanDoi: string): string {
@@ -242,9 +242,9 @@ export class RetractionDatabaseService implements OnModuleInit {
 
     // 2. Negative Cache Check (verified clean within TTL) & L2 Redis synchronization
     if (cleanDoi) {
-      if (this.redisCache?.get) {
+      if (this.cache?.get) {
         try {
-          const redisEntry = await this.redisCache.get<
+          const redisEntry = await this.cache.get<
             RetractionDetails | { __clean: true; expiresAt: number }
           >(this.getRedisDoiKey(cleanDoi));
           if (redisEntry && typeof redisEntry === 'object') {
@@ -388,7 +388,7 @@ export class RetractionDatabaseService implements OnModuleInit {
     this.setMemoryDoi(cleanDoi, details);
     if (cleanPmid) this.setMemoryPmid(cleanPmid, details);
     this.cleanDoiCache.delete(cleanDoi);
-    await this.redisCache
+    await this.cache
       ?.set?.(
         this.getRedisDoiKey(cleanDoi),
         details,
@@ -406,7 +406,7 @@ export class RetractionDatabaseService implements OnModuleInit {
     const expiresAt = Date.now() + this.CLEAN_CACHE_TTL_MS;
 
     this.setCleanDoiCache(cleanDoi, expiresAt);
-    await this.redisCache
+    await this.cache
       ?.set?.(
         this.getRedisDoiKey(cleanDoi),
         { __clean: true, expiresAt },
@@ -493,7 +493,7 @@ export class RetractionDatabaseService implements OnModuleInit {
           this.setMemoryDoi(cleanDoi, details);
           if (cleanPmid) this.setMemoryPmid(cleanPmid, details);
           this.cleanDoiCache.delete(cleanDoi);
-          await this.redisCache
+          await this.cache
             ?.set?.(
               this.getRedisDoiKey(cleanDoi),
               details,

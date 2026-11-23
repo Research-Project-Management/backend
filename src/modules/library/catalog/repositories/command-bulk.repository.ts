@@ -130,8 +130,8 @@ export class CommandBulkOperations {
     ]);
     const attachmentIds: string[] = [];
     const attachmentSpaceById = new Map<string, string | undefined>();
-    for (const att of attachments) {
-      const attRec = att as {
+    for (const attachment of attachments) {
+      const attRec = attachment as {
         id?: string;
         itemId?: string;
         fileId?: string | null;

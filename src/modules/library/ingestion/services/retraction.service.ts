@@ -25,7 +25,7 @@ import {
 import {
   FlagRetractionDto,
   BatchCheckRetractionDto,
-} from '@/modules/library/ingestion/dto/ingestion.dto';
+} from '@/modules/library/ingestion/dto/retraction.dto';
 import {
   RetractionCheckResult,
   RetractionStats,
@@ -86,7 +86,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly repo: RetractionRepository,
-    private readonly scanner: RetractionScannerProvider,
+    private readonly retractionScanner: RetractionScannerProvider,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly seeder?: RetractionSeederService,
     @Optional()
@@ -94,7 +94,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
     private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
   ) {}
 
   onModuleInit(): void {
@@ -237,7 +237,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
       await Promise.all(
         chunk.map(async (item) => {
           if (!item.isRetracted && item.doi) {
-            const lookupRes = await this.scanner.lookup(item.doi);
+            const lookupRes = await this.retractionScanner.lookup(item.doi);
             if (lookupRes.status === 'retracted') {
               const isActuallyRetracted = isRetractedNoticeNature(
                 lookupRes.details.nature,
@@ -287,7 +287,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
             userId: group.userId,
             projectId: group.projectId,
             cacheCoordinator: this.cacheCoordinator,
-            catalogGateway: this.catalogGateway,
+            catalogFacade: this.catalogFacade,
             cache: this.cache,
             logger: this.logger,
             contextLabel: 'delta retraction sync',
@@ -387,7 +387,10 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
           }
 
           try {
-            const result = await this.scanner.lookup(item.doi, item.pmid);
+            const result = await this.retractionScanner.lookup(
+              item.doi,
+              item.pmid,
+            );
             const now = new Date();
 
             if (result.status === 'retracted') {
@@ -456,7 +459,7 @@ export class RetractionSyncService implements OnModuleInit, OnModuleDestroy {
             userId: group.userId,
             projectId: group.projectId,
             cacheCoordinator: this.cacheCoordinator,
-            catalogGateway: this.catalogGateway,
+            catalogFacade: this.catalogFacade,
             cache: this.cache,
             logger: this.logger,
             contextLabel: 'during retraction sync',
@@ -484,7 +487,7 @@ export class RetractionService {
 
   constructor(
     private readonly repo: RetractionRepository,
-    private readonly scanner: RetractionScannerProvider,
+    private readonly retractionScanner: RetractionScannerProvider,
     private readonly retractionDb: RetractionDatabaseService,
     private readonly syncService: RetractionSyncService,
     @Optional() private readonly cache?: RedisCacheService,
@@ -493,7 +496,7 @@ export class RetractionService {
     private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional() private readonly seeder?: RetractionSeederService,
   ) {}
 
@@ -507,7 +510,7 @@ export class RetractionService {
       userId,
       projectId,
       cacheCoordinator: this.cacheCoordinator,
-      catalogGateway: this.catalogGateway,
+      catalogFacade: this.catalogFacade,
       cache: this.cache,
       logger: this.logger,
       contextLabel: 'retraction cache',
@@ -550,7 +553,7 @@ export class RetractionService {
         : typeof meta.pmid === 'string'
           ? meta.pmid
           : null;
-    const lookup = await this.scanner.lookup(item.doi, pmid);
+    const lookup = await this.retractionScanner.lookup(item.doi, pmid);
     const now = new Date();
     const itemRec = item as {
       projectId?: string | null;
@@ -654,7 +657,10 @@ export class RetractionService {
       await Promise.all(
         batch.map(async (item) => {
           try {
-            const result = await this.scanner.lookup(item.doi, item.pmid);
+            const result = await this.retractionScanner.lookup(
+              item.doi,
+              item.pmid,
+            );
             const now = new Date();
             if (result.status === 'retracted') {
               const isActuallyRetracted = isRetractedNoticeNature(

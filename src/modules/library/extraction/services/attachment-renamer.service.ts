@@ -36,10 +36,10 @@ export class AttachmentRenamerService {
   private readonly logger = new Logger(AttachmentRenamerService.name);
 
   constructor(
-    private readonly repo: AttachmentsRepository,
+    private readonly attachmentsRepo: AttachmentsRepository,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
@@ -56,7 +56,7 @@ export class AttachmentRenamerService {
     projectId?: string,
   ): Promise<void> {
     await executeStandardLibraryCacheInvalidation(
-      this.cacheCoordinator ?? this.catalogGateway,
+      this.cacheCoordinator ?? this.catalogFacade,
       this.cache,
       { userId, projectId, itemIds: [itemId] },
       (msg) =>
@@ -71,8 +71,8 @@ export class AttachmentRenamerService {
     itemId: string,
     projectId?: string,
   ): Promise<void> {
-    if (this.catalogGateway) {
-      const exists = await this.catalogGateway.itemExists(
+    if (this.catalogFacade) {
+      const exists = await this.catalogFacade.itemExists(
         userId,
         itemId,
         projectId,
@@ -90,7 +90,7 @@ export class AttachmentRenamerService {
     projectId?: ProjectId | string,
   ) {
     const validProjectId = normalizeProjectSpaceId(projectId);
-    const attachment = await this.repo.findFirst(
+    const attachment = await this.attachmentsRepo.findFirst(
       {
         id: attachmentId,
         deletedAt: null,
@@ -145,13 +145,15 @@ export class AttachmentRenamerService {
         ?.projectId ||
       undefined;
 
-    let updated: Awaited<ReturnType<typeof this.repo.renameAttachment>>;
+    let updated: Awaited<
+      ReturnType<typeof this.attachmentsRepo.renameAttachment>
+    >;
     let ranPostCommitHook = false;
     if (typeof this.libraryTx?.executeInTransaction === 'function') {
       updated = await this.libraryTx.executeInTransaction(
         async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
           ranPostCommitHook = Boolean(helpers?.onAfterCommit);
-          const renamed = await this.repo.renameAttachment(
+          const renamed = await this.attachmentsRepo.renameAttachment(
             attachmentId,
             newFilename,
             attachment.fileId ?? undefined,
@@ -200,7 +202,7 @@ export class AttachmentRenamerService {
         },
       );
     } else {
-      updated = await this.repo.renameAttachment(
+      updated = await this.attachmentsRepo.renameAttachment(
         attachmentId,
         newFilename,
         attachment.fileId ?? undefined,
@@ -257,7 +259,7 @@ export class AttachmentRenamerService {
         projectId?: string | null;
       };
     }
-    const attachments = (await this.repo.findMany(whereClause, {
+    const attachments = (await this.attachmentsRepo.findMany(whereClause, {
       item: {
         include: {
           contributors: {
@@ -302,37 +304,39 @@ export class AttachmentRenamerService {
       fileId?: string;
     }> = [];
 
-    for (const att of attachments) {
+    for (const attachment of attachments) {
       try {
-        if (invalidItemIds.has(att.itemId)) {
+        if (invalidItemIds.has(attachment.itemId)) {
           continue;
         }
-        const oldFilename = att.filename || 'document.pdf';
+        const oldFilename = attachment.filename || 'document.pdf';
         const newFilename = formatAttachmentFilename(
           pattern,
-          att.item || {},
+          attachment.item || {},
           oldFilename,
         );
 
         if (oldFilename !== newFilename) {
           updatesToPersist.push({
-            id: att.id,
-            itemId: att.itemId,
-            projectId: projectId || att.item?.projectId || undefined,
+            id: attachment.id,
+            itemId: attachment.itemId,
+            projectId: projectId || attachment.item?.projectId || undefined,
             filename: newFilename,
-            fileId: att.fileId ?? undefined,
+            fileId: attachment.fileId ?? undefined,
           });
         }
 
         results.push({
-          attachmentId: att.id,
-          itemId: att.itemId,
+          attachmentId: attachment.id,
+          itemId: attachment.itemId,
           oldFilename,
           newFilename,
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Failed to rename attachment ${att.id}: ${message}`);
+        this.logger.warn(
+          `Failed to rename attachment ${attachment.id}: ${message}`,
+        );
       }
     }
 
@@ -358,7 +362,7 @@ export class AttachmentRenamerService {
         await this.libraryTx.executeInTransaction(
           async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
             ranPostCommitHook = Boolean(helpers?.onAfterCommit);
-            await this.repo.batchRename(updatesToPersist, tx);
+            await this.attachmentsRepo.batchRename(updatesToPersist, tx);
             const eventScope = { userId, projectId: validProjectId };
             const changeEntries = updatesToPersist.map((u) => ({
               userId,
@@ -452,7 +456,7 @@ export class AttachmentRenamerService {
           },
         );
       } else {
-        await this.repo.batchRename(updatesToPersist);
+        await this.attachmentsRepo.batchRename(updatesToPersist);
       }
 
       if (!ranPostCommitHook) {

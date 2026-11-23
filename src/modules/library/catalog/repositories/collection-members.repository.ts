@@ -426,64 +426,64 @@ export async function executeDeleteCollectionWithCascade(
           if (helpers.recordTombstonesBatch) {
             await helpers.recordTombstonesBatch(
               eventScope,
-              deletedItemIds.map((itId) => ({
+              deletedItemIds.map((itemId) => ({
                 entityType: 'Item',
-                entityId: itId,
+                entityId: itemId,
               })),
             );
           } else {
-            for (const itId of deletedItemIds) {
+            for (const itemId of deletedItemIds) {
               await helpers.recordTombstone(eventScope, {
                 entityType: 'Item',
-                entityId: itId,
+                entityId: itemId,
               });
             }
           }
           if (helpers.appendChangesBatch) {
             await helpers.appendChangesBatch(
               eventScope,
-              deletedItemIds.map((itId) => ({
+              deletedItemIds.map((itemId) => ({
                 entityType: 'Item',
-                entityId: itId,
+                entityId: itemId,
                 action: 'delete',
                 version: 0,
-                data: { id: itId, deletedAt: deletedIso },
+                data: { id: itemId, deletedAt: deletedIso },
               })),
             );
           } else if (helpers.appendChange) {
-            for (const itId of deletedItemIds) {
+            for (const itemId of deletedItemIds) {
               await helpers.appendChange(eventScope, {
                 entityType: 'Item',
-                entityId: itId,
+                entityId: itemId,
                 action: 'delete',
                 version: 0,
-                data: { id: itId, deletedAt: deletedIso },
+                data: { id: itemId, deletedAt: deletedIso },
               });
             }
           }
           if (helpers.publishOutboxBatch) {
             await helpers.publishOutboxBatch(
               eventScope,
-              deletedItemIds.map((itId) => ({
-                aggregateId: itId,
+              deletedItemIds.map((itemId) => ({
+                aggregateId: itemId,
                 eventType: LIBRARY_EVENT_TYPES.ITEM_DELETED,
                 payload: {
-                  id: itId,
-                  itemId: itId,
+                  id: itemId,
+                  itemId: itemId,
                   deletedAt: deletedIso,
                   projectId: effectiveProjectId,
                 },
               })),
             );
           } else {
-            for (const itId of deletedItemIds) {
+            for (const itemId of deletedItemIds) {
               await helpers.publishOutbox(
                 eventScope,
-                itId,
+                itemId,
                 LIBRARY_EVENT_TYPES.ITEM_DELETED,
                 {
-                  id: itId,
-                  itemId: itId,
+                  id: itemId,
+                  itemId: itemId,
                   deletedAt: deletedIso,
                   projectId: effectiveProjectId,
                 },

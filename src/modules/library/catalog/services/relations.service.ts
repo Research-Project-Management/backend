@@ -36,7 +36,7 @@ export class ItemRelationsService {
   private readonly logger = new Logger(ItemRelationsService.name);
 
   constructor(
-    private readonly query: QueryRepository,
+    private readonly queryRepo: QueryRepository,
     private readonly command: CommandRepository,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
@@ -59,8 +59,8 @@ export class ItemRelationsService {
 
   async getRelatedItems(userId: string, itemId: string, projectId?: string) {
     const [item, relations] = await Promise.all([
-      this.query.findById(userId, itemId, projectId),
-      this.query.getRelations(itemId),
+      this.queryRepo.findById(userId, itemId, projectId),
+      this.queryRepo.getRelations(itemId),
     ]);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found`);
@@ -106,7 +106,7 @@ export class ItemRelationsService {
     },
     projectId?: string,
   ) {
-    const sourceItem = await this.query.findById(
+    const sourceItem = await this.queryRepo.findById(
       userId,
       sourceItemId,
       projectId,
@@ -143,8 +143,8 @@ export class ItemRelationsService {
 
     // Batch fetch target items before opening transaction (zero N+1 fallback queries)
     const targetItemMap = new Map<string, ItemDetail>();
-    const batchTargets = this.query.findByIds
-      ? await this.query.findByIds(userId, targetIds, projectId)
+    const batchTargets = this.queryRepo.findByIds
+      ? await this.queryRepo.findByIds(userId, targetIds, projectId)
       : undefined;
     if (Array.isArray(batchTargets)) {
       for (const item of batchTargets) {
@@ -153,7 +153,7 @@ export class ItemRelationsService {
     } else {
       const fallbackTargets = await Promise.all(
         targetIds.map((targetId) =>
-          this.query.findById(userId, targetId, projectId),
+          this.queryRepo.findById(userId, targetId, projectId),
         ),
       );
       for (const item of fallbackTargets) {
@@ -296,7 +296,7 @@ export class ItemRelationsService {
     targetItemId: string,
     projectId?: string,
   ) {
-    const sourceItem = await this.query.findById(
+    const sourceItem = await this.queryRepo.findById(
       userId,
       sourceItemId,
       projectId,
@@ -378,7 +378,7 @@ export class ItemFulltextService {
   private readonly singleFlight = new SingleFlightCoalescer();
 
   constructor(
-    private readonly query: QueryRepository,
+    private readonly queryRepo: QueryRepository,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional()
     @Inject(FILES_PORT)
@@ -426,9 +426,9 @@ export class ItemFulltextService {
       }
     }
 
-    const item = this.query.findSummaryById
-      ? await this.query.findSummaryById(userId, id, undefined, projectId)
-      : await this.query.findById(userId, id, projectId, undefined, false);
+    const item = this.queryRepo.findSummaryById
+      ? await this.queryRepo.findSummaryById(userId, id, undefined, projectId)
+      : await this.queryRepo.findById(userId, id, projectId, undefined, false);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found or access denied`);
     }
@@ -440,7 +440,7 @@ export class ItemFulltextService {
     return this.singleFlight.execute(coalescingKey, async () => {
       // 1. Look for authoritative full-text or header extraction record in a single query via QueryRepository
       const matchedRecord = trimmedAttachmentId
-        ? await this.query.findItemMetadataByProviders(
+        ? await this.queryRepo.findItemMetadataByProviders(
             id,
             ['pdf_fulltext', 'trusted_extraction', 'ocr', 'pdf_metadata'],
             undefined,
@@ -450,7 +450,7 @@ export class ItemFulltextService {
             },
             trimmedAttachmentId,
           )
-        : await this.query.findItemMetadataByProviders(
+        : await this.queryRepo.findItemMetadataByProviders(
             id,
             ['pdf_fulltext', 'trusted_extraction', 'ocr', 'pdf_metadata'],
             undefined,

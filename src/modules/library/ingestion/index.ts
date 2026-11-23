@@ -75,5 +75,8 @@ export * from './providers/retraction-scanner.provider';
 
 // DTOs & Types
 export * from './dto/ingestion.dto';
+export * from './dto/curation.dto';
+export * from './dto/feeds.dto';
+export * from './dto/retraction.dto';
 export * from './types/metadata.types';
 export * from './types/ingestion.types';

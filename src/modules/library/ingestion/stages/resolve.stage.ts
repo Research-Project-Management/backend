@@ -221,7 +221,7 @@ export class ResolveStage implements IWorkflowStage<
     private readonly duplicatePolicy: DuplicatePolicy = new DuplicatePolicy(),
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
   ) {}
 
   async match(input: ResolveMatchInput): Promise<DuplicateMatchResult> {
@@ -258,7 +258,7 @@ export class ResolveStage implements IWorkflowStage<
             .slice(0, 3)
         : [];
 
-    if (this.catalogGateway?.findMatchCandidates) {
+    if (this.catalogFacade?.findMatchCandidates) {
       const normalizedScope =
         typeof scope === 'string' ? { userId: scope } : scope;
       const proposedYear =
@@ -267,7 +267,7 @@ export class ResolveStage implements IWorkflowStage<
         Number.isFinite(Number(actualProposed.year))
           ? Number(actualProposed.year)
           : undefined;
-      const matchResult = await this.catalogGateway.findMatchCandidates(
+      const matchResult = await this.catalogFacade.findMatchCandidates(
         normalizedScope,
         {
           doi: proposedDoi,
@@ -337,7 +337,7 @@ export class ResolveStage implements IWorkflowStage<
       return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
     }
     this.logger.warn(
-      'ResolveStage.match invoked without catalogGateway; skipping duplicate matching',
+      'ResolveStage.match invoked without catalogFacade; skipping duplicate matching',
     );
     return { matchType: 'NO_MATCH', confidence: 0.0, matchReason: 'NONE' };
   }
@@ -562,19 +562,21 @@ export class ResolveStage implements IWorkflowStage<
   coalesceAndVerify(
     candidates: MetadataCandidate[],
   ): Promise<ReconciliationDecision> {
-    for (const cand of candidates) {
-      if (!cand.fields || Object.keys(cand.fields).length === 0) {
-        cand.fields = {};
-        for (const [k, v] of Object.entries(cand.normalizedMetadata || {})) {
+    for (const candidate of candidates) {
+      if (!candidate.fields || Object.keys(candidate.fields).length === 0) {
+        candidate.fields = {};
+        for (const [k, v] of Object.entries(
+          candidate.normalizedMetadata || {},
+        )) {
           if (v !== undefined && v !== null) {
-            cand.fields[k] = {
+            candidate.fields[k] = {
               path: k,
               value: v,
               normalizedValue: v,
-              confidence: cand.confidenceScore || 0.9,
+              confidence: candidate.confidenceScore || 0.9,
               sourceProvider:
-                cand.sourceName || cand.sourceProvider || 'UNKNOWN',
-              retrievedAt: cand.retrievedAt || new Date().toISOString(),
+                candidate.sourceName || candidate.sourceProvider || 'UNKNOWN',
+              retrievedAt: candidate.retrievedAt || new Date().toISOString(),
             };
           }
         }
@@ -608,27 +610,27 @@ export class ResolveStage implements IWorkflowStage<
       !isFilenameFallback
     ) {
       const remaining: MetadataCandidate[] = [];
-      for (const cand of activeCandidates) {
+      for (const candidate of activeCandidates) {
         if (
-          (cand.sourceKind === 'PROVIDER' ||
-            cand.sourceName === 'EnrichedProvider') &&
-          cand.normalizedMetadata?.title
+          (candidate.sourceKind === 'PROVIDER' ||
+            candidate.sourceName === 'EnrichedProvider') &&
+          candidate.normalizedMetadata?.title
         ) {
           const trap = evaluateCitationTrap(
             fileCandidate.normalizedMetadata,
-            cand.normalizedMetadata,
+            candidate.normalizedMetadata,
             isFilenameFallback,
           );
           if (trap.isTrap) {
             citationTrapRejectedDoi =
               trap.rejectedDoi || trap.rejectedIdentifier;
             this.logger.warn(
-              `[ResolveStage] Page-1 Citation Disambiguation Mismatch: Discarding external candidate ${cand.candidateId} (title="${cand.normalizedMetadata.title}") which conflicts with local PDF title "${fileCandidate.normalizedMetadata.title}" (similarity=${(trap.similarity * 100).toFixed(0)}%).`,
+              `[ResolveStage] Page-1 Citation Disambiguation Mismatch: Discarding external candidate ${candidate.candidateId} (title="${candidate.normalizedMetadata.title}") which conflicts with local PDF title "${fileCandidate.normalizedMetadata.title}" (similarity=${(trap.similarity * 100).toFixed(0)}%).`,
             );
             continue;
           }
         }
-        remaining.push(cand);
+        remaining.push(candidate);
       }
       activeCandidates = remaining;
 

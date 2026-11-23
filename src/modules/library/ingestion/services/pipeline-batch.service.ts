@@ -77,7 +77,7 @@ export class PipelineBatchExecutor {
     private readonly sideEffects: PipelineSideEffectsService,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
   ) {}
 
   async processRecordBatch(params: {
@@ -561,9 +561,9 @@ export class PipelineBatchExecutor {
       Array.from({ length: workerCount }, async () => {
         while (nextCandidateIndex < normalizedCandidates.length) {
           const idx = nextCandidateIndex++;
-          const cand = normalizedCandidates[idx];
-          if (cand) {
-            await processSingleRecordCandidate(cand);
+          const candidate = normalizedCandidates[idx];
+          if (candidate) {
+            await processSingleRecordCandidate(candidate);
           }
         }
       }),

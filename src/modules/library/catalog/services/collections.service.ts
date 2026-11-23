@@ -59,7 +59,7 @@ export class CollectionsService {
   constructor(
     private readonly repo: CollectionsRepository,
     @Optional()
-    private readonly tree: TreeEngine = new TreeEngine(),
+    private readonly treeEngine: TreeEngine = new TreeEngine(),
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
     @Optional() private readonly cacheCoordinator?: ItemCacheCoordinator,
@@ -103,7 +103,7 @@ export class CollectionsService {
         userId,
         effectiveProjectId,
       );
-      const treeNodes = this.tree.buildTree(rawCollections);
+      const treeNodes = this.treeEngine.buildTree(rawCollections);
       const recursiveCountById = new Map<string, number>();
       const stack: CollectionTreeNode[] = [...treeNodes];
       while (stack.length > 0) {
@@ -155,7 +155,7 @@ export class CollectionsService {
     const effectiveProjectId = this.resolveValidProjectId(projectId);
     const fetchTree = async () => {
       const collections = await this.repo.findAll(userId, effectiveProjectId);
-      return { tree: this.tree.buildTree(collections) };
+      return { tree: this.treeEngine.buildTree(collections) };
     };
     const spaceCacheKey = effectiveProjectId
       ? effectiveProjectId
@@ -300,7 +300,7 @@ export class CollectionsService {
         );
       }
     }
-    this.tree.assertNoCycle(allCollections, collectionId, rawParentId);
+    this.treeEngine.assertNoCycle(allCollections, collectionId, rawParentId);
   }
   async updateCollection(
     userId: string,
@@ -459,7 +459,7 @@ export class CollectionsService {
     const { effectiveProjectId, affectedItemIds, ranPostCommitHook } =
       await executeDeleteCollectionWithCascade(
         this.repo,
-        this.tree,
+        this.treeEngine,
         this.libraryTx,
         userId,
         collectionId,
@@ -647,7 +647,7 @@ export class CollectionsService {
   ): Promise<void> {
     await validateCollectionReorderNoCycle(
       this.repo,
-      this.tree,
+      this.treeEngine,
       userId,
       collections,
       projectId,
@@ -950,7 +950,7 @@ export class CollectionsService {
       ranPostCommitHook,
     } = await executeCopyCollectionSubtree(
       this.repo,
-      this.tree,
+      this.treeEngine,
       this.libraryTx,
       userId,
       collectionId,

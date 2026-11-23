@@ -161,17 +161,17 @@ export class ReaderWriteBehindService implements OnModuleInit, OnModuleDestroy {
       const dirtyUsers = await client.spop(dirtySetKey, batchLimit);
       if (!dirtyUsers || dirtyUsers.length === 0) return 0;
 
-      for (const uId of dirtyUsers) {
-        const hashKey = LIBRARY_REDIS_KEYS.readerProgress(uId);
+      for (const userId of dirtyUsers) {
+        const hashKey = LIBRARY_REDIS_KEYS.readerProgress(userId);
         const allItems = await client.hgetall(hashKey);
         if (!allItems || Object.keys(allItems).length === 0) continue;
 
         const flushedItemIds: string[] = [];
 
-        for (const [itId, progressJson] of Object.entries(allItems)) {
+        for (const [itemId, progressJson] of Object.entries(allItems)) {
           try {
             const data = JSON.parse(progressJson) as BufferedReadingProgress;
-            await this.stateRepository.upsertState(uId, itId, {
+            await this.stateRepository.upsertState(userId, itemId, {
               currentPage: data.currentPage,
               scrollPosition: data.scrollPosition as
                 Record<string, unknown> | unknown[] | null | undefined,
@@ -183,11 +183,11 @@ export class ReaderWriteBehindService implements OnModuleInit, OnModuleDestroy {
                 ? new Date(data.lastOpenedAt)
                 : undefined,
             });
-            flushedItemIds.push(itId);
+            flushedItemIds.push(itemId);
             flushedCount++;
           } catch (writeErr) {
             this.logger.warn(
-              `Failed flushing progress for user ${uId}, item ${itId}: ${(writeErr as Error).message}`,
+              `Failed flushing progress for user ${userId}, item ${itemId}: ${(writeErr as Error).message}`,
             );
           }
         }

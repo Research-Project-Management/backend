@@ -393,11 +393,11 @@ export function buildParsedBibtexEntry(
       collectedNotes.push(cleaned);
     }
   };
-  for (const cand of noteCandidates) {
-    if (Array.isArray(cand)) {
-      for (const elem of cand) pushCleanedNote(elem);
+  for (const candidate of noteCandidates) {
+    if (Array.isArray(candidate)) {
+      for (const elem of candidate) pushCleanedNote(elem);
     } else {
-      pushCleanedNote(cand);
+      pushCleanedNote(candidate);
     }
   }
   const notes = collectedNotes.length > 0 ? collectedNotes : undefined;

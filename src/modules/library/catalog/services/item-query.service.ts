@@ -103,7 +103,7 @@ export class ItemQueryService {
   private readonly singleFlight = new SingleFlightCoalescer();
 
   constructor(
-    private readonly query: QueryRepository,
+    private readonly queryRepo: QueryRepository,
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly accessService?: AccessService,
   ) {}
@@ -167,11 +167,11 @@ export class ItemQueryService {
 
     if (
       !resolvedRole &&
-      typeof this.query?.getProjectMemberRole === 'function'
+      typeof this.queryRepo?.getProjectMemberRole === 'function'
     ) {
       try {
         roleLookupAttempted = true;
-        const memberRole = await this.query.getProjectMemberRole(
+        const memberRole = await this.queryRepo.getProjectMemberRole(
           userId,
           projectId,
         );
@@ -292,16 +292,16 @@ export class ItemQueryService {
 
     const fetchProjectSharedCounts = async () => {
       const [unfiled, trash, rawItemTypes] = await Promise.all([
-        this.query.count(userId, { view: 'unfiled', projectId }),
-        this.query.count(userId, { view: 'trash', projectId }),
-        this.query.countByItemType?.(userId, projectId),
+        this.queryRepo.count(userId, { view: 'unfiled', projectId }),
+        this.queryRepo.count(userId, { view: 'trash', projectId }),
+        this.queryRepo.countByItemType?.(userId, projectId),
       ]);
       const itemTypes = rawItemTypes || {};
       const typeCounts = Object.values(itemTypes);
       const total =
         rawItemTypes !== undefined && rawItemTypes !== null
           ? typeCounts.reduce((acc, count) => acc + count, 0)
-          : await this.query.count(userId, { view: 'all', projectId });
+          : await this.queryRepo.count(userId, { view: 'all', projectId });
       return {
         total,
         unfiled,
@@ -317,7 +317,7 @@ export class ItemQueryService {
         );
         const [sharedCounts, starred] = await Promise.all([
           this.singleFlight.execute(sharedProjectKey, fetchProjectSharedCounts),
-          this.query.count(userId, { view: 'starred', projectId }),
+          this.queryRepo.count(userId, { view: 'starred', projectId }),
         ]);
         return {
           ...sharedCounts,
@@ -327,7 +327,7 @@ export class ItemQueryService {
 
       const [sharedCounts, starred] = await Promise.all([
         fetchProjectSharedCounts(),
-        this.query.count(userId, { view: 'starred', projectId }),
+        this.queryRepo.count(userId, { view: 'starred', projectId }),
       ]);
       return {
         ...sharedCounts,
@@ -357,7 +357,7 @@ export class ItemQueryService {
     const cacheKey = validProjectId
       ? `${LIBRARY_REDIS_KEYS.item(id)}:u:${userId}`
       : LIBRARY_REDIS_KEYS.item(id);
-    const fetchRaw = () => this.query.findById(userId, id, validProjectId);
+    const fetchRaw = () => this.queryRepo.findById(userId, id, validProjectId);
 
     let item: ItemDetail | Record<string, unknown> | null = null;
 
@@ -554,7 +554,7 @@ export class ItemQueryService {
       const preResolvedCollectionIds =
         options.collectionId &&
         (!options.collectionIds || options.collectionIds.length === 0)
-          ? await this.query.resolveTargetCollectionIds?.(userId, options)
+          ? await this.queryRepo.resolveTargetCollectionIds?.(userId, options)
           : undefined;
 
       const queryOptions = {
@@ -569,9 +569,9 @@ export class ItemQueryService {
       const shouldCount = isInitialPage;
       const [totalCount, rawItems] = await Promise.all([
         shouldCount
-          ? this.query.count(userId, queryOptions)
+          ? this.queryRepo.count(userId, queryOptions)
           : Promise.resolve(undefined),
-        this.query.findMany(userId, {
+        this.queryRepo.findMany(userId, {
           ...queryOptions,
           limit,
         }),
@@ -592,7 +592,7 @@ export class ItemQueryService {
         .filter((it): it is NonNullable<typeof it> => it !== null);
 
       if (validCheckInProjectId && items.length > 0) {
-        const memberRole = await this.query.getProjectMemberRole(
+        const memberRole = await this.queryRepo.getProjectMemberRole(
           userId,
           validCheckInProjectId,
         );
@@ -601,7 +601,7 @@ export class ItemQueryService {
             `Access to project '${validCheckInProjectId}' denied`,
           );
         }
-        const existingInProject = await this.query.findDuplicatesInProject(
+        const existingInProject = await this.queryRepo.findDuplicatesInProject(
           validCheckInProjectId,
           items.map((it) => ({
             doi: typeof it.doi === 'string' ? it.doi : null,
@@ -682,7 +682,7 @@ export class ItemQueryService {
     itemId: string,
     projectId?: string | null,
   ) {
-    return this.query.getItemSnapshot(userId, itemId, undefined, projectId);
+    return this.queryRepo.getItemSnapshot(userId, itemId, undefined, projectId);
   }
 
   async getItemSnapshots(
@@ -690,7 +690,12 @@ export class ItemQueryService {
     itemIds: string[],
     projectId?: string | null,
   ) {
-    return this.query.getItemSnapshots(userId, itemIds, undefined, projectId);
+    return this.queryRepo.getItemSnapshots(
+      userId,
+      itemIds,
+      undefined,
+      projectId,
+    );
   }
 
   // IItemExistencePort Implementation
@@ -699,7 +704,7 @@ export class ItemQueryService {
     itemId: string,
     projectId?: string,
   ): Promise<boolean> {
-    return this.query.exists(userId, itemId, undefined, projectId);
+    return this.queryRepo.exists(userId, itemId, undefined, projectId);
   }
 
   async assertExists(
@@ -707,7 +712,7 @@ export class ItemQueryService {
     itemId: string,
     projectId?: string,
   ): Promise<void> {
-    return this.query.assertExists(userId, itemId, undefined, projectId);
+    return this.queryRepo.assertExists(userId, itemId, undefined, projectId);
   }
 
   async existMany(
@@ -715,12 +720,12 @@ export class ItemQueryService {
     itemIds: string[],
     projectId?: string,
   ): Promise<Map<string, boolean>> {
-    return this.query.existMany(userId, itemIds, undefined, projectId);
+    return this.queryRepo.existMany(userId, itemIds, undefined, projectId);
   }
 
   // IItemReadPort Implementation
   async findById(userId: string, itemId: string, projectId?: string) {
-    return this.query.findById(userId, itemId, projectId);
+    return this.queryRepo.findById(userId, itemId, projectId);
   }
 
   async findByIds(
@@ -730,22 +735,22 @@ export class ItemQueryService {
     options?: { includeContent?: boolean },
   ) {
     return options?.includeContent !== undefined
-      ? this.query.findByIds(
+      ? this.queryRepo.findByIds(
           userId,
           itemIds,
           projectId,
           undefined,
           options.includeContent,
         )
-      : this.query.findByIds(userId, itemIds, projectId);
+      : this.queryRepo.findByIds(userId, itemIds, projectId);
   }
 
   async findByDoi(userId: string, doi: string, projectId?: string) {
-    return this.query.findByDoi(userId, doi, projectId);
+    return this.queryRepo.findByDoi(userId, doi, projectId);
   }
 
   async findSummaryById(userId: string, itemId: string, projectId?: string) {
-    return this.query.findSummaryById(userId, itemId, undefined, projectId);
+    return this.queryRepo.findSummaryById(userId, itemId, undefined, projectId);
   }
 
   async findSummariesByIds(
@@ -754,8 +759,8 @@ export class ItemQueryService {
     projectId?: string,
   ) {
     return projectId !== undefined
-      ? this.query.findSummariesByIds(userId, itemIds, projectId)
-      : this.query.findSummariesByIds(userId, itemIds);
+      ? this.queryRepo.findSummariesByIds(userId, itemIds, projectId)
+      : this.queryRepo.findSummariesByIds(userId, itemIds);
   }
 
   async findQualityAuditItems(
@@ -763,7 +768,7 @@ export class ItemQueryService {
     limit?: number,
     projectId?: string,
   ): Promise<QualityAuditCandidateItem[]> {
-    return await this.query.findQualityAuditItems(userId, limit, projectId);
+    return await this.queryRepo.findQualityAuditItems(userId, limit, projectId);
   }
 
   async findDuplicateCandidateItems(
@@ -771,7 +776,7 @@ export class ItemQueryService {
     limit?: number,
     projectId?: string,
   ): Promise<DuplicateCandidateItem[]> {
-    return (await this.query.findDuplicateCandidateItems(
+    return (await this.queryRepo.findDuplicateCandidateItems(
       userId,
       limit,
       projectId,
@@ -782,14 +787,14 @@ export class ItemQueryService {
     userId: string,
     options?: Record<string, unknown>,
   ): Promise<number> {
-    return this.query.count(userId, options || { view: 'all' });
+    return this.queryRepo.count(userId, options || { view: 'all' });
   }
 
   async findMany(
     userId: string,
     options?: Record<string, unknown>,
   ): Promise<ItemDetail[]> {
-    return await this.query.findMany(userId, options || {});
+    return await this.queryRepo.findMany(userId, options || {});
   }
 
   async findMatchCandidates(
@@ -804,6 +809,6 @@ export class ItemQueryService {
       titlePrefix?: string;
     },
   ) {
-    return this.query.findMatchCandidates(scope, criteria);
+    return this.queryRepo.findMatchCandidates(scope, criteria);
   }
 }

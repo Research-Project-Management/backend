@@ -50,13 +50,13 @@ export class UrlCaptureService {
   constructor(
     private readonly repo: IngestionRepository,
     @Optional() private readonly urlCaptureProvider?: UrlCaptureProvider,
-    @Optional() @Inject(UNIT_OF_WORK) private readonly txService?: IUnitOfWork,
+    @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx?: IUnitOfWork,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
+    private readonly extractionFacade?: IExtractionFacade,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional()
     @Inject(FILES_PORT)
@@ -73,8 +73,8 @@ export class UrlCaptureService {
       sideEffects ??
       new PipelineSideEffectsService(
         this.repo,
-        this.catalogGateway,
-        this.extractionGateway,
+        this.catalogFacade,
+        this.extractionFacade,
         this.retractionScanner,
       );
   }
@@ -551,18 +551,18 @@ export class UrlCaptureService {
 
               if (!allowDuplicate) {
                 let enrichedExisting: ItemDetail | undefined;
-                if (this.catalogGateway?.getItem) {
+                if (this.catalogFacade?.getItem) {
                   try {
-                    const existing = await this.catalogGateway.getItem(
+                    const existing = await this.catalogFacade.getItem(
                       targetUserId,
                       match.exactMatch.id,
                       projectId,
                     );
                     enrichedExisting = existing ?? undefined;
-                    if (existing && this.catalogGateway?.updateItem) {
+                    if (existing && this.catalogFacade?.updateItem) {
                       const patch = buildEnrichmentPatch(existing, itemData);
                       if (Object.keys(patch).length > 0) {
-                        const updated = await this.catalogGateway.updateItem(
+                        const updated = await this.catalogFacade.updateItem(
                           targetUserId,
                           match.exactMatch.id,
                           patch,
@@ -594,14 +594,14 @@ export class UrlCaptureService {
         }
       }
 
-      if (!this.catalogGateway?.createItem) {
+      if (!this.catalogFacade?.createItem) {
         throw new SubsystemUnavailableException(
-          'CatalogGateway is required to confirm captured URL item',
-          { gateway: 'CatalogGateway' },
+          'catalogFacade is required to confirm captured URL item',
+          { gateway: 'catalogFacade' },
         );
       }
 
-      const createdItem = await this.catalogGateway.createItem(
+      const createdItem = await this.catalogFacade.createItem(
         targetUserId,
         itemData,
         { source: 'url', projectId },

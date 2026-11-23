@@ -46,7 +46,7 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
         readOwnedFile: readOwnedFileMock,
       } as unknown as IFilesPort;
 
-      const extractionGateway = {
+      const extractionFacade = {
         extractTrustedMetadata: extractTrustedMetadataMock,
         extractDocumentFromBuffer: extractDocumentFromBufferMock,
       } as unknown as IExtractionFacade;
@@ -54,7 +54,7 @@ describe('High-Scale Ingestion Architecture Optimizations', () => {
       const resolver = new IdentifyFileResolver(
         new NormalizationPolicy(),
         storagePort,
-        extractionGateway,
+        extractionFacade,
       );
 
       // Simulate 20 different students concurrently uploading the exact same PDF file

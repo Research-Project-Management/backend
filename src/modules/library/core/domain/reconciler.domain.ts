@@ -631,27 +631,27 @@ function selectAuthoritativeCreatorVariant<
   )
     return firstNonEmpty;
   let best = firstNonEmpty;
-  for (const cand of sortedVariants) {
+  for (const candidate of sortedVariants) {
     if (
       !AUTHORITATIVE_CREATOR_PROVIDERS.has(
-        (cand.sourceProvider || '').toLowerCase(),
+        (candidate.sourceProvider || '').toLowerCase(),
       ) ||
-      !Array.isArray(cand.val) ||
-      cand.val.length === 0
+      !Array.isArray(candidate.val) ||
+      candidate.val.length === 0
     )
       continue;
     const bestArr = Array.isArray(best?.val) ? best.val : [];
     if (
       isBetterAuthorListCandidate(
         1,
-        cand.val.length,
-        countFullGivenNames(cand.val),
+        candidate.val.length,
+        countFullGivenNames(candidate.val),
         1,
         bestArr.length,
         countFullGivenNames(bestArr),
       )
     )
-      best = cand;
+      best = candidate;
   }
   return best;
 }
@@ -1839,7 +1839,7 @@ export function reconcileBibliographicRecord(
     defaultSource: string,
     defaultConf: number,
   ): CoalesceMetadataCandidate => {
-    const prov =
+    const provider =
       typeof rec.sourceProvider === 'string' && rec.sourceProvider.trim()
         ? rec.sourceProvider.trim()
         : typeof rec.source === 'string' && rec.source.trim()
@@ -1854,8 +1854,8 @@ export function reconcileBibliographicRecord(
     return {
       candidateId: id,
       sourceKind: 'PROVIDER',
-      sourceName: prov,
-      sourceProvider: prov,
+      sourceName: provider,
+      sourceProvider: provider,
       retrievedAt: now,
       fields: {},
       normalizedMetadata: rec,

@@ -79,7 +79,7 @@ export class ItemCurationService {
   private readonly cacheCoordinator: ItemCacheCoordinator;
 
   constructor(
-    private readonly query: QueryRepository,
+    private readonly queryRepo: QueryRepository,
     private readonly command: CommandRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
@@ -163,7 +163,7 @@ export class ItemCurationService {
     }
 
     const [project, perms] = await Promise.all([
-      this.query.findProjectWithMembers(projectId),
+      this.queryRepo.findProjectWithMembers(projectId),
       this.itemQueryService
         ? this.itemQueryService.getPermissions(userId, projectId)
         : Promise.resolve(null),
@@ -191,7 +191,7 @@ export class ItemCurationService {
       );
     }
 
-    const sourceItems = await this.query.findManyByIdsWithFullDetails(
+    const sourceItems = await this.queryRepo.findManyByIdsWithFullDetails(
       userId,
       uniqueItemIds,
     );
@@ -203,7 +203,7 @@ export class ItemCurationService {
     let existingTitles = new Set<string>();
 
     if (sourceItems.length > 0) {
-      const existingItems = await this.query.findDuplicatesInProject(
+      const existingItems = await this.queryRepo.findDuplicatesInProject(
         projectId,
         sourceItems.map((item) => ({
           doi: item.doi,
@@ -359,8 +359,8 @@ export class ItemCurationService {
    */
   async getMetadataSources(userId: string, itemId: string, projectId?: string) {
     const [item, sources] = await Promise.all([
-      this.query.findById(userId, itemId, projectId),
-      this.query.findMetadataSources(itemId),
+      this.queryRepo.findById(userId, itemId, projectId),
+      this.queryRepo.findMetadataSources(itemId),
     ]);
     if (!item) {
       throw new NotFoundException(`Item ${itemId} not found in library`);
@@ -443,7 +443,7 @@ export class ItemCurationService {
   ): Promise<{ id: string; itemId: string; metadata?: unknown } | null> {
     if (!fileId) return null;
     if (!scope || (!scope.userId && !scope.projectId)) return null;
-    const result = await this.query.findAttachmentByFileId(
+    const result = await this.queryRepo.findAttachmentByFileId(
       fileId,
       undefined,
       scope,
@@ -460,7 +460,7 @@ export class ItemCurationService {
     scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
     if (!attachmentId) return;
-    const existing = await this.query.findAttachmentById(attachmentId);
+    const existing = await this.queryRepo.findAttachmentById(attachmentId);
     if (!existing) return;
     if (
       scope &&
@@ -503,7 +503,7 @@ export class ItemCurationService {
     scope?: { userId?: string; projectId?: string },
   ): Promise<void> {
     if (!itemId) return;
-    const existing = await this.query.findItemForAiMetadata(itemId);
+    const existing = await this.queryRepo.findItemForAiMetadata(itemId);
     if (!existing) return;
     if (
       scope &&

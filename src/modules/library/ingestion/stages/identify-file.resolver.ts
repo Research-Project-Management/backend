@@ -124,7 +124,7 @@ export class IdentifyFileResolver {
     private readonly filesPort?: IFilesPort,
     @Optional()
     @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
+    private readonly extractionFacade?: IExtractionFacade,
   ) {}
 
   private cloneMetadata(meta: ExtractedPdfMetadata): ExtractedPdfMetadata {
@@ -158,10 +158,10 @@ export class IdentifyFileResolver {
     const task = (async (): Promise<ExtractedPdfMetadata> => {
       let result: ExtractedPdfMetadata = {};
 
-      if (this.extractionGateway?.extractTrustedMetadata) {
+      if (this.extractionFacade?.extractTrustedMetadata) {
         try {
           // Pass undefined for filename so global content-hash cache remains 100% pure content-derived
-          const trusted = await this.extractionGateway.extractTrustedMetadata(
+          const trusted = await this.extractionFacade.extractTrustedMetadata(
             fileBuffer,
             undefined,
           );
@@ -187,10 +187,10 @@ export class IdentifyFileResolver {
 
       if (
         needsDocumentFallback &&
-        this.extractionGateway?.extractDocumentFromBuffer
+        this.extractionFacade?.extractDocumentFromBuffer
       ) {
         const extractedDoc =
-          await this.extractionGateway.extractDocumentFromBuffer(fileBuffer, {
+          await this.extractionFacade.extractDocumentFromBuffer(fileBuffer, {
             maxPages: 3,
             headerOnly: true,
             skipTrustedExtraction: true,
@@ -203,11 +203,11 @@ export class IdentifyFileResolver {
 
       if (
         Object.keys(result).length === 0 &&
-        this.extractionGateway?.extractMetadataFromBuffer
+        this.extractionFacade?.extractMetadataFromBuffer
       ) {
         try {
           result =
-            (this.extractionGateway.extractMetadataFromBuffer(
+            (this.extractionFacade.extractMetadataFromBuffer(
               fileBuffer,
             ) as unknown as ExtractedPdfMetadata) || {};
         } catch {
@@ -310,7 +310,7 @@ export class IdentifyFileResolver {
 
     if (
       this.filesPort?.readOwnedFile &&
-      this.extractionGateway?.extractDocumentFromBuffer &&
+      this.extractionFacade?.extractDocumentFromBuffer &&
       payload.fileId
     ) {
       try {

@@ -92,7 +92,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     private readonly libraryTx?: IUnitOfWork,
     @Optional()
     @Inject(SEARCH_FACADE)
-    private readonly searchGateway?: ISearchFacade,
+    private readonly searchFacade?: ISearchFacade,
     @Optional()
     metadataSync?: ExtractionMetadataSynchronizer,
     @Optional()
@@ -100,7 +100,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
   ) {
     this.metadataSync =
       metadataSync ??
@@ -109,7 +109,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
         this.libraryTx,
         this.filesPort,
         this.cacheCoordinator,
-        this.catalogGateway,
+        this.catalogFacade,
       );
   }
 
@@ -546,8 +546,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       charOffset: number;
     }>,
   ): Promise<void> {
-    if (this.searchGateway?.indexAttachmentPages) {
-      await this.searchGateway.indexAttachmentPages(
+    if (this.searchFacade?.indexAttachmentPages) {
+      await this.searchFacade.indexAttachmentPages(
         attachmentId,
         normalizedPages.map((p) => ({
           pageIndex: p.pageIndex,
@@ -645,8 +645,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     const { attachment, effectiveUserId, effectiveProjectId } = ctx;
     const cacheInvalidator = this.cacheCoordinator?.invalidateForWrite
       ? this.cacheCoordinator
-      : this.catalogGateway?.invalidateForWrite
-        ? this.catalogGateway
+      : this.catalogFacade?.invalidateForWrite
+        ? this.catalogFacade
         : undefined;
 
     await executeStandardLibraryCacheInvalidation(
@@ -803,14 +803,14 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Event listener error during ${eventName}: ${msg}`);
       if (
-        this.searchGateway?.indexAttachmentPages &&
+        this.searchFacade?.indexAttachmentPages &&
         typeof payload === 'object' &&
         payload &&
         'attachmentId' in payload &&
         'pages' in payload &&
         Array.isArray((payload as { pages?: unknown }).pages)
       ) {
-        await this.searchGateway
+        await this.searchFacade
           .indexAttachmentPages(
             (payload as { attachmentId: string }).attachmentId,
             (

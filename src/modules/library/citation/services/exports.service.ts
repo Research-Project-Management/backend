@@ -246,12 +246,12 @@ export class ExportsService {
     }> = [];
     for (const it of items) {
       const attachments = Array.isArray(it.attachments) ? it.attachments : [];
-      for (const att of attachments) {
+      for (const attachment of attachments) {
         files.push({
           itemId: it.id,
           title: it.title,
-          filename: att.filename,
-          fileUrl: att.url,
+          filename: attachment.filename,
+          fileUrl: attachment.url,
         });
       }
     }

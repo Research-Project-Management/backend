@@ -1,8 +1,23 @@
-﻿import { Controller, Get, Post, Patch, Param, Query, Body, UseGuards, Optional } from '@nestjs/common';
+﻿import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Query,
+  Body,
+  UseGuards,
+  Optional,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { MergeDuplicatesDto, BatchMergeDuplicatesDto, DismissDuplicatesDto, UpdateReviewCaseStatusDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import {
+  MergeDuplicatesDto,
+  BatchMergeDuplicatesDto,
+  DismissDuplicatesDto,
+  UpdateReviewCaseStatusDto,
+} from '@/modules/library/ingestion/dto/curation.dto';
 import { IngestionService } from '@/modules/library/ingestion/services/ingestion.service';
 import { DuplicateDetectorService } from '@/modules/library/ingestion/services/duplicate-detector.service';
 import { DuplicateMergerService } from '@/modules/library/ingestion/services/duplicate-merger.service';

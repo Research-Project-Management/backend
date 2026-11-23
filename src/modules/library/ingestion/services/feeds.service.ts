@@ -102,7 +102,7 @@ export class FeedsService {
       }
     }
 
-    const sub = await this.feedsRepo.upsertSubscription({
+    const subscription = await this.feedsRepo.upsertSubscription({
       userId,
       feedId: feed.id,
       customTitle,
@@ -111,7 +111,7 @@ export class FeedsService {
       cleanupUnreadAfter,
     });
     await this.invalidateSubscriptionsCache(userId);
-    return sub;
+    return subscription;
   }
 
   async unsubscribe(userId: string, feedId: string): Promise<void> {
@@ -199,18 +199,18 @@ export class FeedsService {
   ) {
     const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
     const readStatus = options?.readStatus ?? 'all';
-    const sub = await this.feedsRepo.findSubscription(userId, feedId);
-    if (!sub) {
+    const subscription = await this.feedsRepo.findSubscription(userId, feedId);
+    if (!subscription) {
       throw new NotFoundException('Feed subscription not found');
     }
-    const resolvedFeedId = sub.feedId || feedId;
+    const resolvedFeedId = subscription.feedId || feedId;
 
-    if (options?.forceRefresh && sub.feed?.url) {
+    if (options?.forceRefresh && subscription.feed?.url) {
       try {
-        await this.feedFetcher.fetchAcademicFeed(sub.feed.url, true);
+        await this.feedFetcher.fetchAcademicFeed(subscription.feed.url, true);
       } catch (err: unknown) {
         this.logger.warn(
-          `[FeedsService] Force refresh failed for feed "${sub.feed.url}": ${err instanceof Error ? err.message : String(err)}`,
+          `[FeedsService] Force refresh failed for feed "${subscription.feed.url}": ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -223,8 +223,8 @@ export class FeedsService {
       cursor: options?.cursor,
       page: options?.page,
       search: options?.search,
-      cleanupReadAfter: sub.cleanupReadAfter,
-      cleanupUnreadAfter: sub.cleanupUnreadAfter,
+      cleanupReadAfter: subscription.cleanupReadAfter,
+      cleanupUnreadAfter: subscription.cleanupUnreadAfter,
     });
 
     const queryLower = options?.search?.trim().toLowerCase() || '';
@@ -340,11 +340,11 @@ export class FeedsService {
     userId: string,
     feedId: string,
   ): Promise<{ markedCount: number }> {
-    const sub = await this.feedsRepo.findSubscription(userId, feedId);
-    if (!sub) {
+    const subscription = await this.feedsRepo.findSubscription(userId, feedId);
+    if (!subscription) {
       throw new NotFoundException('Feed subscription not found');
     }
-    const resolvedFeedId = sub.feedId || feedId;
+    const resolvedFeedId = subscription.feedId || feedId;
     const unreadItems = await this.feedsRepo.findFeedItemsForUser({
       userId,
       feedId: resolvedFeedId,
@@ -454,12 +454,12 @@ export class FeedsService {
     const subscriptions: FeedSubscriptionDto[] = [];
     for (const candidate of candidates.slice(0, 50)) {
       try {
-        const sub = await this.subscribe(
+        const subscription = await this.subscribe(
           userId,
           candidate.url,
           candidate.title,
         );
-        subscriptions.push(sub);
+        subscriptions.push(subscription);
       } catch (err: unknown) {
         this.logger.warn(
           `[FeedsService] Skipping OPML feed "${candidate.url}": ${err instanceof Error ? err.message : String(err)}`,

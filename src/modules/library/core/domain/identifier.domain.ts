@@ -382,11 +382,11 @@ export function normalizeIssn(issn?: string | null): string | undefined {
           ' ',
         ),
     );
-    const cand = withoutQualifiers.replace(/[-\s]/g, '').toUpperCase();
-    if (/^\d{7}[\dX]$/.test(cand)) {
-      return `${cand.slice(0, 4)}-${cand.slice(4)}`;
+    const candidate = withoutQualifiers.replace(/[-\s]/g, '').toUpperCase();
+    if (/^\d{7}[\dX]$/.test(candidate)) {
+      return `${candidate.slice(0, 4)}-${candidate.slice(4)}`;
     }
-    if (!/\d{9,}/.test(cand)) {
+    if (!/\d{9,}/.test(candidate)) {
       const m = withoutQualifiers.match(
         /(?:^|[^\d-])(\d{4})[-\s](\d{3}[\dXx])(?:$|[^\d-])/i,
       );

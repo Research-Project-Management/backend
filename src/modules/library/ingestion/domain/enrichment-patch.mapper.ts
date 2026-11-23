@@ -213,12 +213,12 @@ function resolveExistingExtraText(
   existingExtraObj: Record<string, unknown>,
   existingMetaObj: Record<string, unknown>,
 ): string {
-  for (const cand of [
+  for (const candidate of [
     existingRec?.extra,
     existingExtraObj.extra,
     existingMetaObj.extra,
   ]) {
-    if (typeof cand === 'string' && cand.trim()) return cand;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
   }
   return '';
 }
@@ -335,11 +335,11 @@ function buildPatchProvenanceContext(
       coupled.some((alias) => lockedSet.has(alias))
     )
       return true;
-    const prov = findProv(existingProvMap, fieldKey);
+    const provenance = findProv(existingProvMap, fieldKey);
     return Boolean(
-      prov?.isUserOverride ||
-      prov?.source === 'UserOverride' ||
-      prov?.source === 'manual',
+      provenance?.isUserOverride ||
+      provenance?.source === 'UserOverride' ||
+      provenance?.source === 'manual',
     );
   };
 
@@ -383,8 +383,8 @@ export function buildEnrichmentPatch(
 
   const getExistingFieldAuthority = (fieldKey: string): number => {
     if (isFieldLocked(fieldKey)) return 1.0;
-    const prov = findProv(existingProvMap, fieldKey);
-    if (!prov) {
+    const provenance = findProv(existingProvMap, fieldKey);
+    if (!provenance) {
       if (fieldKey === 'title' && isFilenameTitle) return 0.25;
       const fallbackEngine = pickFirstString(
         existingExtraObj.engineUsed,
@@ -400,25 +400,31 @@ export function buildEnrichmentPatch(
         : 0.5;
     }
     if (
-      prov.isUserOverride ||
-      prov.source === 'UserOverride' ||
-      prov.source === 'manual'
+      provenance.isUserOverride ||
+      provenance.source === 'UserOverride' ||
+      provenance.source === 'manual'
     )
       return 1.0;
     return (
-      resolveProviderFieldWeight(prov.sourceProvider || prov.source, fieldKey) *
-      (typeof prov.confidence === 'number' ? prov.confidence : 0.9)
+      resolveProviderFieldWeight(
+        provenance.sourceProvider || provenance.source,
+        fieldKey,
+      ) *
+      (typeof provenance.confidence === 'number' ? provenance.confidence : 0.9)
     );
   };
 
   const getIncomingFieldAuthority = (fieldKey: string): number => {
-    const prov = findProv(incomingProvMap, fieldKey);
-    if (prov)
+    const provenance = findProv(incomingProvMap, fieldKey);
+    if (provenance)
       return (
         resolveProviderFieldWeight(
-          prov.sourceProvider || prov.source,
+          provenance.sourceProvider || provenance.source,
           fieldKey,
-        ) * (typeof prov.confidence === 'number' ? prov.confidence : 0.9)
+        ) *
+        (typeof provenance.confidence === 'number'
+          ? provenance.confidence
+          : 0.9)
       );
     const candidateSource = pickFirstString(
       pExtraObj.engineUsed,
@@ -818,20 +824,25 @@ export function buildReResolvePatch(
 
   const getExistingProvAuthority = (fieldKey: string): number => {
     if (fieldKey === 'title' && isFilenameTitle) return 0.25;
-    const prov = findProv(existingProvMap, fieldKey);
-    const src = prov?.sourceProvider || prov?.source;
-    return prov && src
+    const provenance = findProv(existingProvMap, fieldKey);
+    const src = provenance?.sourceProvider || provenance?.source;
+    return provenance && src
       ? resolveProviderFieldWeight(src, fieldKey) *
-          (typeof prov.confidence === 'number' ? prov.confidence : 0.9)
+          (typeof provenance.confidence === 'number'
+            ? provenance.confidence
+            : 0.9)
       : 0;
   };
 
   const getIncomingProvAuthority = (fieldKey: string): number => {
-    const prov = findProv(incomingProvMap, fieldKey);
-    const src = prov?.sourceProvider || prov?.source || resolvedSource;
+    const provenance = findProv(incomingProvMap, fieldKey);
+    const src =
+      provenance?.sourceProvider || provenance?.source || resolvedSource;
     return (
       resolveProviderFieldWeight(src, fieldKey) *
-      (prov && typeof prov.confidence === 'number' ? prov.confidence : 0.95)
+      (provenance && typeof provenance.confidence === 'number'
+        ? provenance.confidence
+        : 0.95)
     );
   };
 
@@ -1113,7 +1124,7 @@ export function mapPayloadToSource(kind: string): LibraryItemSource {
 }
 
 export async function materializeDeduplicatedNotes(params: {
-  catalogGateway?: ICatalogFacade;
+  catalogFacade?: ICatalogFacade;
   userId: string;
   projectId?: string;
   itemId: string;
@@ -1122,7 +1133,7 @@ export async function materializeDeduplicatedNotes(params: {
   logger?: DomainLogger;
 }): Promise<void> {
   const {
-    catalogGateway,
+    catalogFacade,
     userId,
     projectId,
     itemId,
@@ -1130,11 +1141,7 @@ export async function materializeDeduplicatedNotes(params: {
     createdItem,
     logger,
   } = params;
-  if (
-    !Array.isArray(notes) ||
-    notes.length === 0 ||
-    !catalogGateway?.createNote
-  )
+  if (!Array.isArray(notes) || notes.length === 0 || !catalogFacade?.createNote)
     return;
 
   const existingNotes = Array.isArray(createdItem?.notes)
@@ -1187,7 +1194,7 @@ export async function materializeDeduplicatedNotes(params: {
     seenContents.add(trimmed.toLowerCase());
 
     try {
-      await catalogGateway.createNote(userId, {
+      await catalogFacade.createNote(userId, {
         itemId,
         contentMd: trimmed,
         title: noteSource || 'Imported Note',
@@ -1208,7 +1215,7 @@ export async function materializeDeduplicatedNotes(params: {
 export async function executeDuplicateItemEnrichment<
   TItem extends { id: string },
 >(params: {
-  catalogGateway?: ICatalogFacade;
+  catalogFacade?: ICatalogFacade;
   userId: string;
   projectId?: string;
   existingItem: TItem;
@@ -1238,7 +1245,7 @@ export async function executeDuplicateItemEnrichment<
   patchedFields: string[];
 }> {
   const {
-    catalogGateway,
+    catalogFacade,
     userId,
     projectId,
     existingItem,
@@ -1250,12 +1257,12 @@ export async function executeDuplicateItemEnrichment<
   let resultItem: TItem = existingItem;
   let patchedFields: string[] = [];
 
-  if (catalogGateway?.updateItem) {
+  if (catalogFacade?.updateItem) {
     try {
       const patch = buildEnrichmentPatch(existingItem, candidateData);
       patchedFields = Object.keys(patch);
       if (patchedFields.length > 0) {
-        const updated = await catalogGateway.updateItem(
+        const updated = await catalogFacade.updateItem(
           userId,
           existingItem.id,
           patch,
@@ -1282,7 +1289,7 @@ export async function executeDuplicateItemEnrichment<
   const uniqueCollectionIds =
     Array.isArray(rawColIds) &&
     rawColIds.length > 0 &&
-    catalogGateway?.assignItemsToCollection
+    catalogFacade?.assignItemsToCollection
       ? Array.from(new Set(rawColIds.filter(Boolean)))
       : [];
 
@@ -1304,7 +1311,7 @@ export async function executeDuplicateItemEnrichment<
               existingRec,
             )
           : materializeDeduplicatedNotes({
-              catalogGateway,
+              catalogFacade,
               userId,
               projectId,
               itemId: existingItem.id,
@@ -1314,7 +1321,7 @@ export async function executeDuplicateItemEnrichment<
             })
         : undefined,
       ...uniqueCollectionIds.map((colId) =>
-        catalogGateway!.assignItemsToCollection!(
+        catalogFacade!.assignItemsToCollection!(
           userId,
           colId,
           [existingItem.id],

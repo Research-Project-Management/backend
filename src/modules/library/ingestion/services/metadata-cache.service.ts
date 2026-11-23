@@ -42,7 +42,7 @@ export class MetadataCache {
   private readonly l1Cache = new Map<string, L1CacheEntry>();
   private readonly MAX_L1_ENTRIES = 1000;
 
-  constructor(@Optional() private readonly redis?: RedisCacheService) {}
+  constructor(@Optional() private readonly cache?: RedisCacheService) {}
 
   buildKey(queryType: QueryType, canonicalId: string): string {
     const hash = createHash('md5')
@@ -94,12 +94,12 @@ export class MetadataCache {
     }
 
     // 2. Tier 2: Check L2 Redis Cache
-    if (!this.redis || !this.redis.isReady()) {
+    if (!this.cache || !this.cache.isReady()) {
       return null;
     }
 
     try {
-      const raw = await this.redis.get<string | ResolvedMetadata>(key);
+      const raw = await this.cache.get<string | ResolvedMetadata>(key);
       if (raw === null || raw === undefined) return null;
 
       if (raw === NEGATIVE_SENTINEL) {
@@ -141,10 +141,10 @@ export class MetadataCache {
     this.setL1(key, value, ttl);
 
     // 2. Set L2 Redis
-    if (!this.redis || !this.redis.isReady()) return;
+    if (!this.cache || !this.cache.isReady()) return;
 
     try {
-      await this.redis.set(key, value, ttl);
+      await this.cache.set(key, value, ttl);
       this.logger.debug(`L2 Redis SET (TTL=${ttl}s): ${key}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -162,10 +162,10 @@ export class MetadataCache {
     this.setL1(key, false, ttl);
 
     // 2. Set L2 Redis negative
-    if (!this.redis || !this.redis.isReady()) return;
+    if (!this.cache || !this.cache.isReady()) return;
 
     try {
-      await this.redis.set(key, NEGATIVE_SENTINEL, ttl);
+      await this.cache.set(key, NEGATIVE_SENTINEL, ttl);
       this.logger.debug(`L2 Redis Negative SET (TTL=${ttl}s): ${key}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -214,6 +214,6 @@ export class MetadataCache {
   }
 
   get redisAvailable(): boolean {
-    return Boolean(this.redis && this.redis.isReady());
+    return Boolean(this.cache && this.cache.isReady());
   }
 }

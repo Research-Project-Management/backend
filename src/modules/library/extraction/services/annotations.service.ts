@@ -51,7 +51,7 @@ export class AnnotationsService {
     private readonly cacheCoordinator?: IItemCacheInvalidator,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
   ) {}
 
   async invalidateCache(
@@ -65,7 +65,7 @@ export class AnnotationsService {
       : `library:attachment:${attachmentId}:annotations`;
 
     await executeStandardLibraryCacheInvalidation(
-      this.cacheCoordinator ?? this.catalogGateway,
+      this.cacheCoordinator ?? this.catalogFacade,
       this.cache,
       {
         userId,

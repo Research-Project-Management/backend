@@ -59,7 +59,7 @@ export class CslRepositoryService implements OnModuleInit {
   constructor(
     @Optional()
     @Inject(RedisCacheService)
-    private readonly redisCache?: RedisCacheService,
+    private readonly cache?: RedisCacheService,
     @Optional()
     private readonly httpClient?: HttpClient,
     @Optional()
@@ -185,14 +185,14 @@ export class CslRepositoryService implements OnModuleInit {
 
     // 2. Cache & DB lookup (scoped custom style lookup first, then global official cache)
     const scopeKey = spaceId?.trim() || 'global';
-    if (this.redisCache) {
-      const scoped = await this.redisCache.get<string>(
+    if (this.cache) {
+      const scoped = await this.cache.get<string>(
         LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey),
       );
       if (scoped && typeof scoped === 'string' && scoped.includes('<style'))
         return scoped;
       if (!spaceId) {
-        const legacyCustom = await this.redisCache.get<string>(
+        const legacyCustom = await this.cache.get<string>(
           LIBRARY_REDIS_KEYS.cslStyleXml(normalized, 'custom'),
         );
         if (
@@ -202,7 +202,7 @@ export class CslRepositoryService implements OnModuleInit {
         )
           return legacyCustom;
       }
-      const cached = await this.redisCache.get<string>(cacheKey);
+      const cached = await this.cache.get<string>(cacheKey);
       if (cached && typeof cached === 'string' && cached.includes('<style'))
         return cached;
     }
@@ -218,8 +218,8 @@ export class CslRepositoryService implements OnModuleInit {
               )
             : null);
         if (dbRow?.xmlContent && dbRow.xmlContent.includes('<style')) {
-          if (this.redisCache) {
-            await this.redisCache.set(
+          if (this.cache) {
+            await this.cache.set(
               LIBRARY_REDIS_KEYS.cslStyleXml(normalized, scopeKey),
               dbRow.xmlContent,
               86400 * 365,
@@ -236,8 +236,7 @@ export class CslRepositoryService implements OnModuleInit {
       xml: string,
     ): Promise<string | null> => {
       if (this.isValidCslXml(xml)) {
-        if (this.redisCache)
-          await this.redisCache.set(cacheKey, xml, 86400 * 30);
+        if (this.cache) await this.cache.set(cacheKey, xml, 86400 * 30);
         return xml;
       }
       const parentSlug = this.extractDependentParentSlug(xml);
@@ -248,8 +247,7 @@ export class CslRepositoryService implements OnModuleInit {
           depth + 1,
         );
         if (parentXml && this.isValidCslXml(parentXml)) {
-          if (this.redisCache)
-            await this.redisCache.set(cacheKey, parentXml, 86400 * 30);
+          if (this.cache) await this.cache.set(cacheKey, parentXml, 86400 * 30);
           return parentXml;
         }
       }
@@ -439,18 +437,18 @@ export class CslRepositoryService implements OnModuleInit {
       }
     }
 
-    if (this.redisCache) {
+    if (this.cache) {
       const xmlKey = LIBRARY_REDIS_KEYS.cslStyleXml(slug, scopeKey);
       const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
       const [, existing] = await Promise.all([
-        this.redisCache.set(xmlKey, cslXml, 86400 * 365),
+        this.cache.set(xmlKey, cslXml, 86400 * 365),
         this.getCustomStyles(scopeKey),
       ]);
       const updated = [meta, ...existing.filter((s) => s.id !== slug)].slice(
         0,
         CslRepositoryService.MAX_CUSTOM_STYLES_PER_SCOPE,
       );
-      await this.redisCache.set(listKey, updated, 86400 * 365);
+      await this.cache.set(listKey, updated, 86400 * 365);
     }
 
     return meta;
@@ -461,10 +459,10 @@ export class CslRepositoryService implements OnModuleInit {
    */
   public async getCustomStyles(spaceId?: string): Promise<CslStyleMetadata[]> {
     const scopeKey = spaceId?.trim() || 'global';
-    if (this.redisCache) {
+    if (this.cache) {
       try {
         const listKey = LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey);
-        const styles = await this.redisCache.get<CslStyleMetadata[]>(listKey);
+        const styles = await this.cache.get<CslStyleMetadata[]>(listKey);
         if (Array.isArray(styles) && styles.length > 0) {
           return styles.slice(
             0,
@@ -495,8 +493,8 @@ export class CslRepositoryService implements OnModuleInit {
             updated: r.updatedAt.toISOString(),
           };
         });
-        if (mapped.length > 0 && this.redisCache) {
-          await this.redisCache.set(
+        if (mapped.length > 0 && this.cache) {
+          await this.cache.set(
             LIBRARY_REDIS_KEYS.cslCustomStylesList(scopeKey),
             mapped,
             86400 * 365,
@@ -524,8 +522,8 @@ export class CslRepositoryService implements OnModuleInit {
     }
 
     // Check Redis
-    if (this.redisCache) {
-      const cached = await this.redisCache.get<CslStyleMetadata[]>(
+    if (this.cache) {
+      const cached = await this.cache.get<CslStyleMetadata[]>(
         LIBRARY_REDIS_KEYS.cslStylesCatalogIndex(),
       );
       if (Array.isArray(cached) && cached.length > 1000) {
@@ -620,9 +618,9 @@ export class CslRepositoryService implements OnModuleInit {
           `Successfully indexed ${parsed.length} official CSL styles from repository.`,
         );
 
-        if (this.redisCache) {
+        if (this.cache) {
           // Cache index for 7 days
-          await this.redisCache.set(
+          await this.cache.set(
             LIBRARY_REDIS_KEYS.cslStylesCatalogIndex(),
             parsed,
             86400 * 7,

@@ -6,7 +6,6 @@ import {
   IsBoolean,
   IsUUID,
   IsArray,
-  ArrayNotEmpty,
   IsNumber,
   ArrayMaxSize,
   MaxLength,
@@ -16,7 +15,6 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import {
-  RetractionNature,
   SubmissionKind,
   IdentifierType,
   RecordFormat,
@@ -141,174 +139,6 @@ export class UnifiedIngestionDto {
 // ============================================================================
 // Curation DTOs
 // ============================================================================
-
-export class UpdateReviewCaseStatusDto {
-  @IsIn(['OPEN', 'PENDING', 'APPROVED', 'REJECTED', 'DISMISSED', 'RESOLVED'])
-  status!:
-    'OPEN' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISMISSED' | 'RESOLVED';
-
-  @IsOptional()
-  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
-  spaceId?: string;
-}
-
-export class MergeDuplicatesDto {
-  @IsUUID(undefined, { message: 'primaryItemId must be a valid UUID' })
-  primaryItemId!: string;
-
-  @IsArray()
-  @ArrayNotEmpty({ message: 'duplicateItemIds must contain at least one ID' })
-  @IsUUID(undefined, {
-    each: true,
-    message: 'Each duplicateItemId must be a valid UUID',
-  })
-  duplicateItemIds!: string[];
-
-  @IsOptional()
-  @IsObject()
-  fieldSelections?: Record<string, unknown>;
-
-  @IsOptional()
-  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
-  spaceId?: string;
-}
-
-export class DismissDuplicatesDto {
-  @IsArray()
-  @ArrayNotEmpty({ message: 'itemIds must contain at least two IDs' })
-  @IsUUID(undefined, {
-    each: true,
-    message: 'Each itemId must be a valid UUID',
-  })
-  itemIds!: string[];
-
-  @IsOptional()
-  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
-  spaceId?: string;
-}
-
-// ============================================================================
-// Feeds DTOs
-// ============================================================================
-
-export class SubscribeFeedDto {
-  @IsString()
-  @MaxLength(2048)
-  url!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  customTitle?: string;
-
-  @IsOptional()
-  @IsNumber()
-  cleanupDays?: number;
-
-  @IsOptional()
-  @IsNumber()
-  cleanupReadAfter?: number;
-
-  @IsOptional()
-  @IsNumber()
-  cleanupUnreadAfter?: number;
-}
-
-export class UpdateFeedSubDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  customTitle?: string;
-
-  @IsOptional()
-  @IsNumber()
-  cleanupDays?: number;
-
-  @IsOptional()
-  @IsNumber()
-  cleanupReadAfter?: number;
-
-  @IsOptional()
-  @IsNumber()
-  cleanupUnreadAfter?: number;
-
-  @IsOptional()
-  @IsString()
-  url?: string;
-}
-
-export class MarkItemReadDto {
-  @IsOptional()
-  @IsBoolean()
-  isRead?: boolean;
-}
-
-export class MarkAllReadDto {
-  @IsArray()
-  @ArrayMaxSize(200)
-  @IsString({ each: true })
-  itemIds!: string[];
-}
-
-export class ImportOpmlDto {
-  @IsString()
-  @MaxLength(500000)
-  opmlXml!: string;
-}
-
-export class BatchMergeDuplicatesDto {
-  @IsArray()
-  @ArrayNotEmpty({ message: 'merges must contain at least one merge group' })
-  @ArrayMaxSize(50)
-  @ValidateNested({ each: true })
-  @Type(() => MergeDuplicatesDto)
-  merges!: MergeDuplicatesDto[];
-
-  @IsOptional()
-  @IsUUID(undefined, { message: 'spaceId must be a valid UUID' })
-  spaceId?: string;
-}
-
-// ============================================================================
-// Retraction DTOs
-// ============================================================================
-
-export class FlagRetractionDto {
-  @IsOptional()
-  @IsIn(['retraction', 'expression_of_concern', 'correction', 'manual'])
-  nature?: RetractionNature = 'manual';
-
-  @IsOptional()
-  @IsString()
-  reason?: string;
-
-  @IsOptional()
-  @IsString()
-  noticeUrl?: string;
-
-  @IsOptional()
-  @IsString()
-  date?: string;
-}
-
-export class BatchCheckRetractionDto {
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  itemIds?: string[];
-}
-
-export class SyncRetractionDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  maxDays?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  limit?: number;
-}
 
 export class IngestionSubmissionDto {
   @Transform(({ value, obj }) => {
@@ -677,18 +507,4 @@ export class ConfirmCapturedUrlDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
-}
-
-export class FetchAcademicFeedDto {
-  @IsNotEmpty()
-  @IsUrl(
-    { require_protocol: true, protocols: ['http', 'https'] },
-    { message: 'Valid HTTP or HTTPS URL is required' },
-  )
-  @MaxLength(2048)
-  url!: string;
-
-  @IsOptional()
-  @IsBoolean()
-  forceRefresh?: boolean;
 }

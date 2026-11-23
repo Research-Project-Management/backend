@@ -18,9 +18,9 @@ export class ItemLifecycleSubscriber {
   private readonly logger = new Logger(ItemLifecycleSubscriber.name);
 
   constructor(
-    private readonly attachmentsRepository: AttachmentsRepository,
+    private readonly attachmentsRepo: AttachmentsRepository,
     @Optional()
-    private readonly annotationsRepository?: AnnotationsRepository,
+    private readonly annotationsRepo?: AnnotationsRepository,
     @Optional()
     @Inject(FILES_PORT)
     private readonly filesPort?: IFilesPort,
@@ -86,21 +86,23 @@ export class ItemLifecycleSubscriber {
         payload?.payload?.projectId ??
         payload?.userId ??
         payload?.payload?.userId;
-      if (this.filesPort?.deleteFile && this.attachmentsRepository?.findMany) {
-        const attachments = await this.attachmentsRepository.findMany(
+      if (this.filesPort?.deleteFile && this.attachmentsRepo?.findMany) {
+        const attachments = await this.attachmentsRepo.findMany(
           { itemId },
           { revisions: true, item: { select: { spaceId: true } } },
         );
-        for (const att of attachments || []) {
-          const attItemSpaceId = (att as { item?: { spaceId?: string } | null })
-            ?.item?.spaceId;
+        for (const attachment of attachments || []) {
+          const attItemSpaceId = (
+            attachment as { item?: { spaceId?: string } | null }
+          )?.item?.spaceId;
           if (!resolvedSpaceId && attItemSpaceId) {
             resolvedSpaceId = attItemSpaceId;
           }
-          const attFileId = att.fileId || extractFileIdFromUrl(att.url);
+          const attFileId =
+            attachment.fileId || extractFileIdFromUrl(attachment.url);
           if (attFileId) candidateFileIdsToDelete.add(attFileId);
           const revisions = (
-            att as {
+            attachment as {
               revisions?: Array<{
                 fileId?: string | null;
                 url?: string | null;
@@ -117,11 +119,11 @@ export class ItemLifecycleSubscriber {
         }
       }
 
-      if (this.annotationsRepository) {
-        await this.annotationsRepository.deleteManyByItemId(itemId);
+      if (this.annotationsRepo) {
+        await this.annotationsRepo.deleteManyByItemId(itemId);
       }
-      if (this.attachmentsRepository?.deleteManyByItemId) {
-        await this.attachmentsRepository.deleteManyByItemId(itemId);
+      if (this.attachmentsRepo?.deleteManyByItemId) {
+        await this.attachmentsRepo.deleteManyByItemId(itemId);
       }
 
       if (this.filesPort?.deleteFile && candidateFileIdsToDelete.size > 0) {
@@ -179,7 +181,7 @@ export class ItemLifecycleSubscriber {
     );
 
     try {
-      const attachments = await this.attachmentsRepository.findMany({
+      const attachments = await this.attachmentsRepo.findMany({
         itemId,
         deletedAt: null,
       });
@@ -187,12 +189,10 @@ export class ItemLifecycleSubscriber {
         (attachment: { id: string }) => attachment.id,
       );
 
-      if (attachmentIds.length > 0 && this.annotationsRepository) {
-        await this.annotationsRepository.softDeleteByAttachmentIds(
-          attachmentIds,
-        );
+      if (attachmentIds.length > 0 && this.annotationsRepo) {
+        await this.annotationsRepo.softDeleteByAttachmentIds(attachmentIds);
       }
-      await this.attachmentsRepository.softDeleteByItemId(itemId);
+      await this.attachmentsRepo.softDeleteByItemId(itemId);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.warn(
@@ -237,9 +237,9 @@ export class ItemLifecycleSubscriber {
       if (
         itemDeletedAt &&
         !isNaN(itemDeletedAt.getTime()) &&
-        this.attachmentsRepository?.findMany
+        this.attachmentsRepo?.findMany
       ) {
-        const trashedAttachments = await this.attachmentsRepository.findMany({
+        const trashedAttachments = await this.attachmentsRepo.findMany({
           itemId,
           deletedAt: { gte: itemDeletedAt },
         });
@@ -247,13 +247,11 @@ export class ItemLifecycleSubscriber {
           (attachment: { id: string }) => attachment.id,
         );
 
-        if (attachmentIds.length > 0 && this.annotationsRepository) {
-          await this.annotationsRepository.restoreByAttachmentIds?.(
-            attachmentIds,
-          );
+        if (attachmentIds.length > 0 && this.annotationsRepo) {
+          await this.annotationsRepo.restoreByAttachmentIds?.(attachmentIds);
         }
       }
-      await this.attachmentsRepository?.syncItemAttachmentCounts?.(itemId);
+      await this.attachmentsRepo?.syncItemAttachmentCounts?.(itemId);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.warn(

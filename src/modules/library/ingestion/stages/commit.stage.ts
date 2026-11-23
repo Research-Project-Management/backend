@@ -371,7 +371,7 @@ export class CommitStage implements IWorkflowStage<
   private readonly logger = new Logger(CommitStage.name);
   constructor(
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway: ICatalogFacade,
+    private readonly catalogFacade: ICatalogFacade,
     @Optional()
     private readonly sideEffects?: CommitMatchedSideEffectsPort,
   ) {}
@@ -384,7 +384,7 @@ export class CommitStage implements IWorkflowStage<
     } = input;
 
     const primaryRole =
-      this.catalogGateway?.getPrimaryCreatorType?.(
+      this.catalogFacade?.getPrimaryCreatorType?.(
         actualMetadata.itemType || 'journalArticle',
       ) || 'author';
     const createData = toItemData(actualMetadata, actualOptions, primaryRole);
@@ -422,10 +422,10 @@ export class CommitStage implements IWorkflowStage<
         createData.arxivId ||
         createData.pmid ||
         createData.isbn) &&
-      this.catalogGateway?.findMatchCandidates
+      this.catalogFacade?.findMatchCandidates
     ) {
       try {
-        const preMatch = await this.catalogGateway.findMatchCandidates(
+        const preMatch = await this.catalogFacade.findMatchCandidates(
           { userId: effectiveUserId, projectId: effectiveProjectId },
           {
             doi: createData.doi,
@@ -447,7 +447,7 @@ export class CommitStage implements IWorkflowStage<
           calculateTitleSimilarity(proposedTitle ?? '', existingTitle ?? '') <
             0.5;
         if (existingId && !titlesConflict) {
-          const existingItem = await this.catalogGateway.getItem(
+          const existingItem = await this.catalogFacade.getItem(
             effectiveUserId,
             existingId,
             effectiveProjectId,
@@ -467,7 +467,7 @@ export class CommitStage implements IWorkflowStage<
     }
 
     try {
-      return await this.catalogGateway.createItem(effectiveUserId, createData, {
+      return await this.catalogFacade.createItem(effectiveUserId, createData, {
         projectId: effectiveProjectId,
         source: actualOptions?.source,
       });
@@ -475,8 +475,8 @@ export class CommitStage implements IWorkflowStage<
       const code = (err as { code?: string })?.code;
       const msg = err instanceof Error ? err.message : String(err);
       if (code === 'P2002' || msg.includes('Unique constraint failed')) {
-        if (this.catalogGateway.findMatchCandidates) {
-          const match = await this.catalogGateway.findMatchCandidates(
+        if (this.catalogFacade.findMatchCandidates) {
+          const match = await this.catalogFacade.findMatchCandidates(
             { userId: effectiveUserId, projectId: effectiveProjectId },
             {
               doi: createData.doi,
@@ -498,7 +498,7 @@ export class CommitStage implements IWorkflowStage<
                   Number(c.year) === Number(createData.year)),
             )?.id;
           if (matchedId) {
-            const existing = await this.catalogGateway.getItem(
+            const existing = await this.catalogFacade.getItem(
               effectiveUserId,
               matchedId,
               effectiveProjectId,
@@ -525,7 +525,7 @@ export class CommitStage implements IWorkflowStage<
     createData: CreateItemData,
   ): Promise<CommittedItemDetail> {
     const { item } = await executeDuplicateItemEnrichment({
-      catalogGateway: this.catalogGateway,
+      catalogFacade: this.catalogFacade,
       userId,
       projectId,
       existingItem,

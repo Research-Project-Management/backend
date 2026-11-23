@@ -47,7 +47,7 @@ interface IngestionItemCacheInvalidationParams {
   userId?: string | null;
   projectId?: string | null;
   cacheCoordinator?: IItemCacheInvalidator;
-  catalogGateway?: ICatalogFacade;
+  catalogFacade?: ICatalogFacade;
   cache?: RedisCacheService;
   logger?: Logger;
   includeExtendedRelations?: boolean;
@@ -62,7 +62,7 @@ export async function invalidateIngestionItemCache(
     userId,
     projectId,
     cacheCoordinator,
-    catalogGateway,
+    catalogFacade,
     cache,
     logger,
     includeExtendedRelations,
@@ -72,8 +72,8 @@ export async function invalidateIngestionItemCache(
   const validProjectId = normalizeProjectSpaceId(projectId);
   const invalidator = cacheCoordinator?.invalidateForWrite
     ? cacheCoordinator
-    : catalogGateway?.invalidateForWrite
-      ? catalogGateway
+    : catalogFacade?.invalidateForWrite
+      ? catalogFacade
       : undefined;
   const extraKeys: string[] = [];
   if (
@@ -112,7 +112,7 @@ export async function invalidateIngestionItemCache(
 export async function invalidateMergedItemsCache(params: {
   cache?: RedisCacheService;
   cacheCoordinator?: IItemCacheInvalidator;
-  catalogGateway?: ICatalogFacade;
+  catalogFacade?: ICatalogFacade;
   logger: Logger;
   primaryId: string;
   uniqueDupIds: string[];
@@ -122,7 +122,7 @@ export async function invalidateMergedItemsCache(params: {
   const {
     cache,
     cacheCoordinator,
-    catalogGateway,
+    catalogFacade,
     logger,
     primaryId,
     uniqueDupIds,
@@ -134,7 +134,7 @@ export async function invalidateMergedItemsCache(params: {
     userId,
     projectId: effectiveProjectId,
     cacheCoordinator,
-    catalogGateway,
+    catalogFacade,
     cache,
     logger,
     includeExtendedRelations: true,

@@ -33,7 +33,7 @@ import { buildTypeConversionUpdatePayload } from '../domain/type-conversion.poli
 @Injectable()
 export class ItemTypeConversionService {
   constructor(
-    private readonly query: QueryRepository,
+    private readonly queryRepo: QueryRepository,
     private readonly command: CommandRepository,
     private readonly typesService: TypesService,
     private readonly transformer: ItemTransformer,
@@ -64,7 +64,7 @@ export class ItemTypeConversionService {
     tx?: Prisma.TransactionClient,
     helpers?: TransactionHelpers,
   ) {
-    const rawExisting = await this.query.findById(
+    const rawExisting = await this.queryRepo.findById(
       userId,
       itemId,
       projectId,

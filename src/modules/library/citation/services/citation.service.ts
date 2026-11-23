@@ -50,7 +50,7 @@ export class CitationService {
     private readonly cslRepo?: CslRepositoryService,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(METADATA_PORT)
     private readonly metadataPort?: {
@@ -285,8 +285,8 @@ export class CitationService {
     const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const spaceId = effectiveProjectId || userId;
     const [item, styleLoaded] = await Promise.all([
-      this.catalogGateway
-        ? this.catalogGateway.getItem<CatalogItemRecord>(
+      this.catalogFacade
+        ? this.catalogFacade.getItem<CatalogItemRecord>(
             userId,
             itemId,
             effectiveProjectId,
@@ -339,8 +339,8 @@ export class CitationService {
     const effectiveProjectId = normalizeProjectSpaceId(projectId);
     const spaceId = effectiveProjectId || userId;
     const [rawItems] = await Promise.all([
-      this.catalogGateway
-        ? this.catalogGateway.findByIds<CatalogItemRecord>(
+      this.catalogFacade
+        ? this.catalogFacade.findByIds<CatalogItemRecord>(
             userId,
             itemIds,
             effectiveProjectId,

@@ -35,10 +35,10 @@ export class PipelineSideEffectsService {
     private readonly repo: IngestionRepository,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
+    private readonly extractionFacade?: IExtractionFacade,
     @Optional()
     private readonly retractionScanner?: RetractionScannerProvider,
     @Optional()
@@ -51,9 +51,9 @@ export class PipelineSideEffectsService {
     itemId: string,
     projectId?: string,
   ): Promise<void> {
-    if (!this.catalogGateway?.assignItemsToCollection) return;
+    if (!this.catalogFacade?.assignItemsToCollection) return;
     try {
-      await this.catalogGateway.assignItemsToCollection(
+      await this.catalogFacade.assignItemsToCollection(
         userId,
         collectionId,
         [itemId],
@@ -139,7 +139,7 @@ export class PipelineSideEffectsService {
     parentMetadata?: Record<string, unknown> | null,
     options?: { rethrowOnError?: boolean },
   ): Promise<void> {
-    if (!fileId || !this.extractionGateway?.createAttachment) return;
+    if (!fileId || !this.extractionFacade?.createAttachment) return;
     if (parentMetadata) {
       const existingAttachments = Array.isArray(parentMetadata.attachments)
         ? (parentMetadata.attachments as Array<{
@@ -244,7 +244,7 @@ export class PipelineSideEffectsService {
         }
       }
 
-      await this.extractionGateway.createAttachment(
+      await this.extractionFacade.createAttachment(
         {
           itemId,
           fileId,
@@ -360,10 +360,10 @@ export class PipelineSideEffectsService {
             if (
               hasNewScrapedKeywords &&
               Array.isArray(scraped.keywords) &&
-              this.catalogGateway?.updateItem
+              this.catalogFacade?.updateItem
             ) {
               try {
-                await this.catalogGateway.updateItem(
+                await this.catalogFacade.updateItem(
                   userId,
                   itemId,
                   { keywords: scraped.keywords },
@@ -388,7 +388,7 @@ export class PipelineSideEffectsService {
     }
 
     // 2. Auto Web Snapshot Capture (.html)
-    if (shouldSaveSnapshot && this.extractionGateway?.captureWebSnapshot) {
+    if (shouldSaveSnapshot && this.extractionFacade?.captureWebSnapshot) {
       const itemType =
         typeof proposedItem?.itemType === 'string' ? proposedItem.itemType : '';
       const isWebOrientedType = [
@@ -418,7 +418,7 @@ export class PipelineSideEffectsService {
         !attachedPdfFileId
       ) {
         try {
-          await this.extractionGateway.captureWebSnapshot(
+          await this.extractionFacade.captureWebSnapshot(
             snapshotTargetUrl,
             itemId,
             userId,
@@ -447,7 +447,7 @@ export class PipelineSideEffectsService {
     createdItem?: Record<string, unknown> | null,
   ): Promise<void> {
     return materializeDeduplicatedNotes({
-      catalogGateway: this.catalogGateway,
+      catalogFacade: this.catalogFacade,
       userId,
       projectId,
       itemId,
@@ -605,9 +605,9 @@ export class PipelineSideEffectsService {
   }> {
     const { userId, projectId, targetItemId, candidateItem } = params;
     await this.scanRetraction(candidateItem, { localOnly: true });
-    if (!this.catalogGateway?.getItem) return { patchedFields: [] };
+    if (!this.catalogFacade?.getItem) return { patchedFields: [] };
 
-    const existing = await this.catalogGateway.getItem(
+    const existing = await this.catalogFacade.getItem(
       userId,
       targetItemId,
       projectId,
@@ -620,8 +620,8 @@ export class PipelineSideEffectsService {
     );
     const patchedFields = Object.keys(enrichPatch);
 
-    if (patchedFields.length > 0 && this.catalogGateway.updateItem) {
-      await this.catalogGateway.updateItem(userId, targetItemId, enrichPatch, {
+    if (patchedFields.length > 0 && this.catalogFacade.updateItem) {
+      await this.catalogFacade.updateItem(userId, targetItemId, enrichPatch, {
         projectId,
       });
       this.logger.log(
@@ -707,7 +707,7 @@ export class PipelineSideEffectsService {
     });
     existingRecord = res.existingRecord;
     patchedFields = res.patchedFields;
-    if (this.catalogGateway?.getItem) {
+    if (this.catalogFacade?.getItem) {
       await this.runPostPersistSideEffects(
         targetItemId,
         { userId, projectId, envelope },

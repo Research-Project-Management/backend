@@ -25,7 +25,7 @@ import {
   ItemsMapper,
 } from '@/modules/library/core';
 import { IngestionRepository } from '@/modules/library/ingestion/repositories/ingestion.repository';
-import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/curation.dto';
 import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
 import { UserId, ProjectId } from '@/modules/library/core';
 import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
@@ -69,10 +69,10 @@ export class DuplicateMergerService {
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
+    private readonly extractionFacade?: IExtractionFacade,
     @Optional()
     private readonly ingestionRepo?: IngestionRepository,
     @Optional()
@@ -132,8 +132,8 @@ export class DuplicateMergerService {
       projectId || dto.spaceId,
     );
     const allItemIds = [dto.primaryItemId, ...uniqueDupIds];
-    const items = this.catalogGateway
-      ? await this.catalogGateway.findByIds(
+    const items = this.catalogFacade
+      ? await this.catalogFacade.findByIds(
           userId,
           allItemIds,
           effectiveProjectId,
@@ -218,8 +218,8 @@ export class DuplicateMergerService {
         );
         const initialAttachments = rawInitialAttachments || [];
 
-        if (this.extractionGateway?.reassignContentToItem) {
-          const orphaned = await this.extractionGateway.reassignContentToItem(
+        if (this.extractionFacade?.reassignContentToItem) {
+          const orphaned = await this.extractionFacade.reassignContentToItem(
             uniqueDupIds,
             primary.id,
             tx,
@@ -229,8 +229,8 @@ export class DuplicateMergerService {
           }
         }
 
-        if (this.catalogGateway) {
-          await this.catalogGateway.mergeItems(tx, uniqueDupIds, primary.id);
+        if (this.catalogFacade) {
+          await this.catalogFacade.mergeItems(tx, uniqueDupIds, primary.id);
         }
 
         await recordMergedAssetSyncEventsInTx({
@@ -381,9 +381,9 @@ export class DuplicateMergerService {
               });
 
         const needNoteRecount =
-          !this.catalogGateway && Boolean(tx.libraryNote?.count);
+          !this.catalogFacade && Boolean(tx.libraryNote?.count);
         const needAttachmentRecount =
-          !this.extractionGateway?.reassignContentToItem &&
+          !this.extractionFacade?.reassignContentToItem &&
           Boolean(tx.attachment?.count);
         const [noteCount, attachmentCount] =
           needNoteRecount || needAttachmentRecount
@@ -506,7 +506,7 @@ export class DuplicateMergerService {
             invalidateMergedItemsCache({
               cache: this.cache,
               cacheCoordinator: this.cacheCoordinator,
-              catalogGateway: this.catalogGateway,
+              catalogFacade: this.catalogFacade,
               logger: this.logger,
               primaryId: primary.id,
               uniqueDupIds,
@@ -529,7 +529,7 @@ export class DuplicateMergerService {
       await invalidateMergedItemsCache({
         cache: this.cache,
         cacheCoordinator: this.cacheCoordinator,
-        catalogGateway: this.catalogGateway,
+        catalogFacade: this.catalogFacade,
         logger: this.logger,
         primaryId: primary.id,
         uniqueDupIds,
@@ -546,8 +546,8 @@ export class DuplicateMergerService {
         userId: String(userId),
         projectId: effectiveProjectId,
       });
-      if (this.extractionGateway?.cleanupOrphanedFiles) {
-        await this.extractionGateway.cleanupOrphanedFiles(filesToCleanup, {
+      if (this.extractionFacade?.cleanupOrphanedFiles) {
+        await this.extractionFacade.cleanupOrphanedFiles(filesToCleanup, {
           spaceId: targetSpaceId,
         });
       } else if (this.filesPort?.deleteFile) {

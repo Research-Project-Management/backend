@@ -110,7 +110,7 @@ export class HtmlMetaTagExtractor {
       result.creators = creators;
     }
 
-    for (const cand of [
+    for (const candidate of [
       first('citation_doi'),
       first('prism.doi'),
       ...all('dc.identifier', 'dcterms.identifier', 'eprints.id_number'),
@@ -118,7 +118,7 @@ export class HtmlMetaTagExtractor {
       coins.doi,
       embeddedScript.doi,
     ]) {
-      const d = cand ? normalizeDoi(cand) : undefined;
+      const d = candidate ? normalizeDoi(candidate) : undefined;
       if (d) {
         result.doi = d;
         break;
@@ -160,18 +160,18 @@ export class HtmlMetaTagExtractor {
       result.pmid = normalizePmid(rawPmid);
     }
 
-    for (const cand of [
+    for (const candidate of [
       first('citation_pmcid', 'prism.pmcid'),
       ...all('dc.identifier', 'dcterms.identifier', 'eprints.id_number'),
     ]) {
-      const pmc = cand ? normalizePmcid(cand) : undefined;
+      const pmc = candidate ? normalizePmcid(candidate) : undefined;
       if (pmc) {
         result.pmcid = pmc;
         break;
       }
     }
 
-    for (const cand of [
+    for (const candidate of [
       ...all(
         'citation_issn',
         'citation_eissn',
@@ -182,19 +182,19 @@ export class HtmlMetaTagExtractor {
       jsonLd.issn,
       coins.issn,
     ]) {
-      const v = cand ? normalizeIssn(cand) : undefined;
+      const v = candidate ? normalizeIssn(candidate) : undefined;
       if (v) {
         result.issn = v;
         break;
       }
     }
 
-    for (const cand of [
+    for (const candidate of [
       ...all('citation_isbn', 'prism.isbn', 'eprints.isbn'),
       jsonLd.isbn,
       coins.isbn,
     ]) {
-      const v = cand ? normalizeIsbn(cand) : undefined;
+      const v = candidate ? normalizeIsbn(candidate) : undefined;
       if (v) {
         result.isbn = v;
         break;

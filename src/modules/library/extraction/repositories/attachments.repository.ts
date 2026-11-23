@@ -334,24 +334,25 @@ export class AttachmentsRepository {
     const candidateOrphanFileIds: string[] = [];
     let hasPrimaryPdf = false;
 
-    for (const att of sortedAttachments) {
+    for (const attachment of sortedAttachments) {
       const hashKey =
-        typeof att.fileHash === 'string' && att.fileHash.trim().length > 0
-          ? att.fileHash.trim().toLowerCase()
+        typeof attachment.fileHash === 'string' &&
+        attachment.fileHash.trim().length > 0
+          ? attachment.fileHash.trim().toLowerCase()
           : undefined;
       const urlKey =
         !hashKey &&
-        typeof att.url === 'string' &&
-        att.url.trim().length > 0 &&
-        att.linkMode === 'linked_url'
-          ? att.url.trim()
+        typeof attachment.url === 'string' &&
+        attachment.url.trim().length > 0 &&
+        attachment.linkMode === 'linked_url'
+          ? attachment.url.trim()
           : undefined;
 
       const existingSurvivor =
         (hashKey ? survivingByHash.get(hashKey) : undefined) ||
         (urlKey ? survivingByUrl.get(urlKey) : undefined);
 
-      if (existingSurvivor && existingSurvivor.id !== att.id) {
+      if (existingSurvivor && existingSurvivor.id !== attachment.id) {
         // Consolidate annotations, structure, FTS, and reading states from duplicate attachment onto existingSurvivor
         const [
           survivorAnnots,
@@ -364,7 +365,7 @@ export class AttachmentsRepository {
             where: { attachmentId: existingSurvivor.id, deletedAt: null },
           }) ?? Promise.resolve([]),
           client.annotation?.findMany?.({
-            where: { attachmentId: att.id, deletedAt: null },
+            where: { attachmentId: attachment.id, deletedAt: null },
           }) ?? Promise.resolve([]),
           typeof client.fullTextIndex?.updateMany === 'function' &&
           typeof client.fullTextIndex?.count === 'function'
@@ -380,7 +381,7 @@ export class AttachmentsRepository {
             : Promise.resolve(null),
           typeof client.attachmentReadingState?.findMany === 'function'
             ? client.attachmentReadingState
-                .findMany({ where: { attachmentId: att.id } })
+                .findMany({ where: { attachmentId: attachment.id } })
                 .catch(() => [])
             : Promise.resolve([]),
         ]);
@@ -440,7 +441,7 @@ export class AttachmentsRepository {
           consolidationWrites.push(
             Promise.resolve(
               client.fullTextIndex.updateMany({
-                where: { attachmentId: att.id },
+                where: { attachmentId: attachment.id },
                 data: { attachmentId: existingSurvivor.id },
               }),
             ).catch(() => undefined),
@@ -450,7 +451,7 @@ export class AttachmentsRepository {
           consolidationWrites.push(
             Promise.resolve(
               client.attachmentStructure.updateMany({
-                where: { attachmentId: att.id },
+                where: { attachmentId: attachment.id },
                 data: { attachmentId: existingSurvivor.id },
               }),
             ).catch(() => undefined),
@@ -512,35 +513,35 @@ export class AttachmentsRepository {
         // Soft-delete redundant duplicate attachment so original attachment rows are preserved in trash/audit
         if (typeof client.attachment.update === 'function') {
           await client.attachment.update({
-            where: { id: att.id },
+            where: { id: attachment.id },
             data: { deletedAt: new Date() },
           });
-          if (att.fileId) candidateOrphanFileIds.push(att.fileId);
+          if (attachment.fileId) candidateOrphanFileIds.push(attachment.fileId);
         } else if (typeof client.attachment.updateMany === 'function') {
           await client.attachment.updateMany({
-            where: { id: att.id },
+            where: { id: attachment.id },
             data: { deletedAt: new Date() },
           });
-          if (att.fileId) candidateOrphanFileIds.push(att.fileId);
+          if (attachment.fileId) candidateOrphanFileIds.push(attachment.fileId);
         } else if (typeof client.attachment.delete === 'function') {
-          await client.attachment.delete({ where: { id: att.id } });
-          if (att.fileId) candidateOrphanFileIds.push(att.fileId);
+          await client.attachment.delete({ where: { id: attachment.id } });
+          if (attachment.fileId) candidateOrphanFileIds.push(attachment.fileId);
         }
         continue;
       }
 
       // Surviving attachment: register hash/url and enforce single primary_pdf
-      if (hashKey) survivingByHash.set(hashKey, att);
-      if (urlKey) survivingByUrl.set(urlKey, att);
-      if (att.fileId) survivingFileIds.add(att.fileId);
-      if (Array.isArray(att.revisions)) {
-        for (const rev of att.revisions) {
+      if (hashKey) survivingByHash.set(hashKey, attachment);
+      if (urlKey) survivingByUrl.set(urlKey, attachment);
+      if (attachment.fileId) survivingFileIds.add(attachment.fileId);
+      if (Array.isArray(attachment.revisions)) {
+        for (const rev of attachment.revisions) {
           if (rev.fileId) survivingFileIds.add(rev.fileId);
         }
       }
 
-      const isPrimaryPdf = att.attachmentType === 'primary_pdf';
-      let nextAttachmentType = att.attachmentType;
+      const isPrimaryPdf = attachment.attachmentType === 'primary_pdf';
+      let nextAttachmentType = attachment.attachmentType;
       if (isPrimaryPdf) {
         if (!hasPrimaryPdf) {
           hasPrimaryPdf = true;
@@ -550,15 +551,15 @@ export class AttachmentsRepository {
       }
 
       if (
-        att.itemId !== targetItemId ||
-        nextAttachmentType !== att.attachmentType
+        attachment.itemId !== targetItemId ||
+        nextAttachmentType !== attachment.attachmentType
       ) {
-        const isMovingItem = att.itemId !== targetItemId;
+        const isMovingItem = attachment.itemId !== targetItemId;
         await client.attachment.update({
-          where: { id: att.id },
+          where: { id: attachment.id },
           data: {
             itemId: targetItemId,
-            ...(nextAttachmentType !== att.attachmentType
+            ...(nextAttachmentType !== attachment.attachmentType
               ? { attachmentType: nextAttachmentType }
               : {}),
           },
@@ -566,7 +567,7 @@ export class AttachmentsRepository {
         if (isMovingItem) {
           await Promise.all([
             client.annotation?.updateMany?.({
-              where: { attachmentId: att.id },
+              where: { attachmentId: attachment.id },
               data: { itemId: targetItemId },
             }),
           ]);

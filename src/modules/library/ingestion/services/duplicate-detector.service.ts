@@ -74,7 +74,7 @@ export class DuplicateDetectorService {
   constructor(
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     private readonly ingestionRepo?: IngestionRepository,
     @Optional()
@@ -378,8 +378,8 @@ export class DuplicateDetectorService {
     }
 
     const effectiveProjectId = this.normalizeScopeProjectId(projectId);
-    const rawItems = this.catalogGateway
-      ? await this.catalogGateway.findByIds(
+    const rawItems = this.catalogFacade
+      ? await this.catalogFacade.findByIds(
           String(userId),
           uniqueIds,
           effectiveProjectId,
@@ -518,7 +518,7 @@ export class DuplicateDetectorService {
       userId: String(userId),
       projectId: effectiveProjectId,
       cacheCoordinator: this.cacheCoordinator,
-      catalogGateway: this.catalogGateway,
+      catalogFacade: this.catalogFacade,
       cache: this.cache,
       logger: this.logger,
       contextLabel: 'after dismissing duplicates',
@@ -545,8 +545,8 @@ export class DuplicateDetectorService {
     effectiveProjectId?: string,
   ): Promise<DuplicateClusterResult[]> {
     const [items, suspectsResult] = await Promise.all([
-      this.catalogGateway
-        ? this.catalogGateway.findDuplicateCandidateItems(
+      this.catalogFacade
+        ? this.catalogFacade.findDuplicateCandidateItems(
             userId,
             undefined,
             effectiveProjectId,
@@ -626,10 +626,10 @@ export class DuplicateDetectorService {
     if (
       rawClusters.length > 0 &&
       groupedItemIds.size > 0 &&
-      this.catalogGateway?.findByIds
+      this.catalogFacade?.findByIds
     ) {
       try {
-        const fullRawItems = await this.catalogGateway.findByIds(
+        const fullRawItems = await this.catalogFacade.findByIds(
           String(userId),
           Array.from(groupedItemIds),
           effectiveProjectId,
@@ -683,7 +683,7 @@ export class DuplicateDetectorService {
       title?: string | null;
     },
   ) {
-    if (!this.catalogGateway?.findMatchCandidates) {
+    if (!this.catalogFacade?.findMatchCandidates) {
       return { matchType: 'NO_MATCH', exactMatch: null, candidateItems: [] };
     }
     const cleanDoi = candidate.doi
@@ -706,7 +706,7 @@ export class DuplicateDetectorService {
             .slice(0, 3)
         : [];
 
-    return this.catalogGateway.findMatchCandidates(scope, {
+    return this.catalogFacade.findMatchCandidates(scope, {
       doi: cleanDoi,
       arxivId: cleanArxiv,
       pmid: cleanPmid,

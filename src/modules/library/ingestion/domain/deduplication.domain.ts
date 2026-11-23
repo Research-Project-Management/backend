@@ -237,10 +237,10 @@ function levenshteinDistance(a: string, b: string): number {
     dp[0] = i;
     const charA = a.charCodeAt(i - 1);
     for (let j = 1; j <= n; j++) {
-      const temp = dp[j];
+      const currentDiag = dp[j];
       const cost = charA === b.charCodeAt(j - 1) ? 0 : 1;
       dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prevDiag + cost);
-      prevDiag = temp;
+      prevDiag = currentDiag;
     }
   }
 

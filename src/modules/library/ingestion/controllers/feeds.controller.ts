@@ -1,7 +1,25 @@
-﻿import { Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Query,
+  Body,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import { SubscribeFeedDto, UpdateFeedSubDto, MarkItemReadDto, MarkAllReadDto, ImportOpmlDto } from '@/modules/library/ingestion/dto/ingestion.dto';
+import {
+  SubscribeFeedDto,
+  UpdateFeedSubDto,
+  MarkItemReadDto,
+  MarkAllReadDto,
+  ImportOpmlDto,
+} from '@/modules/library/ingestion/dto/feeds.dto';
 import { FeedsService } from '@/modules/library/ingestion/services/feeds.service';
 
 @ApiTags('Library Feeds')
@@ -26,7 +44,7 @@ export class FeedsController {
     @CurrentUser('id') userId: string,
     @Body() dto: SubscribeFeedDto,
   ) {
-    const sub = await this.feedsService.subscribe(
+    const subscription = await this.feedsService.subscribe(
       userId,
       dto.url,
       dto.customTitle,
@@ -34,7 +52,7 @@ export class FeedsController {
       dto.cleanupReadAfter,
       dto.cleanupUnreadAfter,
     );
-    return { data: sub };
+    return { data: subscription };
   }
 
   @Patch('subscriptions/:feedId')
@@ -44,8 +62,12 @@ export class FeedsController {
     @Param('feedId') feedId: string,
     @Body() dto: UpdateFeedSubDto,
   ) {
-    const sub = await this.feedsService.updateSubscription(userId, feedId, dto);
-    return { data: sub };
+    const subscription = await this.feedsService.updateSubscription(
+      userId,
+      feedId,
+      dto,
+    );
+    return { data: subscription };
   }
 
   @Delete('subscriptions/:feedId')

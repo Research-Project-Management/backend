@@ -68,10 +68,10 @@ export class PipelineService {
     private readonly commit: CommitStage,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
+    private readonly extractionFacade?: IExtractionFacade,
     @Optional()
     sagaOrchestrator?: IngestionSagaOrchestrator,
     @Optional()
@@ -94,8 +94,8 @@ export class PipelineService {
       sideEffects ??
       new PipelineSideEffectsService(
         repo,
-        catalogGateway,
-        extractionGateway,
+        catalogFacade,
+        extractionFacade,
         retractionScanner,
       );
     this.batchExecutor =
@@ -105,7 +105,7 @@ export class PipelineService {
         resolve,
         commit,
         this.sideEffects,
-        catalogGateway,
+        catalogFacade,
       );
   }
 
@@ -685,11 +685,11 @@ export class PipelineService {
               matchResult?.targetItemId &&
               item?.id === matchResult.targetItemId,
             );
-          if (item?.id && !wasPreExisting && this.catalogGateway?.deleteItem) {
+          if (item?.id && !wasPreExisting && this.catalogFacade?.deleteItem) {
             this.logger.warn(
               `[SAGA_COMPENSATION] Rolling back committed item ${item.id} for run ${runId}`,
             );
-            await this.catalogGateway.deleteItem(
+            await this.catalogFacade.deleteItem(
               resolvedScope.userId,
               item.id,
               resolvedScope.projectId,
@@ -728,7 +728,7 @@ export class PipelineService {
             existingRecord: createdItem,
             assignCollections:
               wasPreExistingMatch &&
-              !this.catalogGateway?.assignItemsToCollection,
+              !this.catalogFacade?.assignItemsToCollection,
             skipNotes: wasPreExistingMatch,
           },
         );

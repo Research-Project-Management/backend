@@ -45,7 +45,7 @@ export class ItemService {
   private readonly logger = new Logger(ItemService.name);
   private readonly cacheCoordinator: ItemCacheCoordinator;
   constructor(
-    private readonly query: QueryRepository,
+    private readonly queryRepo: QueryRepository,
     private readonly command: CommandRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional() _tagsService?: unknown,
@@ -54,7 +54,7 @@ export class ItemService {
     @Optional() cacheCoordinator?: ItemCacheCoordinator,
     @Optional()
     @Inject(SEARCH_FACADE)
-    private readonly searchGateway?: ISearchFacade,
+    private readonly searchFacade?: ISearchFacade,
   ) {
     this.cacheCoordinator = cacheCoordinator ?? new ItemCacheCoordinator(cache);
   }
@@ -124,7 +124,7 @@ export class ItemService {
   // ===========================================================================
 
   async getItem(userId: string, id: string, projectId?: string) {
-    const item = await this.query.findById(userId, id, projectId);
+    const item = await this.queryRepo.findById(userId, id, projectId);
     return item
       ? (ItemsMapper.mapFlattenedState(item, userId) ??
           ItemsMapper.toDomain(item))
@@ -237,32 +237,39 @@ export class ItemService {
             }
           ).attachments
         : [];
-      for (const att of createdItemAttachments) {
-        if (!att?.id) continue;
-        const attRec = att as {
+      for (const attachment of createdItemAttachments) {
+        if (!attachment?.id) continue;
+        const attRec = attachment as {
           size?: number | bigint | null;
           storageKey?: string | null;
         };
         const isPdf =
-          att.mimeType === 'application/pdf' ||
-          Boolean(att.filename && att.filename.toLowerCase().endsWith('.pdf'));
+          attachment.mimeType === 'application/pdf' ||
+          Boolean(
+            attachment.filename &&
+            attachment.filename.toLowerCase().endsWith('.pdf'),
+          );
         const hasRealSizeOrKey =
           Number(attRec.size ?? 0) > 0 || Boolean(attRec.storageKey);
         const hasStoredBinary =
-          att.linkMode !== 'linked_url' &&
+          attachment.linkMode !== 'linked_url' &&
           hasRealSizeOrKey &&
-          Boolean(att.fileId || (att.url && !att.url.startsWith('http')));
+          Boolean(
+            attachment.fileId ||
+            (attachment.url && !attachment.url.startsWith('http')),
+          );
         if (
           isPdf &&
           hasStoredBinary &&
-          (!att.extractionStatus || att.extractionStatus === 'PENDING')
+          (!attachment.extractionStatus ||
+            attachment.extractionStatus === 'PENDING')
         ) {
           await helpers.publishOutbox(
             { userId, projectId: effectiveProjectId },
-            att.id,
+            attachment.id,
             LIBRARY_EVENT_TYPES.ATTACHMENT_EXTRACTION_REQUESTED,
             {
-              attachmentId: att.id,
+              attachmentId: attachment.id,
               itemId: item.id,
               userId,
               projectId: effectiveProjectId,
@@ -320,9 +327,16 @@ export class ItemService {
     ): Promise<ItemDetail> => {
       let targetItemType = data.itemType;
       if (!targetItemType && this.validator?.validateAndSanitizeItem) {
-        const existing = this.query.findSummaryById
-          ? await this.query.findSummaryById(userId, id, tx, projectId)
-          : await this.query.findById(userId, id, projectId, tx, false, false);
+        const existing = this.queryRepo.findSummaryById
+          ? await this.queryRepo.findSummaryById(userId, id, tx, projectId)
+          : await this.queryRepo.findById(
+              userId,
+              id,
+              projectId,
+              tx,
+              false,
+              false,
+            );
         if (existing) {
           targetItemType =
             existing.itemType ||
@@ -467,7 +481,7 @@ export class ItemService {
     );
   }
   async reindexItem(userId: string, id: string, projectId?: string) {
-    const item = await this.query.findById(userId, id, projectId);
+    const item = await this.queryRepo.findById(userId, id, projectId);
     if (!item) {
       throw new NotFoundException(`Item ${id} not found in user library`);
     }
@@ -486,8 +500,8 @@ export class ItemService {
         },
       );
     });
-    if (this.searchGateway?.reindexItem) {
-      await this.searchGateway
+    if (this.searchFacade?.reindexItem) {
+      await this.searchFacade
         .reindexItem({
           id,
           userId,
@@ -762,7 +776,7 @@ export class ItemService {
       (tx, helpers) =>
         executeBulkRestoreInTx({
           command: this.command,
-          query: this.query,
+          query: this.queryRepo,
           userId,
           itemIds,
           tx,

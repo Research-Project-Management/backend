@@ -64,7 +64,7 @@ export class ResilienceRegistryService {
   private readonly limiters = new Map<string, TokenBucketRateLimiter>();
   private readonly dynamicHostLastUsed = new Map<string, number>();
 
-  constructor(@Optional() private readonly redis?: RedisCacheService) {
+  constructor(@Optional() private readonly cache?: RedisCacheService) {
     this.registerDefaults();
   }
 
@@ -213,7 +213,7 @@ export class ResilienceRegistryService {
         name,
         capacity: options?.capacity ?? 10,
         refillRatePerSec: options?.refillRatePerSec ?? 5,
-        redis: this.redis,
+        redis: this.cache,
       });
       this.limiters.set(name, limiter);
       this.logger.log(`Initialized RateLimiter for "${name}"`);
@@ -299,7 +299,7 @@ export class ResilienceRegistryService {
         name: 'doi-org',
         capacity: 5,
         refillRatePerSec: 5,
-        redis: this.redis,
+        redis: this.cache,
       }),
     );
 
@@ -318,7 +318,7 @@ export class ResilienceRegistryService {
         name: 'arxiv',
         capacity: 1,
         refillRatePerSec: 0.33,
-        redis: this.redis,
+        redis: this.cache,
       }),
     );
 
@@ -337,7 +337,7 @@ export class ResilienceRegistryService {
         name: 'crossref',
         capacity: 10,
         refillRatePerSec: 10,
-        redis: this.redis,
+        redis: this.cache,
       }),
     );
 
@@ -356,7 +356,7 @@ export class ResilienceRegistryService {
         name: 'pubmed',
         capacity: 3,
         refillRatePerSec: 3,
-        redis: this.redis,
+        redis: this.cache,
       }),
     );
 
@@ -420,7 +420,7 @@ export class ResilienceRegistryService {
           name: p.name,
           capacity: p.capacity,
           refillRatePerSec: p.refillRatePerSec,
-          redis: this.redis,
+          redis: this.cache,
         }),
       );
     }

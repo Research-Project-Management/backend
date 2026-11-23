@@ -59,7 +59,7 @@ export class UrlMetadataScraperService {
     private readonly filesPort?: IFilesPort,
     @Optional()
     @Inject(EXTRACTION_FACADE)
-    private readonly extractionGateway?: IExtractionFacade,
+    private readonly extractionFacade?: IExtractionFacade,
     @Optional() private readonly ssrfGuard?: SsrfGuardService,
     @Optional()
     @Inject(WEB_FETCH_PORT)
@@ -348,9 +348,9 @@ export class UrlMetadataScraperService {
         }
       })(),
       (async () => {
-        if (!this.extractionGateway?.extractDocumentFromBuffer) return;
+        if (!this.extractionFacade?.extractDocumentFromBuffer) return;
         try {
-          const doc = await this.extractionGateway.extractDocumentFromBuffer(
+          const doc = await this.extractionFacade.extractDocumentFromBuffer(
             buffer,
             {
               headerOnly: true,
@@ -360,7 +360,7 @@ export class UrlMetadataScraperService {
             (doc?.metadata as unknown as Record<string, unknown>) || {};
         } catch (pdfErr: unknown) {
           const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
-          this.logger.warn(`ExtractionGateway pdf extraction failed: ${msg}`);
+          this.logger.warn(`extractionFacade pdf extraction failed: ${msg}`);
         }
       })(),
     ]);

@@ -303,17 +303,17 @@ export function applyManualEditProvenanceLocks(
       input.updatedMetadata.fieldProvenance &&
       typeof input.updatedMetadata.fieldProvenance === 'object'
     ) {
-      const prov = {
+      const provenance = {
         ...(input.updatedMetadata.fieldProvenance as Record<string, unknown>),
       };
-      for (const [k, v] of Object.entries(prov)) {
+      for (const [k, v] of Object.entries(provenance)) {
         if (!explicitSet.has(k) && v && typeof v === 'object') {
           const rec = v as Record<string, unknown>;
           if (rec.isUserOverride === true || rec.source === 'UserOverride')
-            delete prov[k];
+            delete provenance[k];
         }
       }
-      input.updatedMetadata.fieldProvenance = prov;
+      input.updatedMetadata.fieldProvenance = provenance;
     }
   }
 }
@@ -461,16 +461,16 @@ export function prepareAttachmentsToCreate(
     let hasPrimaryPdf = false;
     for (const rawAtt of attachments) {
       if (!rawAtt || typeof rawAtt !== 'object') continue;
-      const att = rawAtt as Record<string, unknown>;
-      const rawFileId = att.fileId || null;
+      const attachment = rawAtt as Record<string, unknown>;
+      const rawFileId = attachment.fileId || null;
       const resolvedFileId = rawFileId && isUuid(rawFileId) ? rawFileId : null;
       const title =
-        (typeof att.title === 'string' && att.title.trim()) ||
-        (typeof att.name === 'string' && att.name.trim()) ||
+        (typeof attachment.title === 'string' && attachment.title.trim()) ||
+        (typeof attachment.name === 'string' && attachment.name.trim()) ||
         '';
       const rawFilename =
-        typeof att.filename === 'string' && att.filename.trim()
-          ? att.filename.trim()
+        typeof attachment.filename === 'string' && attachment.filename.trim()
+          ? attachment.filename.trim()
           : '';
       const filename =
         rawFilename ||
@@ -480,18 +480,20 @@ export function prepareAttachmentsToCreate(
             : `${title}.pdf`
           : 'document.pdf');
       const mimeType =
-        (typeof att.mimeType === 'string' && att.mimeType.trim()) ||
-        (typeof att.contentType === 'string' && att.contentType.trim()) ||
+        (typeof attachment.mimeType === 'string' &&
+          attachment.mimeType.trim()) ||
+        (typeof attachment.contentType === 'string' &&
+          attachment.contentType.trim()) ||
         'application/pdf';
       const size =
-        typeof att.size === 'number'
-          ? att.size
-          : typeof att.fileSize === 'number'
-            ? att.fileSize
+        typeof attachment.size === 'number'
+          ? attachment.size
+          : typeof attachment.fileSize === 'number'
+            ? attachment.fileSize
             : 0;
       const fileUrl =
-        typeof att.url === 'string' && att.url.trim()
-          ? att.url.trim()
+        typeof attachment.url === 'string' && attachment.url.trim()
+          ? attachment.url.trim()
           : resolvedFileId
             ? getFileContentPath(resolvedFileId)
             : '';
@@ -499,8 +501,8 @@ export function prepareAttachmentsToCreate(
         mimeType === 'application/pdf' ||
         filename.toLowerCase().endsWith('.pdf');
       let attachmentType: AttachmentType | undefined =
-        (att.attachmentType as AttachmentType) ||
-        (att.type as AttachmentType | undefined);
+        (attachment.attachmentType as AttachmentType) ||
+        (attachment.type as AttachmentType | undefined);
       if (!attachmentType) {
         if (!hasPrimaryPdf && isPdf) {
           attachmentType = AttachmentType.primary_pdf;
@@ -517,7 +519,7 @@ export function prepareAttachmentsToCreate(
         hasPrimaryPdf = true;
       }
       const linkMode: LinkMode =
-        (att.linkMode as LinkMode | undefined) ||
+        (attachment.linkMode as LinkMode | undefined) ||
         (resolvedFileId
           ? LinkMode.imported_file
           : fileUrl.startsWith('http')
@@ -526,15 +528,17 @@ export function prepareAttachmentsToCreate(
               : LinkMode.linked_url
             : LinkMode.imported_file);
       const metadata: Record<string, unknown> = {
-        ...(typeof att.metadata === 'object' && att.metadata !== null
-          ? (att.metadata as Record<string, unknown>)
+        ...(typeof attachment.metadata === 'object' &&
+        attachment.metadata !== null
+          ? (attachment.metadata as Record<string, unknown>)
           : {}),
         ...(title ? { title } : {}),
-        ...(att.accessDate ? { accessDate: att.accessDate } : {}),
+        ...(attachment.accessDate ? { accessDate: attachment.accessDate } : {}),
       };
       const annotationsToCreate =
-        Array.isArray(att.annotations) && att.annotations.length > 0
-          ? att.annotations
+        Array.isArray(attachment.annotations) &&
+        attachment.annotations.length > 0
+          ? attachment.annotations
               .filter(
                 (ann: unknown) =>
                   ann &&
@@ -617,7 +621,7 @@ export function prepareAttachmentsToCreate(
                     revisionNumber: 1,
                     url: fileUrl,
                     sizeBytes: size,
-                    fileHash: (att.fileHash as string) || null,
+                    fileHash: (attachment.fileHash as string) || null,
                   },
                 ],
               },

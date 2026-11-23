@@ -287,13 +287,12 @@ export class AttachmentController {
     userId?: string,
     projectId?: string,
   ): Promise<string> {
-    const att = await this.attachmentsService.assertAttachmentExists(
+    const attachment = await this.attachmentsService.assertAttachmentExists(
       attachmentId,
       userId,
       undefined,
       projectId,
     );
-    return att?.itemId || '';
+    return attachment?.itemId || '';
   }
 }
-

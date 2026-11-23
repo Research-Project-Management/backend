@@ -52,7 +52,7 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
   private static readonly DEFAULT_RETENTION_TTL_SECONDS = 7 * 86400; // 7 days retention
 
   constructor(
-    @Optional() private readonly redis?: RedisCacheService,
+    @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly outboxRepo?: OutboxRepository,
   ) {}
 
@@ -161,9 +161,9 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     }
 
     // 2. Check Redis if available
-    if (this.redis && this.redis.isReady()) {
+    if (this.cache && this.cache.isReady()) {
       try {
-        const client = this.redis.getClient();
+        const client = this.cache.getClient();
         if (client) {
           const raw = await client.get(key);
           if (raw) {
@@ -209,9 +209,9 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
 
     await Promise.all([
       (async () => {
-        if (this.redis && this.redis.isReady()) {
+        if (this.cache && this.cache.isReady()) {
           try {
-            const client = this.redis.getClient();
+            const client = this.cache.getClient();
             if (client) {
               await client.del(key);
             }
@@ -267,8 +267,8 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       this.setMemoryEntry(key, 'processing', leaseTtlSeconds, ownerToken);
     }
 
-    if (this.redis && this.redis.isReady()) {
-      const client = this.redis.getClient();
+    if (this.cache && this.cache.isReady()) {
+      const client = this.cache.getClient();
       if (client && client.eval) {
         try {
           const luaScript = `
@@ -316,8 +316,8 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
     const leaseTokenPrefix = `PROCESSING:${ownerToken}:`;
 
     // 1. Remote Redis path (Distributed atomic lock)
-    if (this.redis && this.redis.isReady()) {
-      const client = this.redis.getClient();
+    if (this.cache && this.cache.isReady()) {
+      const client = this.cache.getClient();
       if (client) {
         try {
           const leasePayload = JSON.stringify({
@@ -459,8 +459,8 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       this.setMemoryEntry(key, 'completed', retentionTtlSeconds, ownerToken);
     }
 
-    if (this.redis && this.redis.isReady()) {
-      const client = this.redis.getClient();
+    if (this.cache && this.cache.isReady()) {
+      const client = this.cache.getClient();
       if (client) {
         try {
           if (ownerToken && client.eval) {
@@ -525,8 +525,8 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
       this.memoryStore.delete(key);
     }
 
-    if (this.redis && this.redis.isReady()) {
-      const client = this.redis.getClient();
+    if (this.cache && this.cache.isReady()) {
+      const client = this.cache.getClient();
       if (client) {
         try {
           if (ownerToken && client.eval) {

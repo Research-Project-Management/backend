@@ -30,13 +30,13 @@ export class DoiContentNegotiationService {
     @Optional()
     private readonly httpClient?: HttpClient,
     @Optional()
-    private readonly redisCache?: RedisCacheService,
+    private readonly cache?: RedisCacheService,
   ) {}
 
   private static readonly REDIS_TTL_SECONDS = 24 * 60 * 60;
 
   // In-memory cache with TTL (24 hours) and bounded LRU pruning
-  private readonly cache = new Map<
+  private readonly l1Cache = new Map<
     string,
     { result: DoiCitationResult; expiresAt: number }
   >();
@@ -113,17 +113,17 @@ export class DoiContentNegotiationService {
     const redisKey = LIBRARY_REDIS_KEYS.doiNegotiation(normalizedStyle, doi);
 
     // Check L1 cache
-    const cached = this.cache.get(cacheKey);
+    const cached = this.l1Cache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.result;
     }
 
     // Check L2 Redis cache
-    if (this.redisCache?.get) {
+    if (this.cache?.get) {
       try {
-        const l2Hit = await this.redisCache.get<DoiCitationResult>(redisKey);
+        const l2Hit = await this.cache.get<DoiCitationResult>(redisKey);
         if (l2Hit && typeof l2Hit === 'object' && 'bibliography' in l2Hit) {
-          this.setWithLru(this.cache, cacheKey, l2Hit);
+          this.setWithLru(this.l1Cache, cacheKey, l2Hit);
           return l2Hit;
         }
       } catch {
@@ -208,8 +208,8 @@ export class DoiContentNegotiationService {
         };
 
         // Cache for 24h with bounded LRU eviction
-        this.setWithLru(this.cache, cacheKey, result);
-        await this.redisCache
+        this.setWithLru(this.l1Cache, cacheKey, result);
+        await this.cache
           ?.set?.(
             redisKey,
             result,
@@ -293,9 +293,9 @@ export class DoiContentNegotiationService {
     }
 
     const redisMetaKey = LIBRARY_REDIS_KEYS.doiNegotiation('meta', doi);
-    if (this.redisCache?.get) {
+    if (this.cache?.get) {
       try {
-        const l2Meta = await this.redisCache.get<ReferenceData>(redisMetaKey);
+        const l2Meta = await this.cache.get<ReferenceData>(redisMetaKey);
         if (l2Meta && typeof l2Meta === 'object' && 'title' in l2Meta) {
           this.setWithLru(this.metaCache, doi, l2Meta);
           return l2Meta;
@@ -370,7 +370,7 @@ export class DoiContentNegotiationService {
 
         // Cache metadata with bounded LRU eviction
         this.setWithLru(this.metaCache, doi, result);
-        await this.redisCache
+        await this.cache
           ?.set?.(
             redisMetaKey,
             result,

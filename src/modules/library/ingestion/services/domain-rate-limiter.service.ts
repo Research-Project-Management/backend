@@ -23,7 +23,7 @@ export class DomainRateLimiterService {
   private bypassDelayEnabled = false;
 
   constructor(
-    @Optional() private readonly redis?: RedisCacheService,
+    @Optional() private readonly cache?: RedisCacheService,
     @Optional() options?: { bypassDelay?: boolean },
   ) {
     if (options?.bypassDelay !== undefined) {
@@ -143,9 +143,9 @@ export class DomainRateLimiterService {
     this.setLastExecution(normalizedDomain, nextExec);
 
     // Multi-Pod Distributed Check: Synchronize with cluster via atomic Redis Lua GCRA script
-    if (this.redis?.isReady && this.redis.isReady()) {
+    if (this.cache?.isReady && this.cache.isReady()) {
       try {
-        const client = this.redis.getClient?.();
+        const client = this.cache.getClient?.();
         if (client) {
           const redisKey = `library:ratelimit:${normalizedDomain}:last_exec`;
           const ttlMs = Math.max(minIntervalMs * 3, 5000);
@@ -219,7 +219,7 @@ export class DomainRateLimiterService {
     normalizedDomain: string,
     intervalMs: number,
   ): Promise<void> {
-    const client = this.redis?.getClient?.();
+    const client = this.cache?.getClient?.();
     if (!client) return;
     const redisKey = `library:ratelimit:${normalizedDomain}:last_exec`;
     const refundScript = `

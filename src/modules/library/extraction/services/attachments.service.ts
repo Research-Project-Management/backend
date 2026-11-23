@@ -48,11 +48,11 @@ export class AttachmentsService {
   private readonly logger = new Logger(AttachmentsService.name);
 
   constructor(
-    private readonly repo: AttachmentsRepository,
+    private readonly attachmentsRepo: AttachmentsRepository,
     @Optional() @Inject(UNIT_OF_WORK) private readonly libraryTx: IUnitOfWork,
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
     @Optional()
     @Inject(FILES_PORT)
     private readonly filesPort?: IFilesPort,
@@ -69,12 +69,12 @@ export class AttachmentsService {
     itemId: string,
     projectId?: string,
   ): Promise<void> {
-    if (!this.catalogGateway) {
+    if (!this.catalogFacade) {
       throw new InternalServerErrorException(
         'Catalog gateway is unavailable for item authorization',
       );
     }
-    const exists = await this.catalogGateway.itemExists(
+    const exists = await this.catalogFacade.itemExists(
       userId,
       itemId,
       projectId,
@@ -111,7 +111,7 @@ export class AttachmentsService {
     let storageKey = input.storageKey;
     let deduplicated = false;
     if (!resolvedFileId && input.fileHash && isValidFileHash(input.fileHash)) {
-      const existingWithHash = await this.repo.findFirst({
+      const existingWithHash = await this.attachmentsRepo.findFirst({
         fileHash: input.fileHash.trim(),
         storageKey: { not: null },
         deletedAt: null,
@@ -252,7 +252,7 @@ export class AttachmentsService {
               orderBy: { revisionNumber: 'desc' as const },
             },
           };
-          const attachment = await this.repo.create(
+          const attachment = await this.attachmentsRepo.create(
             createData,
             includeOpts,
             tx,
@@ -332,7 +332,7 @@ export class AttachmentsService {
   ): Promise<void> {
     if (!itemId) return;
     await executeStandardLibraryCacheInvalidation(
-      this.cacheCoordinator ?? this.catalogGateway,
+      this.cacheCoordinator ?? this.catalogFacade,
       this.cache,
       { userId, projectId, itemIds: [itemId] },
       (message) =>
@@ -348,7 +348,7 @@ export class AttachmentsService {
     projectId?: ProjectId | string,
   ) {
     await this.assertItemExists(userId, itemId, projectId);
-    const rawAttachments = await this.repo.findManyByItemId(itemId);
+    const rawAttachments = await this.attachmentsRepo.findManyByItemId(itemId);
     const attachments = (rawAttachments || [])
       .filter((att) => !att.deletedAt)
       .map((att) => ({
@@ -380,7 +380,7 @@ export class AttachmentsService {
       item: scopeItemWhere,
       ...(itemId ? { itemId } : {}),
     };
-    const raw = await this.repo.findFirst(where, {
+    const raw = await this.attachmentsRepo.findFirst(where, {
       revisions: { orderBy: { revisionNumber: 'desc' } },
     });
     const rawItem = (
@@ -413,7 +413,7 @@ export class AttachmentsService {
       spaceId: validProjectId || userId,
       deletedAt: null,
     };
-    const attachment = await this.repo.findFirst(
+    const attachment = await this.attachmentsRepo.findFirst(
       { id: attachmentId, deletedAt: null, item: scopeItemWhere },
       { item: true, revisions: true },
     );
@@ -452,7 +452,7 @@ export class AttachmentsService {
     const result = await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
         const eventScope = { userId, projectId: effectiveProjectId };
-        await this.repo.delete(attachment.id, tx);
+        await this.attachmentsRepo.delete(attachment.id, tx);
         await helpers.appendChange(eventScope, {
           entityType: 'Attachment',
           entityId: attachment.id,
@@ -523,7 +523,7 @@ export class AttachmentsService {
     targetItemId: ItemId | string,
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
-    const orphanedFileIds = await this.repo.reassignToItem(
+    const orphanedFileIds = await this.attachmentsRepo.reassignToItem(
       sourceItemIds,
       targetItemId,
       tx,
@@ -571,7 +571,7 @@ export class AttachmentsService {
     tx?: Prisma.TransactionClient,
     projectId?: ProjectId | string,
   ) {
-    const attachment = await this.repo.findUnique(
+    const attachment = await this.attachmentsRepo.findUnique(
       attachmentId,
       { item: true },
       tx,
@@ -622,7 +622,7 @@ export class AttachmentsService {
       spaceId: effectiveProjectId || userId,
       deletedAt: null,
     };
-    const attachment = await this.repo.findFirst({
+    const attachment = await this.attachmentsRepo.findFirst({
       id: attachmentId,
       itemId,
       deletedAt: null,
@@ -639,7 +639,11 @@ export class AttachmentsService {
     let postCommitRegistered = false;
     await this.libraryTx.executeInTransaction(
       async (tx: Prisma.TransactionClient, helpers: TransactionHelpers) => {
-        await this.repo.setPrimaryAttachment(itemId, attachmentId, tx);
+        await this.attachmentsRepo.setPrimaryAttachment(
+          itemId,
+          attachmentId,
+          tx,
+        );
         const eventScope = { userId, projectId: effectiveProjectId };
         const payload = {
           id: attachmentId,
@@ -718,8 +722,8 @@ export class AttachmentsService {
     return (
       this.renamerService ??
       new AttachmentRenamerService(
-        this.repo,
-        this.catalogGateway,
+        this.attachmentsRepo,
+        this.catalogFacade,
         this.cache,
         this.libraryTx,
         this.cacheCoordinator,
@@ -766,8 +770,8 @@ export class AttachmentsService {
     userId: UserId | string,
     projectId?: ProjectId | string,
   ): Promise<string> {
-    const item = this.catalogGateway
-      ? await this.catalogGateway.getItem(userId, itemId, projectId)
+    const item = this.catalogFacade
+      ? await this.catalogFacade.getItem(userId, itemId, projectId)
       : null;
     if (!item) throw new NotFoundException(`Item ${itemId} not found`);
     const directUrl = typeof item.url === 'string' ? item.url : undefined;
@@ -801,7 +805,9 @@ export class AttachmentsService {
     projectId?: string,
   ): Promise<{ status: string; attachmentId: string; message: string }> {
     const effectiveProjectId = normalizeProjectSpaceId(projectId);
-    const attachment = await this.repo.findUnique(attachmentId, { item: true });
+    const attachment = await this.attachmentsRepo.findUnique(attachmentId, {
+      item: true,
+    });
     const itemRec = attachment?.item as
       | {
           spaceId?: string;
@@ -843,7 +849,7 @@ export class AttachmentsService {
           extractionAttempts: 0,
           extractionLastError: null,
         };
-        await this.repo.update(attachmentId, updateData, tx);
+        await this.attachmentsRepo.update(attachmentId, updateData, tx);
         await helpers.publishOutbox(
           eventScope,
           attachment.id,

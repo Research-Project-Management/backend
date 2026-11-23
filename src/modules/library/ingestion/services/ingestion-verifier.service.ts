@@ -474,7 +474,7 @@ export class QualityService {
   constructor(
     @Optional()
     @Inject(CATALOG_FACADE)
-    private readonly catalogGateway?: ICatalogFacade,
+    private readonly catalogFacade?: ICatalogFacade,
   ) {}
 
   async getQualityAudit(userId: string, projectId?: string) {
@@ -488,8 +488,8 @@ export class QualityService {
   }
 
   private async executeQualityAudit(userId: string, projectId?: string) {
-    const items = this.catalogGateway
-      ? await this.catalogGateway.findQualityAuditItems(userId, 2000, projectId)
+    const items = this.catalogFacade
+      ? await this.catalogFacade.findQualityAuditItems(userId, 2000, projectId)
       : [];
 
     let totalScore = 0;

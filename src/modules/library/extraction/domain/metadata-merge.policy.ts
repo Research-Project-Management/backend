@@ -425,11 +425,12 @@ export function buildExtractedMetadataSyncPlan(
   const resolvedYear =
     (attachment.item?.year as number | undefined) || doc.metadata?.year;
   const firstCreatorCandidate = creatorsToSync[0];
-  const cand = firstCreatorCandidate as Record<string, unknown> | undefined;
-  const firstCreatorRaw = cand
-    ? (typeof cand.lastName === 'string' && cand.lastName) ||
-      (typeof cand.fullName === 'string' && cand.fullName) ||
-      (typeof cand.name === 'string' && cand.name) ||
+  const candidate = firstCreatorCandidate as
+    Record<string, unknown> | undefined;
+  const firstCreatorRaw = candidate
+    ? (typeof candidate.lastName === 'string' && candidate.lastName) ||
+      (typeof candidate.fullName === 'string' && candidate.fullName) ||
+      (typeof candidate.name === 'string' && candidate.name) ||
       ''
     : '';
   const regeneratedCitKey =

@@ -78,23 +78,23 @@ function createPageAnchorMatch(
 export class FullTextProvider {
   private static readonly MAX_MATCHES_PER_ATTACHMENT = 200;
   private static readonly MAX_MATCHES_PER_PAGE = 50;
-  private readonly repo: SearchRepository;
+  private readonly searchRepo: SearchRepository;
 
-  constructor(@Optional() private readonly searchRepo?: SearchRepository) {
-    if (!this.searchRepo) {
+  constructor(@Optional() searchRepo?: SearchRepository) {
+    if (!searchRepo) {
       throw new SubsystemUnavailableException(
         'FullTextProvider requires SearchRepository',
         { service: 'SearchIndex' },
       );
     }
-    this.repo = this.searchRepo;
+    this.searchRepo = searchRepo;
   }
 
   async indexAttachmentPages(
     attachmentId: string,
     pages: PageTextExtraction[],
   ): Promise<void> {
-    await this.repo.replaceAttachmentPageIndex(attachmentId, pages);
+    await this.searchRepo.replaceAttachmentPageIndex(attachmentId, pages);
   }
 
   async searchPageAnchors(
@@ -108,7 +108,7 @@ export class FullTextProvider {
     const foldedTerm = SearchQueryEngine.stripDiacritics(normalizedTerm);
     if (!safeRegex && normalizedTerm.length < 2) return [];
 
-    const pages = await this.repo.findAttachmentPages(
+    const pages = await this.searchRepo.findAttachmentPages(
       attachmentId,
       pageIndex,
       safeRegex ? undefined : normalizedTerm,
@@ -220,10 +220,10 @@ export class SearchService {
   private readonly fullText: FullTextProvider;
 
   constructor(
-    private readonly repo: SearchRepository,
+    private readonly searchRepo: SearchRepository,
     @Optional() fullText?: FullTextProvider,
   ) {
-    this.fullText = fullText ?? new FullTextProvider(this.repo);
+    this.fullText = fullText ?? new FullTextProvider(this.searchRepo);
   }
 
   /**
@@ -267,20 +267,20 @@ export class SearchService {
         : {}),
     };
 
-    if (typeof this.repo.prepareSearchOptions === 'function') {
-      searchOptions = await this.repo.prepareSearchOptions(
+    if (typeof this.searchRepo.prepareSearchOptions === 'function') {
+      searchOptions = await this.searchRepo.prepareSearchOptions(
         userId,
         searchOptions,
       );
     }
 
     const [searchResult, facets, directCount] = await Promise.all([
-      this.repo.searchItems(userId, searchOptions),
+      this.searchRepo.searchItems(userId, searchOptions),
       dto.includeFacets === false
         ? Promise.resolve<FacetResult>({ itemTypes: {}, years: {}, tags: {} })
-        : this.repo.computeFacets(userId, searchOptions),
-      dto.includeFacets === false && this.repo.countSearchItems
-        ? this.repo.countSearchItems(userId, searchOptions)
+        : this.searchRepo.computeFacets(userId, searchOptions),
+      dto.includeFacets === false && this.searchRepo.countSearchItems
+        ? this.searchRepo.countSearchItems(userId, searchOptions)
         : Promise.resolve<number | undefined>(undefined),
     ]);
 
@@ -331,7 +331,8 @@ export class SearchService {
       return [];
     }
 
-    const attachment = await this.repo.findAttachmentWithItem(attachmentId);
+    const attachment =
+      await this.searchRepo.findAttachmentWithItem(attachmentId);
     const ownerItem = attachment?.item as
       | {
           spaceId?: string;
@@ -360,22 +361,22 @@ export class SearchService {
     pages: PageTextExtraction[],
   ): Promise<void> {
     if (!attachmentId || !Array.isArray(pages) || pages.length === 0) return;
-    await this.repo.replaceAttachmentPageIndex(attachmentId, pages);
+    await this.searchRepo.replaceAttachmentPageIndex(attachmentId, pages);
   }
 
   async deleteItemSearchIndex(itemId: string): Promise<void> {
     if (!itemId) return;
-    await this.repo.deleteFullTextIndexByItemId(itemId);
+    await this.searchRepo.deleteFullTextIndexByItemId(itemId);
   }
 
   async deleteAttachmentSearchIndex(attachmentId: string): Promise<void> {
     if (!attachmentId) return;
-    await this.repo.deleteFullTextIndexByAttachmentId(attachmentId);
+    await this.searchRepo.deleteFullTextIndexByAttachmentId(attachmentId);
   }
 
   async invalidateFacetsCache(spaceId: string): Promise<void> {
     if (!spaceId) return;
-    await this.repo.invalidateFacets(spaceId);
+    await this.searchRepo.invalidateFacets(spaceId);
   }
 
   async indexItem(item: {
@@ -384,8 +385,8 @@ export class SearchService {
     projectId?: string;
   }): Promise<{ indexed: boolean }> {
     const spaceId = item.projectId || item.userId;
-    if (typeof this.repo.refreshItemSearchIndex === 'function') {
-      return this.repo.refreshItemSearchIndex(item.id, spaceId);
+    if (typeof this.searchRepo.refreshItemSearchIndex === 'function') {
+      return this.searchRepo.refreshItemSearchIndex(item.id, spaceId);
     }
     if (spaceId) {
       await this.invalidateFacetsCache(spaceId);
