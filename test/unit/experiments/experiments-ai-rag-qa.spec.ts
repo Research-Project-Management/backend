@@ -27,6 +27,7 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
     mockEngine = {
       health: jest.fn(),
       listAgents: jest.fn(),
+      listModels: jest.fn(),
       chatSync: jest.fn().mockResolvedValue({
         content: 'Grounding answer based on the uploaded paper.',
         route: 'rag_agent',
@@ -48,6 +49,8 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
       deleteThread: jest.fn(),
       deleteSpaceThreads: jest.fn(),
       ingestDocument: jest.fn(),
+      enqueueKnowledgeIngest: jest.fn(),
+      getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn(),
       deleteSpaceKnowledge: jest.fn(),

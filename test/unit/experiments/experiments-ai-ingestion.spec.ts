@@ -89,6 +89,7 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
     mockEngine = {
       health: jest.fn(),
       listAgents: jest.fn(),
+      listModels: jest.fn(),
       chatSync: jest.fn(),
       chatStream: jest.fn(),
       resumeSync: jest.fn(),
@@ -97,6 +98,8 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       deleteThread: jest.fn(),
       deleteSpaceThreads: jest.fn(),
       ingestDocument: jest.fn(),
+      enqueueKnowledgeIngest: jest.fn(),
+      getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn().mockResolvedValue({
         space_id: 'project-physics',

@@ -35,7 +35,9 @@ export interface HardwareSnapshot {
   readonly v8HeapUsedBytes: number;
   readonly rssBytes: number;
   readonly osTotalMemBytes: number;
+  readonly osFreeMemBytes?: number;
   readonly cgroupMemLimitBytes: number | null;
+  readonly cgroupMemUsedBytes?: number | null;
 }
 
 /**
@@ -119,6 +121,36 @@ function readCgroupMemoryLimitBytes(): number | null {
   return null;
 }
 
+/**
+ * Reads live container memory consumption (including all spawned `latexmk`/`pdflatex`
+ * child processes in the same cgroup) directly from the Linux kernel.
+ */
+function readCgroupMemoryUsedBytes(): number | null {
+  const cgroupUsagePaths = [
+    '/sys/fs/cgroup/memory.current', // Cgroup v2
+    '/sys/fs/cgroup/memory/memory.usage_in_bytes', // Cgroup v1
+  ];
+
+  for (const usagePath of cgroupUsagePaths) {
+    try {
+      if (!fs.existsSync(usagePath)) continue;
+      const raw = fs.readFileSync(usagePath, 'utf8').trim();
+      if (!raw) continue;
+      const parsed = Number.parseInt(raw, 10);
+      if (
+        Number.isFinite(parsed) &&
+        parsed >= 0 &&
+        parsed < MAX_REASONABLE_CGROUP_BYTES
+      ) {
+        return parsed;
+      }
+    } catch {
+      // Ignore permission or non-Linux filesystem errors
+    }
+  }
+  return null;
+}
+
 @Injectable()
 export class NodeHardwareResourceProbe implements HardwareResourceProbe {
   private readonly cachedCgroupLimitBytes: number | null;
@@ -142,7 +174,9 @@ export class NodeHardwareResourceProbe implements HardwareResourceProbe {
       v8HeapUsedBytes: memUsage.heapUsed,
       rssBytes: memUsage.rss,
       osTotalMemBytes: os.totalmem(),
+      osFreeMemBytes: os.freemem(),
       cgroupMemLimitBytes: this.cachedCgroupLimitBytes,
+      cgroupMemUsedBytes: readCgroupMemoryUsedBytes(),
     };
   }
 }
@@ -157,6 +191,10 @@ export class SystemResourceGovernor {
 
   constructor(@Optional() probe?: HardwareResourceProbe) {
     this.probe = probe ?? new NodeHardwareResourceProbe();
+  }
+
+  public readHardwareSnapshot(): HardwareSnapshot {
+    return this.probe.readSnapshot();
   }
 
   public getTierBudgets(): SystemTierBudgets {
