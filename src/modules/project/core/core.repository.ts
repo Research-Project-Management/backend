@@ -335,65 +335,75 @@ export class CoreRepository {
       );
     }
 
-    const project = await this.prisma.project.create({
-      data: {
-        name: data.name.trim(),
-        identifier,
-        avatar: data.avatar || '',
-        coverImage: data.coverImage || '',
-        description: data.description || '',
-        priority: data.priority || ProjectPriority.none,
-        startDate: data.startDate || null,
-        targetDate: data.targetDate || null,
-        modules: data.modules || ['overview', 'work-items', 'pages'],
-        settings: (data.settings || {}) as Prisma.InputJsonValue,
-        createdById: userId,
-        members: {
-          create: {
-            userId,
-            role: Role.owner,
+    const project = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.project.create({
+        data: {
+          name: data.name.trim(),
+          identifier,
+          avatar: data.avatar || '',
+          coverImage: data.coverImage || '',
+          description: data.description || '',
+          priority: data.priority || ProjectPriority.none,
+          startDate: data.startDate || null,
+          targetDate: data.targetDate || null,
+          modules: data.modules || ['overview', 'work-items', 'pages'],
+          settings: (data.settings || {}) as Prisma.InputJsonValue,
+          createdById: userId,
+          members: {
+            create: {
+              userId,
+              role: Role.owner,
+            },
+          },
+          ...(data.labelIds && data.labelIds.length > 0
+            ? {
+                labels: {
+                  create: data.labelIds.map((labelId) => ({ labelId })),
+                },
+              }
+            : {}),
+          states: {
+            create: DEFAULT_WORK_ITEM_STATES.map((s) => ({
+              name: s.name,
+              color: s.color,
+              group: s.group,
+              sequence: s.sequence,
+              isDefault: s.isDefault ?? false,
+              description: s.description || '',
+            })),
+          },
+          projectStates: {
+            create: DEFAULT_PROJECT_STATES.map((s) => ({
+              name: s.name,
+              description: s.description,
+              color: s.color,
+              sequence: s.sequence,
+              isDefault: s.isDefault,
+            })),
           },
         },
-        ...(data.labelIds && data.labelIds.length > 0
-          ? {
-              labels: {
-                create: data.labelIds.map((labelId) => ({ labelId })),
-              },
-            }
-          : {}),
-        states: {
-          create: DEFAULT_WORK_ITEM_STATES.map((s) => ({
-            name: s.name,
-            color: s.color,
-            group: s.group,
-            sequence: s.sequence,
-            isDefault: s.isDefault ?? false,
-            description: s.description || '',
-          })),
-        },
-        projectStates: {
-          create: DEFAULT_PROJECT_STATES.map((s) => ({
-            name: s.name,
-            description: s.description,
-            color: s.color,
-            sequence: s.sequence,
-            isDefault: s.isDefault,
-          })),
-        },
-      },
-      include: {
-        members: {
-          include: {
-            user: { select: USER_SELECT },
+        include: {
+          members: {
+            include: {
+              user: { select: USER_SELECT },
+            },
           },
-        },
-        labels: {
-          include: {
-            label: true,
+          labels: {
+            include: {
+              label: true,
+            },
           },
+          projectStates: true,
         },
-        projectStates: true,
-      },
+      });
+      await tx.space.create({
+        data: {
+          id: created.id,
+          type: 'project',
+          projectId: created.id,
+        },
+      });
+      return created;
     });
 
     // Link initial stateId to the default project state
