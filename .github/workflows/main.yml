@@ -108,6 +108,7 @@ jobs:
           DOCKER_USER: ${{ github.actor }}
         with:
           host: ${{ secrets.HOST }}
+          port: ${{ secrets.PORT || 22 }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
           timeout: 30m
@@ -118,10 +119,12 @@ jobs:
             echo "Starting deployment on VPS..."
             cd /opt/flux/backend
 
-            # Synchronize git repository on VPS
-            git checkout .
-            BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "main")
-            git pull origin "$BRANCH"
+            # Synchronize git repository on VPS if tracked
+            if [ -d .git ]; then
+              git checkout .
+              BRANCH=$(git rev-parse --abbrev-ref HEAD || echo "main")
+              git pull origin "$BRANCH"
+            fi
 
             # Login to GitHub Container Registry
             echo "$DOCKER_PASSWORD" | docker login ghcr.io -u "$DOCKER_USER" --password-stdin
@@ -129,8 +132,8 @@ jobs:
             # Pull latest image from GHCR
             docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
 
-            # Recreate backend container cleanly
-            docker compose up -d be
+            # Recreate backend, worker, and realtime containers cleanly
+            docker compose --profile prod up -d be worker realtime
 
             # Run Prisma migrations inside backend container
             docker compose exec -T be npx prisma migrate deploy
@@ -140,5 +143,5 @@ jobs:
 
             # Health verification
             sleep 5
-            curl -sf http://127.0.0.1:3000/health/liveness || exit 1
+            curl -sf http://127.0.0.1:${BACKEND_HOST_PORT:-18300}/health/liveness || exit 1
             echo "Deployment successfully verified!"

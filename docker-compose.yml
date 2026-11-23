@@ -13,14 +13,14 @@ services:
   db:
     image: postgres:16-alpine
     container_name: flux_postgres
-    restart: "no"
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME:-flux-db}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "127.0.0.1:${DB_PORT:-5433}:5432"
+      - "127.0.0.1:${DB_PORT:-24532}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -32,7 +32,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: ${DB_MEM_LIMIT:-384M}
         reservations:
           memory: 128M
     logging:
@@ -52,10 +52,10 @@ services:
   redis:
     image: redis:7-alpine
     container_name: flux_redis
-    restart: "no"
-    command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-140mb} --maxmemory-policy allkeys-lru
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-31679}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -67,7 +67,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: ${REDIS_MEM_LIMIT:-192M}
         reservations:
           memory: 64M
     logging:
@@ -94,9 +94,9 @@ services:
       target: runner
     image: ghcr.io/research-project-management/backend:latest
     container_name: flux_backend
-    restart: "no"
+    restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-18300}:3000"
     env_file:
       - .env
     environment:
@@ -130,7 +130,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: ${BE_MEM_LIMIT:-768M}
         reservations:
           memory: 256M
     logging:
@@ -154,7 +154,7 @@ services:
       target: runner
     image: ghcr.io/research-project-management/backend:latest
     container_name: flux_backend_worker
-    restart: "no"
+    restart: unless-stopped
     command: ["node", "dist/worker.js"]
     volumes:
       - flux_clsi_scratch:/tmp/clsi-scratch
@@ -193,7 +193,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: ${WORKER_MEM_LIMIT:-768M}
         reservations:
           memory: 128M
     logging:
@@ -219,10 +219,10 @@ services:
         TEXLIVE_BASE: ${CLSI_TEXLIVE_BASE:-texlive-full-base}
     image: ghcr.io/research-project-management/clsi:latest
     container_name: flux_clsi
-    restart: "no"
+    restart: unless-stopped
     command: ["node", "dist/clsi.js"]
     ports:
-      - "127.0.0.1:${CLSI_PORT:-3013}:3013"
+      - "127.0.0.1:${CLSI_HOST_PORT:-18313}:3013"
     environment:
       PORT: 3013
       CLSI_PORT: 3013
@@ -230,7 +230,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2048M
+          memory: ${CLSI_MEM_LIMIT:-1024M}
         reservations:
           memory: 256M
     logging:
@@ -256,10 +256,10 @@ services:
       target: runner
     image: ghcr.io/research-project-management/backend:latest
     container_name: flux_realtime
-    restart: "no"
+    restart: unless-stopped
     command: ["node", "dist/realtime.js"]
     ports:
-      - "${REALTIME_PORT:-3014}:3014"
+      - "127.0.0.1:${REALTIME_HOST_PORT:-18314}:3014"
     env_file:
       - .env
     environment:
@@ -290,7 +290,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: ${REALTIME_MEM_LIMIT:-512M}
         reservations:
           memory: 192M
     logging:

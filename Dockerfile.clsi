@@ -40,7 +40,11 @@ RUN apk add --no-cache \
     font-dejavu \
     font-liberation \
     texlive-full \
-    texmf-dist-full
+    texmf-dist-full && \
+    rm -rf /usr/share/texmf-dist/doc \
+           /usr/share/texmf-dist/source \
+           /usr/share/doc \
+           /usr/share/man
 
 FROM ${TEXLIVE_BASE} AS runner
 USER root
