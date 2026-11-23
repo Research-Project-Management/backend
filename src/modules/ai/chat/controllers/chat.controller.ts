@@ -58,6 +58,13 @@ export class ChatController {
     return { agents };
   }
 
+  @Get('models')
+  @ApiOperation({ summary: 'List platform-managed LLM Model Catalog options' })
+  async listModels() {
+    const models = await this.engine.listModels();
+    return { models };
+  }
+
   @Post(['chat', 'editor-chat'])
   @UseGuards(VerifiedEmailGuard)
   @BypassEnvelope()
@@ -124,9 +131,58 @@ export class ChatController {
     @CurrentUser('id') userId: string,
     @Param('traceId') traceId: string,
     @Query('spaceId') spaceId?: string,
+    @Body() body?: { entityIds?: string[] },
     @Headers('authorization') authorization?: string,
   ) {
-    return this.chatService.revertTurn(userId, traceId, spaceId, authorization);
+    return this.chatService.revertTurn(
+      userId,
+      traceId,
+      spaceId,
+      authorization,
+      body?.entityIds,
+    );
+  }
+
+  @Get('chat/:chatId/checkpoints')
+  @ApiOperation({ summary: 'List LangGraph checkpoints for an AI chat thread' })
+  async listCheckpoints(
+    @CurrentUser('id') userId: string,
+    @Param('chatId') chatId: string,
+    @Query('spaceId') spaceId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit
+      ? Math.min(100, Math.max(1, Number(limit) || 20))
+      : undefined;
+    return this.chatService.listCheckpoints(
+      userId,
+      chatId,
+      spaceId,
+      parsedLimit,
+    );
+  }
+
+  @Post('chat/:chatId/rewind')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Rewind AI chat thread to a prior checkpoint and undo turn effects',
+  })
+  async rewindThread(
+    @CurrentUser('id') userId: string,
+    @Param('chatId') chatId: string,
+    @Body() body: { checkpointId: string; revertTraceIds?: string[] },
+    @Query('spaceId') spaceId?: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    return this.chatService.rewindThread(
+      userId,
+      chatId,
+      body?.checkpointId,
+      spaceId,
+      authorization,
+      body?.revertTraceIds,
+    );
   }
 
   @Delete(['memory/:spaceId', 'memory'])

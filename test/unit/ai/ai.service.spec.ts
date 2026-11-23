@@ -125,6 +125,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         timestamp: new Date().toISOString(),
       }),
       listAgents: jest.fn().mockResolvedValue([]),
+      listModels: jest.fn().mockResolvedValue([]),
       chatSync: jest.fn().mockResolvedValue({
         content: 'Authoritative AI response',
         route: 'rag_agent',
@@ -154,6 +155,20 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         reverted_count: 0,
         results: [],
       }),
+      listThreadCheckpoints: jest.fn().mockResolvedValue({
+        chat_id: 'chat-1',
+        space_id: mockUserId,
+        checkpoints: [],
+      }),
+      rewindThread: jest.fn().mockResolvedValue({
+        chat_id: 'chat-1',
+        space_id: mockUserId,
+        target_checkpoint_id: 'ckpt-1',
+        new_checkpoint_id: 'ckpt-2',
+        message_count: 2,
+        reverted_count: 0,
+        revert_results: [],
+      }),
       deleteThread: jest
         .fn()
         .mockResolvedValue({ space_id: mockUserId, deleted: true }),
@@ -163,6 +178,8 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         deleted_threads: 2,
       }),
       ingestDocument: jest.fn(),
+      enqueueKnowledgeIngest: jest.fn(),
+      getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn(),
       deleteSpaceKnowledge: jest.fn(),

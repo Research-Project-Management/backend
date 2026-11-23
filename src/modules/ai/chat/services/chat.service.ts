@@ -223,9 +223,55 @@ export class ChatService {
     traceId: string,
     rawSpaceId?: string,
     authorization?: string,
+    entityIds?: string[],
   ) {
     const scope = await this.accessService.resolveSpace(userId, rawSpaceId);
-    return this.engine.revertTurn(traceId, scope.spaceId, authorization);
+    return this.engine.revertTurn(
+      traceId,
+      scope.spaceId,
+      authorization,
+      entityIds,
+    );
+  }
+
+  async listCheckpoints(
+    userId: string,
+    chatId: string,
+    rawSpaceId?: string,
+    limit?: number,
+  ) {
+    const scope = await this.accessService.authorizeChatTurn({
+      userId,
+      spaceId: rawSpaceId,
+      chatId,
+    });
+    return this.engine.listThreadCheckpoints(chatId, scope.spaceId, limit);
+  }
+
+  async rewindThread(
+    userId: string,
+    chatId: string,
+    checkpointId: string,
+    rawSpaceId?: string,
+    authorization?: string,
+    revertTraceIds?: string[],
+  ) {
+    const cleanCheckpoint = (checkpointId || '').trim();
+    if (!cleanCheckpoint) {
+      throw new UnprocessableEntityException('checkpointId is required');
+    }
+    const scope = await this.accessService.authorizeChatTurn({
+      userId,
+      spaceId: rawSpaceId,
+      chatId,
+    });
+    return this.engine.rewindThread(
+      chatId,
+      scope.spaceId,
+      cleanCheckpoint,
+      authorization,
+      revertTraceIds,
+    );
   }
 
   private async prepareChatTurn(

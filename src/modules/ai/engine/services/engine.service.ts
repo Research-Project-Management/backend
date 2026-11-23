@@ -14,10 +14,14 @@ import type {
   EngineChatResponse,
   EngineDeleteResponse,
   EngineIngestInput,
+  EngineIngestJobResponse,
   EngineIngestResponse,
   EngineKnowledgeSearchHit,
   EngineKnowledgeSearchInput,
+  EngineModelInfo,
   EngineResumeRequest,
+  EngineThreadCheckpointsResponse,
+  EngineThreadRewindResponse,
   EngineTurnRevertResponse,
   StreamOptions,
 } from '../types/engine.type';
@@ -65,6 +69,14 @@ export class EngineService implements IAiEnginePort {
       { method: 'GET', timeoutMs: 10000 },
     );
     return Array.isArray(res.agents) ? res.agents : [];
+  }
+
+  async listModels(): Promise<EngineModelInfo[]> {
+    const res = await this.http.requestJson<{ models?: EngineModelInfo[] }>(
+      '/models',
+      { method: 'GET', timeoutMs: 10000 },
+    );
+    return Array.isArray(res.models) ? res.models : [];
   }
 
   async chatSync(request: EngineChatRequest): Promise<EngineChatResponse> {
@@ -153,11 +165,56 @@ export class EngineService implements IAiEnginePort {
     traceId: string,
     spaceId: string,
     authToken?: string,
+    entityIds?: string[],
   ): Promise<EngineTurnRevertResponse> {
     const qs = new URLSearchParams({ space_id: spaceId }).toString();
     return this.http.requestJson<EngineTurnRevertResponse>(
       `/turns/${encodeURIComponent(traceId)}/revert?${qs}`,
-      { method: 'POST', timeoutMs: 30000, delegationToken: authToken },
+      {
+        method: 'POST',
+        timeoutMs: 30000,
+        delegationToken: authToken,
+        ...(entityIds?.length ? { body: { entity_ids: entityIds } } : {}),
+      },
+    );
+  }
+
+  async listThreadCheckpoints(
+    chatId: string,
+    spaceId: string,
+    limit?: number,
+  ): Promise<EngineThreadCheckpointsResponse> {
+    const params = new URLSearchParams({ space_id: spaceId });
+    if (limit !== undefined) {
+      params.set('limit', String(limit));
+    }
+    return this.http.requestJson<EngineThreadCheckpointsResponse>(
+      `/threads/${encodeURIComponent(chatId)}/checkpoints?${params.toString()}`,
+      { method: 'GET', timeoutMs: 10000 },
+    );
+  }
+
+  async rewindThread(
+    chatId: string,
+    spaceId: string,
+    checkpointId: string,
+    authToken?: string,
+    revertTraceIds?: string[],
+  ): Promise<EngineThreadRewindResponse> {
+    const qs = new URLSearchParams({ space_id: spaceId }).toString();
+    return this.http.requestJson<EngineThreadRewindResponse>(
+      `/threads/${encodeURIComponent(chatId)}/rewind?${qs}`,
+      {
+        method: 'POST',
+        timeoutMs: 30000,
+        delegationToken: authToken,
+        body: {
+          checkpoint_id: checkpointId,
+          ...(revertTraceIds?.length
+            ? { revert_trace_ids: revertTraceIds }
+            : {}),
+        },
+      },
     );
   }
 
@@ -179,9 +236,9 @@ export class EngineService implements IAiEnginePort {
     );
   }
 
-  async ingestDocument(
+  async enqueueKnowledgeIngest(
     input: EngineIngestInput,
-  ): Promise<EngineIngestResponse> {
+  ): Promise<EngineIngestJobResponse> {
     const formData = new FormData();
     const blob = new Blob([new Uint8Array(input.fileBuffer)], {
       type: input.mimeType || 'application/octet-stream',
@@ -194,11 +251,51 @@ export class EngineService implements IAiEnginePort {
     if (input.url) formData.append('url', input.url);
     formData.append('metadata_json', JSON.stringify(input.metadata ?? {}));
 
-    return this.http.requestJson<EngineIngestResponse>('/knowledge/ingest', {
+    return this.http.requestJson<EngineIngestJobResponse>('/knowledge/ingest', {
       method: 'POST',
       body: formData,
-      timeoutMs: 120000,
+      timeoutMs: 30000,
     });
+  }
+
+  async getKnowledgeJob(jobId: string): Promise<EngineIngestJobResponse> {
+    return this.http.requestJson<EngineIngestJobResponse>(
+      `/knowledge/jobs/${encodeURIComponent(jobId)}`,
+      {
+        method: 'GET',
+        timeoutMs: 10000,
+      },
+    );
+  }
+
+  async ingestDocument(
+    input: EngineIngestInput,
+  ): Promise<EngineIngestResponse> {
+    let current = await this.enqueueKnowledgeIngest(input);
+    const deadline = Date.now() + 120_000;
+
+    while (current.status === 'queued' || current.status === 'running') {
+      if (Date.now() >= deadline) {
+        throw new Error(`AI ingestion job ${current.job_id} timed out`);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      current = await this.getKnowledgeJob(current.job_id);
+    }
+
+    if (current.status === 'failed') {
+      throw new Error(
+        current.error || `AI ingestion job ${current.job_id} failed`,
+      );
+    }
+
+    return {
+      space_id: current.space_id,
+      source_type: current.source_type,
+      source_id: current.source_id,
+      title: current.title,
+      pages_parsed: current.pages_parsed,
+      chunks_indexed: current.chunks_indexed,
+    };
   }
 
   async searchKnowledge(

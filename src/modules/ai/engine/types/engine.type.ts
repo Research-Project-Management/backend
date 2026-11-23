@@ -130,6 +130,18 @@ export interface EngineIngestInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface EngineIngestJobResponse {
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  space_id: string;
+  source_type: string;
+  source_id: string;
+  title: string;
+  pages_parsed: number;
+  chunks_indexed: number;
+  error?: string;
+}
+
 export interface EngineIngestResponse {
   space_id: string;
   source_type: string;
@@ -190,6 +202,41 @@ export interface EngineTurnRevertResponse {
   space_id: string;
   reverted_count: number;
   results: EngineRevertStepResult[];
+}
+
+export interface EngineCheckpointSummary {
+  checkpoint_id: string;
+  parent_checkpoint_id?: string | null;
+  created_at?: string | null;
+  step?: number | null;
+  message_count: number;
+  route?: string | null;
+  preview: string;
+}
+
+export interface EngineThreadCheckpointsResponse {
+  chat_id: string;
+  space_id: string;
+  checkpoints: EngineCheckpointSummary[];
+}
+
+export interface EngineThreadRewindResponse {
+  chat_id: string;
+  space_id: string;
+  target_checkpoint_id: string;
+  new_checkpoint_id: string;
+  message_count: number;
+  reverted_count: number;
+  revert_results: EngineRevertStepResult[];
+}
+
+export interface EngineModelInfo {
+  id: string;
+  label: string;
+  provider: string;
+  tier: 'auto' | 'fast' | 'balanced' | 'pro';
+  description: string;
+  is_default: boolean;
 }
 
 export interface TranslatedSseFrame {

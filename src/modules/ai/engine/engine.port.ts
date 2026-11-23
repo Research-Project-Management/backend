@@ -6,10 +6,14 @@ import type {
   EngineChatResponse,
   EngineDeleteResponse,
   EngineIngestInput,
+  EngineIngestJobResponse,
   EngineIngestResponse,
   EngineKnowledgeSearchHit,
   EngineKnowledgeSearchInput,
+  EngineModelInfo,
   EngineResumeRequest,
+  EngineThreadCheckpointsResponse,
+  EngineThreadRewindResponse,
   EngineTurnRevertResponse,
   StreamOptions,
 } from './types/engine.type';
@@ -17,6 +21,7 @@ import type {
 export interface IAiEnginePort {
   health(): Promise<AiHealthStatus>;
   listAgents(): Promise<EngineAgentInfo[]>;
+  listModels(): Promise<EngineModelInfo[]>;
   chatSync(request: EngineChatRequest): Promise<EngineChatResponse>;
   chatStream(
     request: EngineChatRequest,
@@ -34,10 +39,27 @@ export interface IAiEnginePort {
     traceId: string,
     spaceId: string,
     authToken?: string,
+    entityIds?: string[],
   ): Promise<EngineTurnRevertResponse>;
+  listThreadCheckpoints(
+    chatId: string,
+    spaceId: string,
+    limit?: number,
+  ): Promise<EngineThreadCheckpointsResponse>;
+  rewindThread(
+    chatId: string,
+    spaceId: string,
+    checkpointId: string,
+    authToken?: string,
+    revertTraceIds?: string[],
+  ): Promise<EngineThreadRewindResponse>;
   deleteThread(spaceId: string, chatId: string): Promise<EngineDeleteResponse>;
   deleteSpaceThreads(spaceId: string): Promise<EngineDeleteResponse>;
   ingestDocument(input: EngineIngestInput): Promise<EngineIngestResponse>;
+  enqueueKnowledgeIngest(
+    input: EngineIngestInput,
+  ): Promise<EngineIngestJobResponse>;
+  getKnowledgeJob(jobId: string): Promise<EngineIngestJobResponse>;
   searchKnowledge(
     input: EngineKnowledgeSearchInput,
   ): Promise<EngineKnowledgeSearchHit[]>;
