@@ -59,22 +59,32 @@ export class UserRepository implements IUserRepository {
     name: string;
     avatar?: string;
   }): Promise<UserWithProfile> {
-    return this.prisma.user.create({
-      data: {
-        email: data.email.toLowerCase().trim(),
-        password: data.passwordHash,
-        status: 'pending_verification',
-        settings: {
-          create: {},
-        },
-        profile: {
-          create: {
-            name: data.name,
-            avatar: data.avatar ?? null,
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: data.email.toLowerCase().trim(),
+          password: data.passwordHash,
+          status: 'pending_verification',
+          settings: {
+            create: {},
+          },
+          profile: {
+            create: {
+              name: data.name,
+              avatar: data.avatar ?? null,
+            },
           },
         },
-      },
-      include: { profile: true },
+        include: { profile: true },
+      });
+      await tx.space.create({
+        data: {
+          id: user.id,
+          type: 'personal',
+          ownerUserId: user.id,
+        },
+      });
+      return user;
     });
   }
 

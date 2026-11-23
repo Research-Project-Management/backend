@@ -57,16 +57,26 @@ export class AuthRepository implements IRefreshTokenRepository {
   ): Promise<
     User & { profile?: { name: string; avatar: string | null } | null }
   > {
-    return this.prisma.user.create({
-      data,
-      include: {
-        profile: {
-          select: {
-            name: true,
-            avatar: true,
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data,
+        include: {
+          profile: {
+            select: {
+              name: true,
+              avatar: true,
+            },
           },
         },
-      },
+      });
+      await tx.space.create({
+        data: {
+          id: user.id,
+          type: 'personal',
+          ownerUserId: user.id,
+        },
+      });
+      return user;
     });
   }
 
@@ -289,4 +299,3 @@ export class AuthRepository implements IRefreshTokenRepository {
     });
   }
 }
-
