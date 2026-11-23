@@ -56,7 +56,7 @@ import {
   LatexmkEngine,
   ClsiHealthCheck,
 } from './compile-pipeline.service';
-import { CompileQueueService } from './compile-queue.service';
+import { CompileLockService, getCompileName } from './compile-lock.service';
 import { ClsiQueueUnavailableError } from '../domain/sandbox.errors';
 import { ClsiMetrics } from '../domain/clsi.metrics';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
@@ -75,7 +75,6 @@ import {
 } from './clsi-synctex-wordcount.helper';
 import {
   type EditorLastBuildSummary,
-  dispatchAndAwaitQueueCompileHelper,
   downloadAllArtifactsZipHelper,
   downloadAuxFileHelper,
   enrichUnreachableRemoteFailure,
@@ -102,7 +101,7 @@ export class ClsiService implements OnModuleDestroy {
   private readonly syntaxLinter: SyntaxLinter = new SyntaxLinter();
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
-  private readonly fairQueue: CompileQueueService;
+  private readonly compileLock: CompileLockService;
   private readonly synctexDiskCache = new Map<string, SynctexDiskCacheEntry>();
   private readonly activeQueueJobIds = new Map<string, string>();
   private readonly diskUsageCleaner: DiskUsageCleaner;
@@ -128,7 +127,7 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() diskUsageCleaner?: DiskUsageCleaner,
     @Optional() healthCheck?: ClsiHealthCheck,
     @Optional() pipeline?: CompilePipeline,
-    @Optional() fairQueue?: CompileQueueService,
+    @Optional() compileLock?: CompileLockService,
     @Optional()
     @Inject(AI_FACADE)
     private readonly aiEngine?: ClsiAiEngine,
@@ -136,7 +135,7 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly filestoreService?: FilestoreService,
   ) {
-    this.fairQueue = fairQueue ?? new CompileQueueService();
+    this.compileLock = compileLock ?? new CompileLockService();
     const sandboxConfig = parseSandboxConfig({
       env: extractSandboxEnvFromConfigService(this.configService),
       isProduction: this.configService.get<string>('NODE_ENV') === 'production',
@@ -197,7 +196,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public onModuleDestroy(): void {
-    this.fairQueue.onModuleDestroy();
+    this.compileLock.onModuleDestroy();
   }
 
   private hashSource(source: string): string {
@@ -205,44 +204,6 @@ export class ClsiService implements OnModuleDestroy {
       .createHash('sha256')
       .update(source || '')
       .digest('hex');
-  }
-
-  private async isQueueActive(): Promise<boolean> {
-    if (!this.compileQueue) return false;
-    if (
-      this.configService.get<string>('DISABLE_CLSI_QUEUE') === 'true' ||
-      process.env.DISABLE_CLSI_QUEUE === 'true'
-    ) {
-      return false;
-    }
-    try {
-      const workers = await this.compileQueue.getWorkers();
-      return Array.isArray(workers) && workers.length > 0;
-    } catch {
-      return false;
-    }
-  }
-
-  private async queueCompileJob(
-    dto: CompilePageDto,
-    userId?: string,
-    authorizedProjectId?: string,
-  ): Promise<ClsiCompileResult> {
-    if (!this.compileQueue) {
-      throw new ClsiQueueUnavailableError();
-    }
-    return await dispatchAndAwaitQueueCompileHelper({
-      compileQueue: this.compileQueue,
-      activeQueueJobIds: this.activeQueueJobIds,
-      dto,
-      userId,
-      authorizedProjectId,
-      realtimeService: this.realtimeService,
-      onSupersede: (compileTargetId) => {
-        this.fairQueue.cancel(compileTargetId);
-      },
-      logger: this.logger,
-    });
   }
 
   public async enqueueCompile(
@@ -267,29 +228,17 @@ export class ClsiService implements OnModuleDestroy {
     return { jobId: job.id! };
   }
 
+  /**
+   * Citation: Overleaf `services/web/app/src/Features/Compile/CompileManager.mjs` (lines 30-135) &
+   * `services/clsi/app/js/CompileController.js` (lines 48-210).
+   * Executes compilation synchronously against the target CLSI workspace without routing
+   * through a shared Redis/BullMQ pull queue (preserving local disk `.aux/.fdb_latexmk` affinity).
+   */
   public async compile(
     dto: CompilePageDto,
     userId?: string,
     authorizedProjectId?: string,
   ): Promise<ClsiCompileResult> {
-    if (await this.isQueueActive()) {
-      try {
-        return await this.queueCompileJob(dto, userId, authorizedProjectId);
-      } catch (err: unknown) {
-        if (
-          err instanceof HttpException ||
-          err instanceof PagesDomainError ||
-          (err as { isWorkerExecutionError?: boolean })?.isWorkerExecutionError
-        ) {
-          throw err;
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `CLSI queue dispatch failed (Redis/Queue unavailable), falling back to inline fairQueue: ${msg}`,
-        );
-      }
-    }
-
     return await this.compileInline(dto, userId, authorizedProjectId);
   }
 
@@ -315,7 +264,7 @@ export class ClsiService implements OnModuleDestroy {
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
     const metricEngine = requestedEngine || 'pdflatex';
 
-    return await this.fairQueue.schedule(
+    return await this.compileLock.runWithLock(
       scratchWorkspaceId,
       _userId,
       this.realtimeService,
@@ -370,7 +319,6 @@ export class ClsiService implements OnModuleDestroy {
             dto.stopOnFirstError ?? false,
           ].join('|'),
         )}`;
-        this.fairQueue.registerFingerprint(scratchWorkspaceId, cacheKey);
         const cacheable = !!(dto.useCache && plan.hasMainContent);
 
         if (cacheable && this.cache) {
@@ -423,7 +371,10 @@ export class ClsiService implements OnModuleDestroy {
           manuscriptPageId,
         );
       },
-      { priority: dto.priority ?? 'manual' },
+      {
+        priority: dto.priority ?? 'manual',
+        ...(dto.forceClean ? { forceClean: true } : {}),
+      },
     );
   }
 
@@ -444,15 +395,6 @@ export class ClsiService implements OnModuleDestroy {
   ): Promise<ClsiCompileResult> {
     const mainFile = plan.mainFile;
     const dbProjectId = projectId.startsWith('adhoc-') ? 'default' : projectId;
-    const mergedFiles = await this.workspacePlanner.hydrateFiles(
-      dbProjectId,
-      plan,
-      scratchWorkspaceId,
-    );
-    const rawMain = mergedFiles[mainFile] ?? dto.source ?? '';
-    const source = Buffer.isBuffer(rawMain)
-      ? rawMain.toString('utf8')
-      : rawMain;
 
     if (dto.forceClean) {
       await this.pipeline.runWithProjectLock(
@@ -461,6 +403,19 @@ export class ClsiService implements OnModuleDestroy {
         signal,
       );
     }
+
+    const mergedFiles = await this.workspacePlanner.hydrateFiles(
+      dbProjectId,
+      plan,
+      scratchWorkspaceId,
+      {
+        deltaOnlyOnDisk: !this.remoteClient.isEnabled() && !dto.forceClean,
+      },
+    );
+    const rawMain = mergedFiles[mainFile] ?? dto.source ?? '';
+    const source = Buffer.isBuffer(rawMain)
+      ? rawMain.toString('utf8')
+      : rawMain;
 
     const remoteResult = await this.remoteClient.tryRemoteClsiCompile({
       projectId: scratchWorkspaceId,
@@ -580,16 +535,17 @@ export class ClsiService implements OnModuleDestroy {
     return formatted;
   }
 
-  public cancelCompile(projectId: string): boolean {
-    const existingJobId = this.activeQueueJobIds.get(projectId);
+  public cancelCompile(projectId: string, userId?: string): boolean {
+    const compileKey = getCompileName(projectId, userId);
+    const existingJobId = this.activeQueueJobIds.get(compileKey);
     if (existingJobId && this.compileQueue) {
-      this.activeQueueJobIds.delete(projectId);
+      this.activeQueueJobIds.delete(compileKey);
       this.compileQueue
         .getJob(existingJobId)
         .then((job) => job?.remove())
         .catch(() => {});
     }
-    return this.fairQueue.cancel(projectId) || Boolean(existingJobId);
+    return Boolean(existingJobId);
   }
 
   public async forwardSync(dto: ForwardSyncDto, authorizedProjectId?: string) {

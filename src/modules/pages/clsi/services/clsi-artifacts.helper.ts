@@ -12,7 +12,10 @@ import * as path from 'path';
 import type { CompilePageDto } from '../dto/clsi.dto';
 import type { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { CompilerDiagnostic } from '../domain/clsi.ports';
-import { CompileSupersededError } from '../domain/fair-semaphore';
+import {
+  AlreadyCompilingError,
+  CompileSupersededError,
+} from '../domain/compile-lock.errors';
 import { ClsiWorkerExecutionError } from '../domain/sandbox.errors';
 import {
   WorkspaceRepository,
@@ -21,6 +24,7 @@ import {
 } from '../repositories/workspace.repository';
 import { CompileLogAnalyzer } from '@/modules/pages/diagnostics/domain';
 import { CompilePipelineResult } from './compile-pipeline.service';
+import { getCompileName } from './compile-lock.service';
 import type { RemoteClsiClientAdapter } from './remote-clsi.client';
 
 export interface EditorLastBuildSummary {
@@ -407,7 +411,7 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
   userId?: string;
   authorizedProjectId?: string;
   realtimeService?: RealtimeFacade;
-  onSupersede?: (compileTargetId: string) => void;
+  onSupersede?: (compileTargetId: string, userId?: string) => void;
   logger: Logger;
 }): Promise<CompilePipelineResult> {
   const {
@@ -423,6 +427,10 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
 
   const spaceId = authorizedProjectId || dto.spaceId || 'default';
   const compileTargetId = dto.pageId || spaceId;
+  // Citation: Overleaf `services/clsi/app/js/CompileManager.js` (lines 51-57):
+  // Scope active compile key per `(projectId, userId)` so two different users in the
+  // same project can compile simultaneously without colliding.
+  const compileKey = getCompileName(compileTargetId, userId);
   const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
   if (realtimeService && spaceId && spaceId !== 'default') {
@@ -436,9 +444,16 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
     }
   }
 
-  const existingJobId = activeQueueJobIds.get(compileTargetId);
+  const existingJobId = activeQueueJobIds.get(compileKey);
   if (existingJobId) {
-    onSupersede?.(compileTargetId);
+    if (!dto.forceClean) {
+      // Citation: Overleaf `services/clsi/app/js/LockManager.js` (lines 21-33) &
+      // `services/clsi/app/js/CompileController.js` (lines 77-80):
+      // Reject overlapping compile requests for the same `(projectId, userId)` immediately
+      // with 423 Locked (`compile-in-progress`) rather than killing the active compilation.
+      throw new AlreadyCompilingError('compile in progress');
+    }
+    onSupersede?.(compileTargetId, userId);
     try {
       const oldJob = await compileQueue.getJob(existingJobId);
       if (oldJob) {
@@ -449,7 +464,7 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
     }
   }
 
-  const jobId = `clsi-${compileTargetId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const jobId = `clsi-${compileKey}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
   const job = await compileQueue.add(
     'clsi-compile',
     { dto, userId, authorizedProjectId },
@@ -459,13 +474,13 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
       removeOnFail: { age: 300, count: 25 },
     },
   );
-  activeQueueJobIds.set(compileTargetId, jobId);
+  activeQueueJobIds.set(compileKey, jobId);
 
   const startTime = Date.now();
   const pollIntervalMs = 200;
   try {
     while (Date.now() - startTime < effectiveTimeoutMs) {
-      if (activeQueueJobIds.get(compileTargetId) !== jobId) {
+      if (activeQueueJobIds.get(compileKey) !== jobId) {
         throw new CompileSupersededError('Compilation superseded or cancelled');
       }
       const state = await job.getState();
@@ -488,8 +503,8 @@ export async function dispatchAndAwaitQueueCompileHelper(params: {
       'COMPILE_QUEUE_TIMEOUT',
     );
   } finally {
-    if (activeQueueJobIds.get(compileTargetId) === jobId) {
-      activeQueueJobIds.delete(compileTargetId);
+    if (activeQueueJobIds.get(compileKey) === jobId) {
+      activeQueueJobIds.delete(compileKey);
     }
   }
 }

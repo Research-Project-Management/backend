@@ -81,6 +81,7 @@ export class ClsiController {
     summary: 'Cancel an ongoing compilation for a manuscript page or project',
   })
   cancelCompile(
+    @CurrentUser('id') userId?: string,
     @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
@@ -91,7 +92,7 @@ export class ClsiController {
       routePageId ||
       '';
     const targetId = routePageId || spaceId;
-    const cancelled = this.clsiService.cancelCompile(targetId);
+    const cancelled = this.clsiService.cancelCompile(targetId, userId);
     return { success: true, cancelled };
   }
 

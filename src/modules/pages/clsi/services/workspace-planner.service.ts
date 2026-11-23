@@ -34,15 +34,39 @@ import {
   PlannedFileSet,
 } from '../domain/fileset.planner';
 import { FileSnapshotVo } from '@/modules/pages/project-history/domain/file-snapshot';
-import { WorkspaceRepository } from '../repositories/workspace.repository';
+import {
+  WorkspaceRepository,
+  createUnchangedDiskPlaceholder,
+} from '../repositories/workspace.repository';
 import { SafePath } from '../domain/safe-path';
+
+export interface HydrateFilesOptions {
+  /**
+   * When true, binary files already verified on disk in `scratchDir` (`stat.size === bf.sizeBytes`
+   * and matching `.clsi-manifest.json` hash) are returned as 0-byte `UnchangedDiskBuffer` sentinels
+   * (`O(1)` RAM, 0 bytes disk read, 0ms MD5 re-hash in `syncFiles`) instead of reading full buffers
+   * from disk back into memory.
+   */
+  deltaOnlyOnDisk?: boolean;
+}
 
 @Injectable()
 export class WorkspacePlannerService {
   private readonly logger = new Logger(WorkspacePlannerService.name);
   private readonly lastAutoSnapshotTimes = new Map<string, number>();
   private readonly lastSnapshotHashes = new Map<string, string>();
+  /**
+   * Bounded LRU cache mapping `${projectId}:${docId}` -> `{ token, content }` so `hydrateFiles`
+   * only queries PostgreSQL (`SELECT lines FROM page_docs`) for the `O(Delta D)` documents whose
+   * revision token (`d:${id}:${rev}:${updatedAt}:${sizeBytes}`) actually changed since the last build.
+   */
+  private readonly docContentCache = new Map<
+    string,
+    { token: string; content: string }
+  >();
   private static readonly MAX_TRACKED_PROJECTS = 1000;
+  private static readonly MAX_CACHED_DOCS = 2000;
+  private static readonly MAX_CACHED_DOC_BYTES = 512 * 1024;
 
   constructor(
     @Optional() private readonly prisma?: PrismaService,
@@ -331,23 +355,74 @@ export class WorkspacePlannerService {
     return planInlineFileSet({ incomingFiles, source, mainFile });
   }
 
+  private getCachedDocContent(
+    cacheKey: string,
+    expectedToken: string,
+  ): string | undefined {
+    const entry = this.docContentCache.get(cacheKey);
+    if (!entry || entry.token !== expectedToken) {
+      return undefined;
+    }
+    // Refresh LRU order
+    this.docContentCache.delete(cacheKey);
+    this.docContentCache.set(cacheKey, entry);
+    return entry.content;
+  }
+
+  private setCachedDocContent(
+    cacheKey: string,
+    token: string | undefined,
+    content: string,
+  ): void {
+    if (
+      !token ||
+      Buffer.byteLength(content, 'utf8') >
+        WorkspacePlannerService.MAX_CACHED_DOC_BYTES
+    ) {
+      return;
+    }
+    if (this.docContentCache.has(cacheKey)) {
+      this.docContentCache.delete(cacheKey);
+    } else if (
+      this.docContentCache.size >= WorkspacePlannerService.MAX_CACHED_DOCS
+    ) {
+      const oldestKey = this.docContentCache.keys().next().value;
+      if (oldestKey) {
+        this.docContentCache.delete(oldestKey);
+      }
+    }
+    this.docContentCache.set(cacheKey, { token, content });
+  }
+
   /**
-   * Loads document bodies for DB-backed entries in ONE `id IN (…)` query,
+   * Loads document bodies for DB-backed entries in ONE `id IN (…)` query for only the
+   * `O(Delta D)` documents whose revision token changed since the last compile,
    * unarchiving cold-storage docs via DocstoreService if available, and
-   * materializing binary ManuscriptFile blobs via FilestoreService.
+   * materializing binary ManuscriptFile blobs via FilestoreService (or `O(1)` zero-copy
+   * on-disk sentinels when `options?.deltaOnlyOnDisk` is enabled).
    */
   public async hydrateFiles(
     projectId: string,
     plan: PlannedFileSet,
     scratchWorkspaceId: string = projectId,
+    options?: HydrateFilesOptions,
   ): Promise<Record<string, string | Buffer>> {
     const dbIds: string[] = [];
+    const tokenByDocId = new Map<string, string>();
+    const contentById = new Map<string, string>();
+
     for (const s of plan.files.values()) {
       if (s.kind !== 'db') continue;
-      dbIds.push(s.docId);
+      tokenByDocId.set(s.docId, s.token);
+      const cacheKey = `${projectId}:${s.docId}`;
+      const cachedText = this.getCachedDocContent(cacheKey, s.token);
+      if (cachedText !== undefined) {
+        contentById.set(s.docId, cachedText);
+      } else {
+        dbIds.push(s.docId);
+      }
     }
 
-    const contentById = new Map<string, string>();
     if (dbIds.length > 0 && this.prisma) {
       const rows = await this.prisma.pageDoc.findMany({
         where: { id: { in: dbIds } },
@@ -364,7 +439,13 @@ export class WorkspacePlannerService {
                   projectId,
                   row.id,
                 );
-                contentById.set(row.id, linesToText(hydratedDoc.lines));
+                const text = linesToText(hydratedDoc.lines);
+                contentById.set(row.id, text);
+                this.setCachedDocContent(
+                  `${projectId}:${row.id}`,
+                  tokenByDocId.get(row.id),
+                  text,
+                );
                 return;
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
@@ -378,7 +459,13 @@ export class WorkspacePlannerService {
               );
             }
           }
-          contentById.set(row.id, linesToText(row.lines));
+          const text = linesToText(row.lines);
+          contentById.set(row.id, text);
+          this.setCachedDocContent(
+            `${projectId}:${row.id}`,
+            tokenByDocId.get(row.id),
+            text,
+          );
         }),
       );
     }
@@ -513,7 +600,13 @@ export class WorkspacePlannerService {
                 stat.size === bf.sizeBytes &&
                 hashMatches
               ) {
-                out[relPath] = await fs.readFile(localAssetPath);
+                if (options?.deltaOnlyOnDisk && manifestHash) {
+                  // O(1) Zero-Copy Disk Hit: skip reading 50MB binary file from disk into RAM
+                  // and skip re-computing MD5 in WorkspaceRepository.syncFiles.
+                  out[relPath] = createUnchangedDiskPlaceholder(manifestHash);
+                } else {
+                  out[relPath] = await fs.readFile(localAssetPath);
+                }
                 return;
               }
             } catch {

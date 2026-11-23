@@ -24,6 +24,35 @@ export interface ProjectManifest {
   lastUpdated: string;
 }
 
+export const UNCHANGED_ON_DISK_HASH = Symbol.for(
+  'flux.clsi.unchangedOnDiskHash',
+);
+
+export interface UnchangedDiskBuffer extends Buffer {
+  [UNCHANGED_ON_DISK_HASH]?: string;
+}
+
+/**
+ * Creates a 0-byte sentinel Buffer representing a file already verified on disk
+ * in the scratch workspace (`O(1)` memory, 0 bytes disk read, 0 MD5 re-hash).
+ */
+export function createUnchangedDiskPlaceholder(
+  manifestHash: string,
+): UnchangedDiskBuffer {
+  const buf = Buffer.alloc(0) as UnchangedDiskBuffer;
+  buf[UNCHANGED_ON_DISK_HASH] = manifestHash;
+  return buf;
+}
+
+export function getUnchangedDiskHash(
+  content: string | Buffer | undefined,
+): string | undefined {
+  if (Buffer.isBuffer(content)) {
+    return (content as UnchangedDiskBuffer)[UNCHANGED_ON_DISK_HASH];
+  }
+  return undefined;
+}
+
 const MANIFEST_FILENAME = '.clsi-manifest.json';
 const AUX_EXTENSIONS = new Set([
   '.pdf',
@@ -135,6 +164,17 @@ export class WorkspaceRepository implements IWorkspaceManager {
         scratchDir,
         sanitizedRelPath,
       );
+      const preverifiedHash = getUnchangedDiskHash(file.content);
+      if (
+        preverifiedHash &&
+        manifest.files[sanitizedRelPath] === preverifiedHash
+      ) {
+        return {
+          path: sanitizedRelPath,
+          hash: preverifiedHash,
+          status: 'unchanged' as const,
+        };
+      }
       const contentBuffer = Buffer.isBuffer(file.content)
         ? file.content
         : typeof file.content === 'string' && file.content.startsWith('base64:')

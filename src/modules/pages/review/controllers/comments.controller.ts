@@ -42,9 +42,32 @@ export class CommentsController {
   async list(
     @Param('docId') docId: string,
     @Query('status') status?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
   ) {
-    return this.commentsService.list(docId, status, undefined, authSpace);
+    const parsedLimit =
+      limit !== undefined && limit !== ''
+        ? Number.parseInt(limit, 10)
+        : undefined;
+    const pagination =
+      cursor || (parsedLimit !== undefined && Number.isFinite(parsedLimit))
+        ? {
+            cursor: cursor || undefined,
+            limit:
+              parsedLimit !== undefined && Number.isFinite(parsedLimit)
+                ? parsedLimit
+                : undefined,
+          }
+        : undefined;
+
+    return this.commentsService.list(
+      docId,
+      status,
+      undefined,
+      authSpace,
+      pagination,
+    );
   }
 
   @Post()

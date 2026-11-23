@@ -1,4 +1,7 @@
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+
+const logger = new Logger('ReviewEvents');
 
 export const REVIEW_EVENTS = {
   STATUS_CHANGED: 'review:status-changed',
@@ -26,7 +29,11 @@ export function emitReviewEvent(
       event,
       payload,
     });
-  } catch {
-    // Non-blocking real-time broadcast error ignored
+  } catch (error) {
+    logger.warn(
+      `Failed to emit review event "${event}" for space "${spaceId}": ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }

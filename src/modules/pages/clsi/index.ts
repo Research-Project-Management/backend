@@ -12,7 +12,7 @@ export * from './clsi.controller';
 export * from './services/clsi.service';
 export * from './services/workspace-planner.service';
 export * from './services/compile-pipeline.service';
-export * from './services/compile-queue.service';
+export * from './services/compile-lock.service';
 export * from './services/remote-clsi.client';
 
 // Repositories

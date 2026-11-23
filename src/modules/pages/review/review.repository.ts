@@ -312,6 +312,60 @@ export class ReviewRepository {
     return records.map((r) => ReviewMapper.toDomainThread(r, spaceId));
   }
 
+  public async listThreadsPaginated(
+    spaceId: string,
+    docId: string,
+    options: {
+      isResolved?: boolean;
+      cursor?: string;
+      limit?: number;
+    },
+  ): Promise<{
+    items: CommentThread[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> {
+    const clampedLimit = Math.min(Math.max(1, options.limit ?? 20), 100);
+    const where: Prisma.DocCommentWhereInput = {
+      docId,
+      deletedAt: null,
+      doc: { spaceId },
+    };
+    if (options.isResolved !== undefined) {
+      where.isResolved = options.isResolved;
+    }
+
+    const validCursor =
+      options.cursor && isUUID(options.cursor) ? options.cursor : undefined;
+
+    const records = await this.prisma.docComment.findMany({
+      where,
+      include: {
+        doc: { select: { spaceId: true, pageId: true } },
+        replies: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(validCursor ? { cursor: { id: validCursor }, skip: 1 } : {}),
+      take: clampedLimit + 1,
+    });
+
+    const hasMore = records.length > clampedLimit;
+    const pageRecords = hasMore ? records.slice(0, clampedLimit) : records;
+    const nextCursor =
+      hasMore && pageRecords.length > 0
+        ? pageRecords[pageRecords.length - 1].id
+        : null;
+
+    return {
+      items: pageRecords.map((r) => ReviewMapper.toDomainThread(r, spaceId)),
+      nextCursor,
+      hasMore,
+    };
+  }
+
   public async updateThread(
     spaceId: string,
     commentId: string,

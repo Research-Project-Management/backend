@@ -13,7 +13,7 @@ export * from './draft-mode.manager';
 export * from './bib-backend.detector';
 export * from './safe-path';
 export * from './clsi.metrics';
-export * from './fair-semaphore';
+export * from './compile-lock.errors';
 export * from './sandbox.errors';
 export * from './sandbox-profile';
 export * from './sandbox-env.builder';

@@ -27,11 +27,15 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import {
-  FairSemaphore,
+  AlreadyCompilingError,
   AutoCompileShedError,
   CompileSupersededError,
-  SemaphoreAbortedError,
-} from './modules/pages/clsi/domain/fair-semaphore';
+  TooManyCompileRequestsError,
+} from './modules/pages/clsi/domain/compile-lock.errors';
+import {
+  assessLiveCompileCapacity,
+  resolveHardwareCompileConcurrencyLimit,
+} from './modules/pages/clsi/services/compile-lock.service';
 import {
   CompilePageDto,
   ClsiWordCountDto,
@@ -72,7 +76,7 @@ export class ClsiService implements OnModuleDestroy {
   private readonly diskUsageCleaner: DiskUsageCleaner;
   private readonly healthCheck: ClsiHealthCheck;
   private readonly metrics: ClsiMetrics = ClsiMetrics.getInstance();
-  private readonly slots: FairSemaphore;
+  private readonly compileConcurrencyLimit: number;
   private readonly autoShedThreshold: number;
   private readonly supersedeGraceMs = 3000;
   private readonly inFlightCompiles = new Map<
@@ -88,24 +92,14 @@ export class ClsiService implements OnModuleDestroy {
     const latexmkBin = process.env.LATEXMK_BIN || 'latexmk';
 
     const maxConcurrentEnv = Number(process.env.CLSI_MAX_CONCURRENT_COMPILES);
-    const cpuCount = typeof os.cpus === 'function' ? os.cpus().length : 2;
-    const capacity =
+    this.compileConcurrencyLimit =
       Number.isFinite(maxConcurrentEnv) && maxConcurrentEnv >= 1
         ? Math.floor(maxConcurrentEnv)
-        : Math.max(2, cpuCount - 1);
-    const maxQueue = Math.max(
-      1,
-      Number(process.env.CLSI_MAX_QUEUE_LENGTH || 64),
-    );
-    const maxWaitMs = Math.max(
-      1000,
-      Number(process.env.CLSI_MAX_QUEUE_WAIT_MS || 90_000),
-    );
+        : resolveHardwareCompileConcurrencyLimit({ isRemoteProxy: false });
     this.autoShedThreshold = Math.max(
       1,
-      Math.min(40, Math.floor(maxQueue * 0.75)),
+      Math.floor(this.compileConcurrencyLimit * 0.75),
     );
-    this.slots = new FairSemaphore(capacity, maxQueue, maxWaitMs);
 
     this.workspace = new WorkspaceRepository(scratchDir);
     const runner = new LocalProcessRunner();
@@ -168,12 +162,36 @@ export class ClsiService implements OnModuleDestroy {
     const requestedEngine = dto.engine;
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
-    const waitingCount = this.slots.stats().waiting;
-    if (dto.priority === 'auto' && waitingCount >= this.autoShedThreshold) {
-      throw new AutoCompileShedError(waitingCount, this.autoShedThreshold);
+    const existing = this.inFlightCompiles.get(projectId);
+    if (existing) {
+      if (dto.forceClean) {
+        existing.abortController.abort();
+        await this.waitSettled(existing.settled, this.supersedeGraceMs);
+      } else {
+        throw new AlreadyCompilingError('compile in progress');
+      }
     }
 
-    const existing = this.inFlightCompiles.get(projectId);
+    const activeCount = this.inFlightCompiles.size;
+    if (dto.priority === 'auto' && activeCount >= this.autoShedThreshold) {
+      throw new AutoCompileShedError(activeCount, this.autoShedThreshold);
+    }
+
+    if (activeCount >= this.compileConcurrencyLimit) {
+      throw new TooManyCompileRequestsError(
+        'too many concurrent compile requests',
+      );
+    }
+
+    if (activeCount >= 1) {
+      const liveCapacity = assessLiveCompileCapacity({ isRemoteProxy: false });
+      if (!liveCapacity.hasLiveMemoryHeadroom) {
+        throw new TooManyCompileRequestsError(
+          'too many concurrent compile requests',
+        );
+      }
+    }
+
     const abortController = new AbortController();
     let markSettled!: () => void;
     const settled = new Promise<void>((resolve) => {
@@ -185,30 +203,7 @@ export class ClsiService implements OnModuleDestroy {
     };
     this.inFlightCompiles.set(projectId, session);
 
-    let release: (() => void) | undefined;
     try {
-      if (existing) {
-        existing.abortController.abort();
-        await this.waitSettled(existing.settled, this.supersedeGraceMs);
-      }
-
-      const fast = this.slots.tryAcquire();
-      if (fast) {
-        release = fast;
-      } else {
-        try {
-          release = await this.slots.acquire(
-            dto.spaceId || projectId,
-            abortController.signal,
-          );
-        } catch (err) {
-          if (err instanceof SemaphoreAbortedError) {
-            throw new CompileSupersededError();
-          }
-          throw err;
-        }
-      }
-
       if (abortController.signal.aborted) {
         throw new CompileSupersededError();
       }
@@ -253,7 +248,6 @@ export class ClsiService implements OnModuleDestroy {
 
       return pipelineResult;
     } finally {
-      release?.();
       if (this.inFlightCompiles.get(projectId) === session) {
         this.inFlightCompiles.delete(projectId);
       }
@@ -509,7 +503,10 @@ export class ClsiService implements OnModuleDestroy {
     return {
       ...report,
       queue: {
-        ...this.slots.stats(),
+        capacity: this.compileConcurrencyLimit,
+        active: this.inFlightCompiles.size,
+        waiting: 0,
+        waitingTenants: 0,
         inFlightProjects: this.inFlightCompiles.size,
       },
     };

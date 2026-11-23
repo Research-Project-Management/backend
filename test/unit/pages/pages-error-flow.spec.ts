@@ -50,13 +50,13 @@ import {
   UnsafePathException,
 } from '@/modules/pages/clsi/domain/sandbox.errors';
 import {
+  AlreadyCompilingError,
   AutoCompileShedError,
+  CompileAbortedError,
   CompileRateLimitExceededError,
   CompileSupersededError,
-  SemaphoreAbortedError,
-  SemaphoreQueueFullError,
-  SemaphoreWaitTimeoutError,
-} from '@/modules/pages/clsi/domain/fair-semaphore';
+  TooManyCompileRequestsError,
+} from '@/modules/pages/clsi/domain/compile-lock.errors';
 import {
   ProjectLockAbortedError,
   ProjectLockTimeoutError,
@@ -399,20 +399,20 @@ describe('Backend Pages Error Architecture & Flow Verification', () => {
         'CLSI_QUEUE_UNAVAILABLE',
       ],
       [
-        'SemaphoreQueueFullError',
-        new SemaphoreQueueFullError(25),
+        'AlreadyCompilingError',
+        new AlreadyCompilingError(),
+        423,
+        'COMPILE_IN_PROGRESS',
+      ],
+      [
+        'TooManyCompileRequestsError',
+        new TooManyCompileRequestsError(),
         503,
-        'COMPILE_QUEUE_FULL',
+        'TOO_MANY_COMPILE_REQUESTS',
       ],
       [
-        'SemaphoreWaitTimeoutError',
-        new SemaphoreWaitTimeoutError(15000),
-        504,
-        'COMPILE_QUEUE_TIMEOUT',
-      ],
-      [
-        'SemaphoreAbortedError',
-        new SemaphoreAbortedError(),
+        'CompileAbortedError',
+        new CompileAbortedError(),
         499,
         'COMPILE_ABORTED',
       ],
@@ -676,7 +676,7 @@ describe('Backend Pages Error Architecture & Flow Verification', () => {
           'SSRF_SECURITY_VIOLATION',
         ],
         [new CompileRateLimitExceededError(20), 429, 'COMPILE_RATE_LIMITED'],
-        [new SemaphoreQueueFullError(40), 503, 'COMPILE_QUEUE_FULL'],
+        [new TooManyCompileRequestsError(), 503, 'TOO_MANY_COMPILE_REQUESTS'],
         [
           new ProjectLockTimeoutError('space-1', 30000),
           409,

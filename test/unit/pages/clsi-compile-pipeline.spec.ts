@@ -10,7 +10,7 @@ import {
   LatexmkEngine,
 } from '@/modules/pages/clsi/services/compile-pipeline.service';
 import { ClsiService } from '@/modules/pages/clsi/services/clsi.service';
-import { CompileQueueService } from '@/modules/pages/clsi/services/compile-queue.service';
+import { CompileLockService } from '@/modules/pages/clsi/services/compile-lock.service';
 import { RemoteClsiClientError } from '@/modules/pages/clsi/domain/sandbox.errors';
 import { RemoteClsiClientAdapter } from '@/modules/pages/clsi/services/remote-clsi.client';
 import { WorkspaceRepository } from '@/modules/pages/clsi/repositories/workspace.repository';
@@ -483,17 +483,16 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
     }
   });
 
-  it('CompileQueueService sheds auto-compile under queue load while allowing manual builds and preserving structured HttpException codes', async () => {
-    const queue = new CompileQueueService({
-      maxConcurrentCompiles: 1,
-      maxQueueLength: 4,
+  it('CompileLockService sheds auto-compile at autoShedThreshold, allows manual builds up to compileConcurrencyLimit, and fails fast with 503 TOO_MANY_COMPILE_REQUESTS when capacity is reached (Overleaf LockManager.js:39-51)', async () => {
+    const lockService = new CompileLockService({
+      maxConcurrentCompiles: 2,
       autoShedThreshold: 1,
       maxCompilesPerMinute: 2,
     });
 
     let releaseFirst!: () => void;
     const firstEntered = new Promise<void>((resolve) => {
-      void queue.schedule('proj-1', 'user-1', undefined, async () => {
+      void lockService.runWithLock('proj-1', 'user-1', undefined, async () => {
         resolve();
         await new Promise<void>((done) => {
           releaseFirst = done;
@@ -503,56 +502,98 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
     });
     await firstEntered;
 
-    let releaseSecondQueued!: () => void;
-    const secondPromise = queue.schedule(
-      'proj-2',
-      'user-2',
-      undefined,
-      async () => {
-        await new Promise<void>((done) => {
-          releaseSecondQueued = done;
-        });
-        return 'second-done';
-      },
-      { priority: 'manual' },
-    );
-
-    // Waiting queue count is now 1 (>= autoShedThreshold=1): auto compile must shed cleanly with 429 AUTO_COMPILE_SHED
+    // Active count is now 1 (>= autoShedThreshold=1): auto compile must shed immediately with 429 AUTO_COMPILE_SHED
     let shedErr: unknown;
     try {
-      await queue.schedule('proj-3', 'user-3', undefined, async () => 'auto', {
-        priority: 'auto',
-      });
+      await lockService.runWithLock(
+        'proj-3',
+        'user-3',
+        undefined,
+        async () => 'auto',
+        {
+          priority: 'auto',
+        },
+      );
     } catch (err) {
       shedErr = err;
     }
     expect(shedErr).toBeInstanceOf(HttpException);
     expect((shedErr as HttpException).getStatus()).toBe(429);
     expect((shedErr as HttpException).getResponse()).toEqual(
-      expect.objectContaining({ code: 'AUTO_COMPILE_SHED' }),
+      expect.objectContaining({
+        code: 'AUTO_COMPILE_SHED',
+        status: 'autocompile-backoff',
+      }),
     );
 
-    // Manual compile for proj-3 is still accepted into remaining queue slots
-    const thirdPromise = queue.schedule(
-      'proj-3',
-      'user-3',
-      undefined,
-      async () => 'third-manual-done',
-      { priority: 'manual' },
+    // Manual compile for proj-2 is still accepted and runs concurrently (active count becomes 2 == maxConcurrentCompiles)
+    let releaseSecond!: () => void;
+    let secondPromise!: Promise<string>;
+    const secondEntered = new Promise<void>((resolve) => {
+      secondPromise = lockService.runWithLock(
+        'proj-2',
+        'user-2',
+        undefined,
+        async () => {
+          resolve();
+          await new Promise<void>((done) => {
+            releaseSecond = done;
+          });
+          return 'second-done';
+        },
+        { priority: 'manual' },
+      );
+    });
+    await secondEntered;
+
+    // Active count is now 2 (== maxConcurrentCompiles=2): 3rd concurrent project fails fast (0ms, no queue) with 503 TOO_MANY_COMPILE_REQUESTS
+    let capErr: unknown;
+    try {
+      await lockService.runWithLock(
+        'proj-3',
+        'user-3',
+        undefined,
+        async () => 'third-manual',
+        { priority: 'manual' },
+      );
+    } catch (err) {
+      capErr = err;
+    }
+    expect(capErr).toBeInstanceOf(HttpException);
+    expect((capErr as HttpException).getStatus()).toBe(503);
+    expect((capErr as HttpException).getResponse()).toEqual(
+      expect.objectContaining({
+        code: 'TOO_MANY_COMPILE_REQUESTS',
+        status: 'unavailable',
+        message: 'too many concurrent compile requests',
+      }),
     );
 
     releaseFirst();
-    await new Promise((r) => setTimeout(r, 10));
-    releaseSecondQueued?.();
+    releaseSecond();
     await expect(secondPromise).resolves.toBe('second-done');
-    await expect(thirdPromise).resolves.toBe('third-manual-done');
 
     // Rate limit exhaustion emits structured 429 COMPILE_RATE_LIMITED
-    await queue.schedule('proj-rate', 'user-rate', undefined, async () => 1);
-    await queue.schedule('proj-rate', 'user-rate', undefined, async () => 2);
+    await lockService.runWithLock(
+      'proj-rate',
+      'user-rate',
+      undefined,
+      async () => 1,
+    );
+    await lockService.runWithLock(
+      'proj-rate',
+      'user-rate',
+      undefined,
+      async () => 2,
+    );
     let rateErr: unknown;
     try {
-      await queue.schedule('proj-rate', 'user-rate', undefined, async () => 3);
+      await lockService.runWithLock(
+        'proj-rate',
+        'user-rate',
+        undefined,
+        async () => 3,
+      );
     } catch (err) {
       rateErr = err;
     }
@@ -562,10 +603,10 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
       expect.objectContaining({ code: 'COMPILE_RATE_LIMITED' }),
     );
 
-    queue.onModuleDestroy();
+    lockService.onModuleDestroy();
   });
 
-  it('ClsiService.compileInline forwards dto.priority into CompileQueueService.schedule', async () => {
+  it('ClsiService.compileInline forwards dto.priority into CompileLockService.runWithLock', async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'clsi-prio-'));
     try {
       const workspace = new WorkspaceRepository(tmpRoot);
@@ -602,8 +643,8 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
         tryRemoteClsiCompile: jest.fn().mockResolvedValue(null),
       } as unknown as RemoteClsiClientAdapter;
 
-      const fairQueue = new CompileQueueService();
-      const scheduleSpy = jest.spyOn(fairQueue, 'schedule');
+      const compileLock = new CompileLockService();
+      const runWithLockSpy = jest.spyOn(compileLock, 'runWithLock');
 
       const clsi = new ClsiService(
         { get: jest.fn(() => undefined) } as unknown as ConfigService,
@@ -620,7 +661,7 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
         undefined,
         undefined,
         mockPipeline,
-        fairQueue,
+        compileLock,
       );
 
       await clsi.compileInline({
@@ -630,7 +671,7 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
         priority: 'auto',
       });
 
-      expect(scheduleSpy).toHaveBeenCalledWith(
+      expect(runWithLockSpy).toHaveBeenCalledWith(
         PAGE_ID,
         undefined,
         undefined,
@@ -643,8 +684,8 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
     }
   });
 
-  it('CompileQueueService batches rapid onLogChunk bursts bounded by maxLogChunkBytes and clears timer on settle', async () => {
-    const queue = new CompileQueueService({
+  it('CompileLockService batches rapid onLogChunk bursts bounded by maxLogChunkBytes and clears timer on settle', async () => {
+    const lockService = new CompileLockService({
       maxConcurrentCompiles: 1,
       logChunkFlushIntervalMs: 30,
       maxLogChunkBytes: 64,
@@ -654,7 +695,7 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
       broadcastCompileProgress: broadcastMock,
     } as unknown as RealtimeFacade;
 
-    await queue.schedule(
+    await lockService.runWithLock(
       'proj-batch-logs',
       'user-batch',
       realtimeMock,
@@ -673,7 +714,9 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
     const chunkCalls = broadcastMock.mock.calls.filter(([, payload]) => {
       const p = payload as { status?: string; logs?: string[] };
       return (
-        p.status === 'compiling' && !p.logs?.[0]?.startsWith('[CLSI Queue]')
+        p.status === 'compiling' &&
+        !p.logs?.[0]?.startsWith('[CLSI Queue]') &&
+        !p.logs?.[0]?.startsWith('[CLSI]')
       );
     });
     expect(chunkCalls).toHaveLength(1);
@@ -682,7 +725,7 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
     expect(flushedText).toContain('CHUNK_9_');
     expect(flushedText).not.toContain('TRAILING_UNFLUSHED_CHUNK');
 
-    queue.onModuleDestroy();
+    lockService.onModuleDestroy();
   });
 
   it('ClsiService.compileInline broadcasts lightweight completion summary metadata instead of large raw logs', async () => {
@@ -1184,197 +1227,406 @@ describe('Block 3 CLSI Compile Pipeline & Remote Contract Regression Tests', () 
       expect(body.engine).toBeUndefined();
     });
 
-    it('CompileQueueService prioritizes manual builds ahead of queued auto builds across projects', async () => {
-      const queue = new CompileQueueService({
+    it('CompileLockService enforces fail-fast compileConcurrencyLimit without a waiting queue and releases slot immediately upon completion (Overleaf LockManager.js:39-51)', async () => {
+      const lockService = new CompileLockService({
         maxConcurrentCompiles: 1,
-        maxQueueLength: 10,
-        autoShedThreshold: 8,
+        autoShedThreshold: 1,
       });
 
       const executionOrder: string[] = [];
       let releaseActive!: () => void;
+      let activePromise!: Promise<string>;
       const activeStarted = new Promise<void>((resolve) => {
-        void queue.schedule('proj-active', 'user-1', undefined, async () => {
-          executionOrder.push('proj-active');
-          resolve();
-          await new Promise<void>((done) => {
-            releaseActive = done;
-          });
-          return 'active-done';
-        });
+        activePromise = lockService.runWithLock(
+          'proj-active',
+          'user-1',
+          undefined,
+          async () => {
+            executionOrder.push('proj-active');
+            resolve();
+            await new Promise<void>((done) => {
+              releaseActive = done;
+            });
+            return 'active-done';
+          },
+        );
       });
       await activeStarted;
 
-      const autoB = queue.schedule(
-        'proj-auto-b',
+      // While slot is occupied, another project fails fast with 503 TOO_MANY_COMPILE_REQUESTS (no waiting queue)
+      await expect(
+        lockService.runWithLock(
+          'proj-manual-b',
+          'user-b',
+          undefined,
+          async () => 'b-done',
+          { priority: 'manual' },
+        ),
+      ).rejects.toMatchObject({
+        status: 503,
+        response: expect.objectContaining({
+          code: 'TOO_MANY_COMPILE_REQUESTS',
+          status: 'unavailable',
+        }),
+      });
+
+      // As soon as proj-active finishes and releases its lock, proj-manual-b executes immediately
+      releaseActive();
+      await expect(activePromise).resolves.toBe('active-done');
+
+      const bRes = await lockService.runWithLock(
+        'proj-manual-b',
         'user-b',
         undefined,
         async () => {
-          executionOrder.push('proj-auto-b');
+          executionOrder.push('proj-manual-b');
           return 'b-done';
         },
-        { priority: 'auto' },
-      );
-
-      const autoC = queue.schedule(
-        'proj-auto-c',
-        'user-c',
-        undefined,
-        async () => {
-          executionOrder.push('proj-auto-c');
-          return 'c-done';
-        },
-        { priority: 'auto' },
-      );
-
-      const manualD = queue.schedule(
-        'proj-manual-d',
-        'user-d',
-        undefined,
-        async () => {
-          executionOrder.push('proj-manual-d');
-          return 'd-done';
-        },
         { priority: 'manual' },
       );
-
-      releaseActive();
-      await Promise.all([autoB, autoC, manualD]);
-
-      expect(executionOrder).toEqual([
-        'proj-active',
-        'proj-manual-d',
-        'proj-auto-b',
-        'proj-auto-c',
-      ]);
-      queue.onModuleDestroy();
+      expect(bRes).toBe('b-done');
+      expect(executionOrder).toEqual(['proj-active', 'proj-manual-b']);
+      lockService.onModuleDestroy();
     });
 
-    it('CompileQueueService transfers wait-queue slot reservation in-place, promotes auto->manual, and does not double-count rate limit when superseding a queued build', async () => {
-      const queue = new CompileQueueService({
-        maxConcurrentCompiles: 1,
-        maxQueueLength: 10,
-        autoShedThreshold: 8,
-        maxCompilesPerMinute: 2,
-      });
-
-      const executionOrder: string[] = [];
-      let releaseHolder!: () => void;
-      const holderStarted = new Promise<void>((resolve) => {
-        void queue.schedule('proj-holder', 'user-h', undefined, async () => {
-          resolve();
-          await new Promise<void>((done) => {
-            releaseHolder = done;
-          });
-          return 'holder';
-        });
-      });
-      await holderStarted;
-
-      // proj-target enters wait queue at position #1 (as auto)
-      const firstQueuedPromise = queue.schedule(
-        'proj-target',
-        'user-t',
-        undefined,
-        async () => {
-          executionOrder.push('proj-target-v1');
-          return 'v1';
-        },
-        { priority: 'auto' },
-      );
-
-      // proj-other enters wait queue at position #2 (as manual)
-      const otherQueuedPromise = queue.schedule(
-        'proj-other',
-        'user-o',
-        undefined,
-        async () => {
-          executionOrder.push('proj-other');
-          return 'other';
-        },
-        { priority: 'manual' },
-      );
-
-      // Supersede proj-target while still queued, upgrading priority to manual
-      const secondQueuedPromise = queue.schedule(
-        'proj-target',
-        'user-t',
-        undefined,
-        async () => {
-          executionOrder.push('proj-target-v2');
-          return 'v2';
-        },
-        { priority: 'manual' },
-      );
-
-      await expect(firstQueuedPromise).rejects.toMatchObject({
-        status: 409,
-      });
-
-      releaseHolder();
-      await expect(secondQueuedPromise).resolves.toBe('v2');
-      await expect(otherQueuedPromise).resolves.toBe('other');
-
-      // proj-target preserved its #1 manual turn ahead of proj-other
-      expect(executionOrder).toEqual(['proj-target-v2', 'proj-other']);
-
-      // Because v1 was superseded while still in the wait queue (0 CPU used),
-      // proj-target only consumed 1 of its 2 compiles/min budget and can run once more!
-      await expect(
-        queue.schedule('proj-target', 'user-t', undefined, async () => 'v3'),
-      ).resolves.toBe('v3');
-
-      queue.onModuleDestroy();
-    });
-
-    it('CompileQueueService coalesces concurrent identical-fingerprint compiles in the same project without aborting or re-running', async () => {
-      const queue = new CompileQueueService({
+    it('CompileLockService isolates locks per (projectId, userId) so User 1 and User 2 in the same project compile concurrently and User 2 cannot cancel User 1 (Overleaf CompileManager.js:51-57, 415-428)', async () => {
+      const lockService = new CompileLockService({
         maxConcurrentCompiles: 2,
         maxCompilesPerMinute: 2,
       });
 
-      let runCount = 0;
-      let releaseBuild!: () => void;
-      let markStarted!: () => void;
-      const buildStarted = new Promise<void>((resolve) => {
-        markStarted = resolve;
+      const executedBuilds: string[] = [];
+      let releaseUser1Build!: () => void;
+      let markUser1Running!: () => void;
+      const user1Running = new Promise<void>((resolve) => {
+        markUser1Running = resolve;
       });
 
-      const userAPromise = queue.schedule(
-        'proj-collab',
-        'user-a',
+      // User 1 starts compiling proj-paper (acquires lock `proj-paper-user-1`)
+      const user1Promise = lockService.runWithLock(
+        'proj-paper',
+        'user-1',
         undefined,
-        async () => {
-          runCount++;
-          queue.registerFingerprint('proj-collab', 'fp-identical-123');
-          markStarted();
+        async (signal) => {
+          executedBuilds.push('user-1-build');
+          markUser1Running();
           await new Promise<void>((done) => {
-            releaseBuild = done;
+            releaseUser1Build = done;
           });
-          return { pdf: 'shared-pdf-bytes' };
+          expect(signal.aborted).toBe(false);
+          return 'pdf-user-1';
         },
       );
-      await buildStarted;
+      await user1Running;
 
-      // User B in the same project triggers compile with the exact same fingerprint while User A's build is running
-      const userBPromise = queue.schedule(
-        'proj-collab',
-        'user-b',
+      // User 2 (a different user in the same project) attempts to cancel User 1's compile:
+      // Per Overleaf stopCompile(projectId, userId), User 2 only targets `proj-paper-user-2` and CANNOT cancel User 1!
+      expect(lockService.cancel('proj-paper', 'user-2')).toBe(false);
+      expect(lockService.isInFlight('proj-paper', 'user-1')).toBe(true);
+
+      // User 2 in the same project triggers compile while User 1 is still compiling:
+      // Per Overleaf getCompileName(projectId, userId) = `${projectId}-${userId}`,
+      // User 2 acquires `proj-paper-user-2` and compiles concurrently without being blocked by User 1!
+      const user2Result = await lockService.runWithLock(
+        'proj-paper',
+        'user-2',
         undefined,
         async () => {
-          runCount++;
-          return { pdf: 'should-not-run-twice' };
+          executedBuilds.push('user-2-build');
+          return 'pdf-user-2';
         },
-        { fingerprint: 'fp-identical-123' },
+      );
+      expect(user2Result).toBe('pdf-user-2');
+
+      // Meanwhile, if User 1 sends a duplicate overlapping compile request while `proj-paper-user-1` is still running,
+      // LockManager rejects it with HTTP 423 Locked (`compile-in-progress`) without killing User 1's active build
+      let dupErr: unknown;
+      try {
+        await lockService.runWithLock(
+          'proj-paper',
+          'user-1',
+          undefined,
+          async () => 'dup',
+        );
+      } catch (e) {
+        dupErr = e;
+      }
+      expect(dupErr).toBeInstanceOf(HttpException);
+      expect((dupErr as HttpException).getStatus()).toBe(423);
+      expect((dupErr as HttpException).getResponse()).toEqual(
+        expect.objectContaining({
+          code: 'COMPILE_IN_PROGRESS',
+          status: 'compile-in-progress',
+          message: 'compile in progress',
+        }),
       );
 
-      releaseBuild();
-      const [resA, resB] = await Promise.all([userAPromise, userBPromise]);
-      expect(resA).toEqual({ pdf: 'shared-pdf-bytes' });
-      expect(resB).toEqual({ pdf: 'shared-pdf-bytes' });
-      expect(runCount).toBe(1);
+      // User 1's active build finishes cleanly
+      releaseUser1Build();
+      await expect(user1Promise).resolves.toBe('pdf-user-1');
+      expect(executedBuilds).toEqual(['user-1-build', 'user-2-build']);
 
-      queue.onModuleDestroy();
+      lockService.onModuleDestroy();
+    });
+
+    it('CompileLockService stops active compile and waits for lock release when forceClean is true (Overleaf CompileController.js:234-245 clearCache parity)', async () => {
+      const lockService = new CompileLockService({
+        maxConcurrentCompiles: 2,
+      });
+
+      let firstSignalAborted = false;
+      let markFirstRunning!: () => void;
+      const firstRunning = new Promise<void>((resolve) => {
+        markFirstRunning = resolve;
+      });
+
+      const firstPromise = lockService.runWithLock(
+        'proj-clean',
+        'user-1',
+        undefined,
+        async (signal) => {
+          markFirstRunning();
+          await new Promise<void>((resolve) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                firstSignalAborted = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          return 'aborted-v1';
+        },
+      );
+      await firstRunning;
+
+      const cleanPromise = lockService.runWithLock(
+        'proj-clean',
+        'user-1',
+        undefined,
+        async () => 'clean-v2',
+        { forceClean: true },
+      );
+
+      await expect(firstPromise).resolves.toBe('aborted-v1');
+      await expect(cleanPromise).resolves.toBe('clean-v2');
+      expect(firstSignalAborted).toBe(true);
+
+      lockService.onModuleDestroy();
+    });
+
+    it('WorkspacePlannerService.hydrateFiles + WorkspaceRepository.syncFiles achieve O(Delta D + Delta S_bin) by querying only changed rev docs from DB and using 0-byte disk placeholders for unchanged binaries', async () => {
+      const tmpRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'clsi-delta-o1-'),
+      );
+      try {
+        const workspace = new WorkspaceRepository(tmpRoot);
+        const scratchDir = await workspace.ensureScratch(PAGE_ID);
+        const figBytes = Buffer.from('heavy-50mb-figure-simulation-bytes');
+
+        // Seed initial sync of 3 docs + 1 binary image onto disk
+        await workspace.syncFiles(PAGE_ID, [
+          {
+            path: 'main.tex',
+            content:
+              '\\documentclass{article}\n\\input{ch1}\n\\input{ch2}\n\\begin{document}Main\\end{document}',
+          },
+          { path: 'ch1.tex', content: 'Chapter 1 initial' },
+          { path: 'ch2.tex', content: 'Chapter 2 initial' },
+          { path: 'fig.png', content: figBytes },
+        ]);
+
+        const baseNodes = [
+          {
+            id: 'n-main',
+            docId: 'doc-main',
+            fileId: null,
+            path: '/main.tex',
+            name: 'main.tex',
+            type: 'DOC',
+            isRootDoc: true,
+          },
+          {
+            id: 'n-ch1',
+            docId: 'doc-ch1',
+            fileId: null,
+            path: '/ch1.tex',
+            name: 'ch1.tex',
+            type: 'DOC',
+            isRootDoc: false,
+          },
+          {
+            id: 'n-ch2',
+            docId: 'doc-ch2',
+            fileId: null,
+            path: '/ch2.tex',
+            name: 'ch2.tex',
+            type: 'DOC',
+            isRootDoc: false,
+          },
+          {
+            id: 'n-fig',
+            docId: null,
+            fileId: 'file-fig',
+            path: '/fig.png',
+            name: 'fig.png',
+            type: 'FILE',
+            isRootDoc: false,
+          },
+        ];
+
+        const baseBinaryFiles = [
+          {
+            id: 'file-fig',
+            name: 'fig.png',
+            sizeBytes: figBytes.length,
+            hash: 'a'.repeat(64),
+          },
+        ];
+
+        const plan1 = planDbFileSet({
+          nodes: baseNodes,
+          docs: [
+            {
+              id: 'doc-main',
+              path: '/main.tex',
+              rev: 1,
+              sizeBytes: 82,
+              updatedAt: now,
+            },
+            {
+              id: 'doc-ch1',
+              path: '/ch1.tex',
+              rev: 1,
+              sizeBytes: 17,
+              updatedAt: now,
+            },
+            {
+              id: 'doc-ch2',
+              path: '/ch2.tex',
+              rev: 1,
+              sizeBytes: 17,
+              updatedAt: now,
+            },
+          ],
+          binaryFiles: baseBinaryFiles,
+          incomingFiles: {},
+          source: '',
+          pageId: PAGE_ID,
+        });
+
+        const docRowsById: Record<string, string[]> = {
+          'doc-main': [
+            '\\documentclass{article}',
+            '\\input{ch1}',
+            '\\input{ch2}',
+            '\\begin{document}Main\\end{document}',
+          ],
+          'doc-ch1': ['Chapter 1 initial'],
+          'doc-ch2': ['Chapter 2 initial'],
+        };
+
+        const findManyMock = jest.fn(
+          async ({ where }: { where: { id: { in: string[] } } }) =>
+            where.id.in.map((id) => ({
+              id,
+              lines: docRowsById[id] || [],
+              inStorage: false,
+              sizeBytes: 20,
+            })),
+        );
+        const openReadStreamMock = jest.fn();
+
+        const planner = new WorkspacePlannerService(
+          {
+            pageDoc: { findMany: findManyMock },
+          } as unknown as never,
+          undefined,
+          { openReadStream: openReadStreamMock } as unknown as never,
+          undefined,
+          workspace,
+        );
+
+        // 1st hydrate: fetches all 3 docs from DB, but skips reading fig.png from disk into RAM (0-byte sentinel)
+        const hydrated1 = await planner.hydrateFiles(SPACE_ID, plan1, PAGE_ID, {
+          deltaOnlyOnDisk: true,
+        });
+        expect(findManyMock).toHaveBeenCalledTimes(1);
+        expect(findManyMock.mock.calls[0][0].where.id.in.sort()).toEqual([
+          'doc-ch1',
+          'doc-ch2',
+          'doc-main',
+        ]);
+        expect(openReadStreamMock).not.toHaveBeenCalled();
+        expect(Buffer.isBuffer(hydrated1['fig.png'])).toBe(true);
+        expect((hydrated1['fig.png'] as Buffer).byteLength).toBe(0);
+
+        // 2nd hydrate: User 2 edits ONLY ch2.tex (rev 1 -> 2).
+        // findManyMock must query ONLY ['doc-ch2'] (O(Delta D) = 1 doc instead of 3)!
+        docRowsById['doc-ch2'] = ['Chapter 2 updated by User 2'];
+        const plan2 = planDbFileSet({
+          nodes: baseNodes,
+          docs: [
+            {
+              id: 'doc-main',
+              path: '/main.tex',
+              rev: 1,
+              sizeBytes: 82,
+              updatedAt: now,
+            },
+            {
+              id: 'doc-ch1',
+              path: '/ch1.tex',
+              rev: 1,
+              sizeBytes: 17,
+              updatedAt: now,
+            },
+            {
+              id: 'doc-ch2',
+              path: '/ch2.tex',
+              rev: 2,
+              sizeBytes: 27,
+              updatedAt: new Date(now.getTime() + 1000),
+            },
+          ],
+          binaryFiles: baseBinaryFiles,
+          incomingFiles: {},
+          source: '',
+          pageId: PAGE_ID,
+        });
+
+        const hydrated2 = await planner.hydrateFiles(SPACE_ID, plan2, PAGE_ID, {
+          deltaOnlyOnDisk: true,
+        });
+        expect(findManyMock).toHaveBeenCalledTimes(2);
+        expect(findManyMock.mock.calls[1][0].where.id.in).toEqual(['doc-ch2']);
+        expect((hydrated2['fig.png'] as Buffer).byteLength).toBe(0);
+
+        const syncStats2 = await workspace.syncFiles(
+          PAGE_ID,
+          Object.entries(hydrated2).map(([p, content]) => ({
+            path: p,
+            content,
+          })),
+        );
+        expect(syncStats2).toEqual({
+          written: 1,
+          unchanged: 3,
+          deleted: 0,
+        });
+
+        // Verify on-disk fig.png was preserved intact without being overwritten by the 0-byte sentinel
+        const figOnDisk = await fs.readFile(path.join(scratchDir, 'fig.png'));
+        expect(figOnDisk).toEqual(figBytes);
+        const ch2OnDisk = await fs.readFile(
+          path.join(scratchDir, 'ch2.tex'),
+          'utf8',
+        );
+        expect(ch2OnDisk).toBe('Chapter 2 updated by User 2');
+      } finally {
+        await fs.rm(tmpRoot, { recursive: true, force: true });
+      }
     });
   });
 });

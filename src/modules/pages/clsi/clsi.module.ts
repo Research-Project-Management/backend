@@ -36,7 +36,7 @@ import {
   extractSandboxEnvFromConfigService,
   ClsiSandboxConfig,
 } from './services/sandbox/sandbox-config';
-import { CompileQueueService } from './services/compile-queue.service';
+import { CompileLockService } from './services/compile-lock.service';
 
 export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
 export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
@@ -120,7 +120,7 @@ const inProcessClsiWorkers =
       ) => new CompilePipeline(workspace, latexmkEngine),
       inject: [WorkspaceRepository, LatexmkEngine],
     },
-    CompileQueueService,
+    CompileLockService,
     ClsiService,
     ...inProcessClsiWorkers,
   ],

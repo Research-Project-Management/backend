@@ -174,8 +174,15 @@ export class CommentsService {
     status?: string,
     routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
+    pagination?: { cursor?: string; limit?: number },
   ) {
-    if (!isUuid(targetId)) return { comments: [] };
+    const isPaginated =
+      pagination?.limit !== undefined || Boolean(pagination?.cursor);
+    if (!isUuid(targetId)) {
+      return isPaginated
+        ? { comments: [], nextCursor: null, hasMore: false }
+        : { comments: [] };
+    }
     try {
       const { docId, spaceId: resolvedSpace } = await this.resolveTarget(
         targetId,
@@ -186,34 +193,56 @@ export class CommentsService {
         this.pageService.resolveActiveProjectId(authSpace) ||
         routeSpaceId;
       const docTargetId = docId || targetId;
-      if (!spaceId) return { comments: [] };
+      if (!spaceId) {
+        return isPaginated
+          ? { comments: [], nextCursor: null, hasMore: false }
+          : { comments: [] };
+      }
 
       const isResolved =
         status === 'resolved' ? true : status === 'open' ? false : undefined;
-      const threads = await this.repo.listThreads(
-        spaceId,
-        docTargetId,
-        isResolved,
-      );
+
+      let threads: Awaited<ReturnType<typeof this.repo.listThreads>>;
+      let nextCursor: string | null = null;
+      let hasMore = false;
+
+      if (isPaginated) {
+        const page = await this.repo.listThreadsPaginated(
+          spaceId,
+          docTargetId,
+          {
+            isResolved,
+            cursor: pagination?.cursor,
+            limit: pagination?.limit,
+          },
+        );
+        threads = page.items;
+        nextCursor = page.nextCursor;
+        hasMore = page.hasMore;
+      } else {
+        threads = await this.repo.listThreads(spaceId, docTargetId, isResolved);
+      }
+
       const userIds: (string | null | undefined)[] = [];
       for (const t of threads) {
         userIds.push(t.createdById);
         for (const r of t.replies) userIds.push(r.createdById);
       }
       const userMap = await this.userResolver.resolveUserNames(userIds);
-      return {
-        comments: threads.map((t) =>
-          toCommentDto(t, userMap, {
-            includeAvatar: true,
-            includeDocId: false,
-          }),
-        ),
-      };
+      const comments = threads.map((t) =>
+        toCommentDto(t, userMap, {
+          includeAvatar: true,
+          includeDocId: false,
+        }),
+      );
+      return isPaginated ? { comments, nextCursor, hasMore } : { comments };
     } catch (err: unknown) {
       this.logger.warn(
         `Failed to list comments for ${targetId}: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return { comments: [] };
+      return isPaginated
+        ? { comments: [], nextCursor: null, hasMore: false }
+        : { comments: [] };
     }
   }
 
