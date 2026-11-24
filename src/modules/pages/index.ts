@@ -13,9 +13,9 @@ export * from './filestore';
 export * from './docstore';
 export * from './structure';
 
-// Subsystem 3: Compilation & Diagnostics
-export * from './diagnostics';
-export * from './clsi';
+// Subsystem 3: Compilation & CLSI
+export * from './clsi/clsi.module';
+export * from './clsi/clsi.controller';
 
 // Subsystem 4: Review & Versioning
 export * from './review/review.module';
@@ -32,19 +32,22 @@ export * from './review/domain/review.errors';
 export * from './review/domain/review.policy';
 export * from './review/domain/review.mapper';
 export * from './history/history.module';
-export * from './history/controllers/history.controller';
-export * from './history/services/history.service';
-export * from './history/repositories/history.repository';
+export * from './history/history.controller';
+export * from './history/services/snapshot.service';
+export * from './history/services/diff.service';
+export * from './history/services/label.service';
+export * from './history/services/restore.service';
+export * from './history/history.repository';
 export * from './history/adapters/snapshot-collector.adapter';
 export * from './history/adapters/snapshot-restorer.adapter';
 export * from './history/dto/history.dto';
-export * from './history/domain/diff.domain';
-export * from './history/domain/file-snapshot.domain';
-export * from './history/domain/snapshot.domain';
+export * from './history/domain/diff.engine';
+export * from './history/domain/file-snapshot.vo';
+export * from './history/domain/snapshot.entity';
 export * from './history/domain/snapshot.mapper';
-export * from './history/domain/version-label.domain';
-export * from './history/domain/history.errors';
-export * from './history/domain/history.ports';
+export * from './history/domain/label.entity';
+export * from './history/domain/errors';
+export * from './history/domain/ports';
 
 // Subsystem 5: Academic Authoring & Packaging
 export * from './spelling';

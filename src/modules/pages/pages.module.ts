@@ -21,8 +21,7 @@ import { FilestoreModule } from './filestore/filestore.module';
 import { DocstoreModule } from './docstore/docstore.module';
 import { StructureModule } from './structure/structure.module';
 
-// Subsystem 3: Compilation & Diagnostics
-import { DiagnosticsModule } from './diagnostics/diagnostics.module';
+// Subsystem 3: Compilation
 import { ClsiModule } from './clsi/clsi.module';
 
 // Subsystem 4: Review & Versioning
@@ -49,8 +48,7 @@ import { PagesFacade } from './pages.facade';
     DocstoreModule,
     StructureModule,
 
-    // Tier 2 (Subsystem 3): Compilation & Diagnostics
-    DiagnosticsModule,
+    // Tier 2 (Subsystem 3): Compilation
     ClsiModule,
 
     // Tier 3 (Subsystem 4): Review & Versioning
@@ -78,8 +76,7 @@ import { PagesFacade } from './pages.facade';
     DocstoreModule,
     StructureModule,
 
-    // Subsystem 3: Compilation & Diagnostics
-    DiagnosticsModule,
+    // Subsystem 3: Compilation
     ClsiModule,
 
     // Subsystem 4: Review & Versioning

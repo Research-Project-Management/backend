@@ -9,7 +9,7 @@ import {
   FileSnapshotVo,
   FileSnapshotProps,
   FileSnapshotType,
-} from './file-snapshot.domain';
+} from './file-snapshot.vo';
 
 export interface RawSnapshotFileEntry {
   path?: string;

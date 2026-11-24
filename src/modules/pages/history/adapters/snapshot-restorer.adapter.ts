@@ -19,15 +19,15 @@ import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
-import { HistoryRepository } from '../repositories/history.repository';
+import { HistoryRepository } from '../history.repository';
 import {
   ISnapshotRestorerPort,
   RestoreResult,
   RestoreSingleFileResult,
-} from '../domain/history.ports';
-import { Snapshot } from '../domain/snapshot.domain';
-import { FileSnapshotVo } from '../domain/file-snapshot.domain';
-import { SnapshotFileNotFoundException } from '../domain/history.errors';
+} from '../domain/ports';
+import { Snapshot } from '../domain/snapshot.entity';
+import { FileSnapshotVo } from '../domain/file-snapshot.vo';
+import { SnapshotFileNotFoundException } from '../domain/errors';
 
 @Injectable()
 export class SnapshotRestorerAdapter extends ISnapshotRestorerPort {

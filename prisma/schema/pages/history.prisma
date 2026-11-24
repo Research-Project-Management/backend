@@ -34,6 +34,7 @@ model PageSnapshot {
   @@unique([id, pageId], map: "uq_page_snapshots_id_page")
   @@unique([pageId, version], map: "uq_page_snapshots_page_version")
   @@index([spaceId, version], map: "idx_page_snapshots_space_version")
+  @@index([spaceId, isAutomatic, createdAt], map: "idx_page_snapshots_compaction")
   @@index([pageId, createdAt(sort: Desc)], map: "idx_page_snapshots_page_created_desc")
   @@map("page_snapshots")
 }

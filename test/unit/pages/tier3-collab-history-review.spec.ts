@@ -12,23 +12,24 @@ import {
   PAGES_REALTIME_DEFAULTS,
   PagesRealtimeConfigService,
 } from '@/modules/realtime/channels/pages/config';
-import { Snapshot } from '@/modules/pages/history/domain/snapshot.domain';
+import { Snapshot } from '@/modules/pages/history/domain/snapshot.entity';
 import {
   VersionLabel,
   InvalidVersionLabelException,
-} from '@/modules/pages/history/domain/version-label.domain';
+} from '@/modules/pages/history/domain/label.entity';
 import {
   VersionNotFoundException,
   DuplicateLabelException,
   EmptyProjectException,
-} from '@/modules/pages/history/domain/history.errors';
-import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.domain';
-import { DiffEngine } from '@/modules/pages/history/domain/diff.domain';
+} from '@/modules/pages/history/domain/errors';
+import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.vo';
+import { DiffEngine } from '@/modules/pages/history/domain/diff.engine';
 import {
   HistoryMapper,
   HistoryRepository,
-} from '@/modules/pages/history/repositories/history.repository';
-import { HistoryService } from '@/modules/pages/history/services/history.service';
+} from '@/modules/pages/history/history.repository';
+import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
+import { RestoreService } from '@/modules/pages/history/services/restore.service';
 import type { SnapshotCollectorAdapter } from '@/modules/pages/history/adapters/snapshot-collector.adapter';
 import type { SnapshotRestorerAdapter } from '@/modules/pages/history/adapters/snapshot-restorer.adapter';
 import { TrackChange } from '@/modules/pages/review/domain/change.domain';
@@ -270,14 +271,8 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
         }),
       } as unknown as SnapshotRestorerAdapter;
 
-      const service = new HistoryService(
-        mockRepo,
-        mockCollector,
-        mockRestorer,
-        undefined,
-        undefined,
-        new DiffEngine(),
-      );
+      const snapshots = new SnapshotService(mockRepo, mockCollector);
+      const service = new RestoreService(mockRepo, mockRestorer, snapshots);
 
       const res = await service.restoreSingleFile(
         SPACE_ID,

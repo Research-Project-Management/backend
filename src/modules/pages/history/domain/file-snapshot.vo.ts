@@ -1,5 +1,5 @@
 /**
- * project-history/core/domain/value-objects/file-snapshot.domain.ts
+ * project-history/core/domain/value-objects/file-snapshot.vo.ts
  * Value Object representing an immutable file entry in a project history snapshot.
  */
 

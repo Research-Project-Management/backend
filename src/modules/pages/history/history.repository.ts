@@ -15,14 +15,14 @@ import {
   PageSnapshotFile as PrismaSnapshotFile,
   PageSnapshotLabel as PrismaLabel,
 } from '@prisma/client';
-import { IHistoryRepositoryPort } from '../domain/history.ports';
-import { Snapshot } from '../domain/snapshot.domain';
-import { VersionLabel } from '../domain/version-label.domain';
-import { FileSnapshotVo } from '../domain/file-snapshot.domain';
+import { IHistoryRepositoryPort } from './domain/ports';
+import { Snapshot } from './domain/snapshot.entity';
+import { VersionLabel } from './domain/label.entity';
+import { FileSnapshotVo } from './domain/file-snapshot.vo';
 import {
   SnapshotNormalizer,
   RawSnapshotFileEntry,
-} from '../domain/snapshot.mapper';
+} from './domain/snapshot.mapper';
 
 export type { RawSnapshotFileEntry };
 
@@ -557,5 +557,58 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     }
 
     return null;
+  }
+
+  /**
+   * Garbage-collects unreferenced HistoryBlob records (0 PageSnapshotFile references).
+   */
+  public async gcOrphanBlobs(): Promise<number> {
+    const result = await this.prisma.historyBlob.deleteMany({
+      where: {
+        snapshotFiles: { none: {} },
+      },
+    });
+    return result.count;
+  }
+
+  /**
+   * Compacts old automatic snapshots older than `olderThanDays` to at most 1 per (pageId, UTC day).
+   * Strictly preserves all manual snapshots (`isAutomatic: false`) and any labelled snapshots.
+   */
+  public async compactAutoSnapshots(
+    spaceId?: string,
+    olderThanDays = 30,
+  ): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+    const candidates = await this.prisma.pageSnapshot.findMany({
+      where: {
+        ...(spaceId ? { spaceId } : {}),
+        isAutomatic: true,
+        createdAt: { lt: cutoff },
+        labels: { none: {} },
+      },
+      select: { id: true, spaceId: true, pageId: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const keptBuckets = new Set<string>();
+    const idsToDelete: string[] = [];
+
+    for (const snap of candidates) {
+      const dayKey = snap.createdAt.toISOString().slice(0, 10);
+      const bucket = `${snap.spaceId}:${snap.pageId ?? '*'}:${dayKey}`;
+      if (keptBuckets.has(bucket)) {
+        idsToDelete.push(snap.id);
+      } else {
+        keptBuckets.add(bucket);
+      }
+    }
+
+    if (idsToDelete.length === 0) return 0;
+
+    const deleted = await this.prisma.pageSnapshot.deleteMany({
+      where: { id: { in: idsToDelete } },
+    });
+    return deleted.count;
   }
 }

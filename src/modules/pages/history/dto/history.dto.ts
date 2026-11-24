@@ -14,7 +14,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { FileDiffVo } from '../domain/history.ports';
+import { FileDiffVo } from '../domain/ports';
 
 export class CreateSnapshotDto {
   @ApiPropertyOptional({

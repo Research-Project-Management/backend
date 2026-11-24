@@ -37,7 +37,10 @@ import {
   UserRateLimit,
   UserRateLimitGuard,
 } from '@/core';
-import { HistoryService } from '../services/history.service';
+import { SnapshotService } from './services/snapshot.service';
+import { DiffService } from './services/diff.service';
+import { LabelService } from './services/label.service';
+import { RestoreService } from './services/restore.service';
 import {
   CreateSnapshotDto,
   LabelVersionDto,
@@ -49,7 +52,7 @@ import {
   SnapshotDetailDto,
   VersionListItemDto,
   VersionLabelDto,
-} from '../dto/history.dto';
+} from './dto/history.dto';
 
 @ApiTags('Pages - History & Snapshots')
 @ApiBearerAuth('JWT-auth')
@@ -57,7 +60,12 @@ import {
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class HistoryController {
-  constructor(private readonly historyService: HistoryService) {}
+  constructor(
+    private readonly snapshots: SnapshotService,
+    private readonly diff: DiffService,
+    private readonly labels: LabelService,
+    private readonly restore: RestoreService,
+  ) {}
 
   private resolveSpaceId(
     routeSpaceId: string,
@@ -84,7 +92,7 @@ export class HistoryController {
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ): Promise<VersionListItemDto[]> {
-    return await this.historyService.listVersions(
+    return await this.snapshots.listVersions(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       pageId,
     );
@@ -103,7 +111,7 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
-    return await this.historyService.createSnapshot(
+    return await this.snapshots.createSnapshot(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       dto,
       this.resolveUserId(req),
@@ -122,7 +130,7 @@ export class HistoryController {
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ): Promise<SnapshotDetailDto> {
-    return await this.historyService.getSnapshot(
+    return await this.snapshots.getSnapshot(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       version,
       pageId,
@@ -140,7 +148,7 @@ export class HistoryController {
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ): Promise<DiffResponseDto> {
-    return await this.historyService.compareVersions(
+    return await this.diff.compareVersions(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       query.baseVersion,
       query.targetVersion,
@@ -162,7 +170,7 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<VersionLabelDto> {
-    return await this.historyService.labelVersion(
+    return await this.labels.labelVersion(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       version,
       dto.label,
@@ -182,7 +190,7 @@ export class HistoryController {
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ): Promise<void> {
-    await this.historyService.deleteLabel(
+    await this.labels.deleteLabel(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       labelId,
       pageId,
@@ -203,7 +211,7 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ) {
-    return await this.historyService.restoreVersion(
+    return await this.restore.restoreVersion(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       dto.targetVersion,
       this.resolveUserId(req),
@@ -227,7 +235,7 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<RestoreSingleFileResponseDto> {
-    return await this.historyService.restoreSingleFile(
+    return await this.restore.restoreSingleFile(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       version,
       dto,
@@ -244,7 +252,7 @@ export class HistoryController {
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ): Promise<VersionLabelDto[]> {
-    return await this.historyService.listLabels(
+    return await this.labels.listLabels(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       pageId,
     );
@@ -261,7 +269,7 @@ export class HistoryController {
     @Param('contentHash') contentHash: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    return await this.historyService.getBlob(
+    return await this.snapshots.getBlob(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       contentHash,
     );
@@ -282,7 +290,7 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ) {
-    return await this.historyService.flushHistory(
+    return await this.snapshots.flushHistory(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       this.resolveUserId(req),
       pageId,
@@ -304,7 +312,7 @@ export class HistoryController {
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ): Promise<void> {
-    const result = await this.historyService.exportVersionZipStream(
+    const result = await this.snapshots.exportVersionZipStream(
       this.resolveSpaceId(routeSpaceId, resolvedSpace),
       version,
       projectName,
