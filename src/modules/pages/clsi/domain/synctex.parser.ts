@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/synctex.parser.ts
+ * modules/pages/clsi/domain/synctex.parser.ts
  * Pure in-process domain parser decompressing SyncTeX streams and resolving
  * forward/reverse coordinate mappings with indexed LRU caching.
  */

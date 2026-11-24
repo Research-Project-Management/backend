@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/draft-mode.manager.ts
+ * modules/pages/clsi/domain/draft-mode.manager.ts
  * Manages rapid compilation modes for academic papers:
  * 1. Visual Draft: Injects \PassOptionsToPackage{draft}{graphicx} so layout, text,
  *    citations, and equations render in < 1 second by replacing heavy graphics with bounding boxes.

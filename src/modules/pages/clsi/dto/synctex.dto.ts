@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/dto/synctex.dto.ts
+ * modules/pages/clsi/dto/synctex.dto.ts
  * Canonical Data Transfer Objects for Forward and Reverse SyncTeX navigation.
  */
 

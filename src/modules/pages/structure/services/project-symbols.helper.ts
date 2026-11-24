@@ -233,25 +233,25 @@ export function extractSingleDocSymbols(
     const rawContent = lines.join('\n');
     const parsedEntries = bibParser.parse(rawContent);
     for (const entry of parsedEntries) {
-      const json = entry.toJSON();
+      const json = entry.toJSON(filePath);
       docCitations.push({
         key: json.key,
-        type: json.entryType,
+        type: json.type,
         title: json.title,
-        author: json.author,
+        author: entry.authors.toDisplayString(),
         year: json.year,
         journal: json.journal,
-        booktitle: json.fields?.booktitle,
-        publisher: json.fields?.publisher,
+        booktitle: json.booktitle,
+        publisher: json.publisher,
         doi: json.doi,
-        url: json.fields?.url,
-        abstract: json.fields?.abstract,
-        volume: json.fields?.volume,
-        number: json.fields?.number,
-        pages: json.fields?.pages,
+        url: json.url,
+        abstract: json.abstract,
+        volume: json.volume,
+        number: json.number,
+        pages: json.pages,
         file: filePath,
         line: 1,
-        raw: json.rawBibtex,
+        raw: entry.toBibtexString(),
       });
     }
     return {

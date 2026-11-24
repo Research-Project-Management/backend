@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/bib-backend.detector.ts
+ * modules/pages/clsi/domain/bib-backend.detector.ts
  * Auto-detects whether the document requires modern Biber or traditional BibTeX,
  * and generates project-level .latexmkrc configuration matching Overleaf CLSI.
  */

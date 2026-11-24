@@ -89,8 +89,8 @@ import {
   EmptyProjectException,
   SnapshotFileNotFoundException,
   VersionNotFoundException,
-} from '@/modules/pages/history/domain/history.errors';
-import { InvalidVersionLabelException } from '@/modules/pages/history/domain/version-label.domain';
+} from '@/modules/pages/history/domain/errors';
+import { InvalidVersionLabelException } from '@/modules/pages/history/domain/label.entity';
 import {
   ChangeNotFoundError,
   InvalidChangeError,

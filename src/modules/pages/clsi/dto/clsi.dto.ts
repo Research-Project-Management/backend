@@ -1,5 +1,5 @@
 ﻿/**
- * modules/manuscripts/clsi/dto/clsi.dto.ts
+ * modules/pages/clsi/dto/clsi.dto.ts
  * Canonical Data Transfer Objects for the Common LaTeX Service Interface (CLSI).
  */
 
@@ -198,79 +198,4 @@ export class ClsiWordCountDto {
   @IsOptional()
   @IsObject()
   files?: Record<string, string>;
-}
-
-export class ClsiAiFixErrorDto {
-  @ApiProperty({ description: 'Compiler error message' })
-  @IsString()
-  errorMessage!: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  errorLine?: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  errorFile?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  detail?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  surroundingCode?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  fullCode?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  pageId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  spaceId?: string;
-}
-
-export class ClsiAiGenerateTableDto {
-  @ApiProperty({ description: 'Natural language description of the table' })
-  @IsString()
-  prompt!: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  spaceId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  pageId?: string;
-}
-
-export class ClsiAiGenerateEquationDto {
-  @ApiProperty({
-    description: 'Natural language description of the equation to generate',
-  })
-  @IsString()
-  prompt!: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  spaceId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  pageId?: string;
 }

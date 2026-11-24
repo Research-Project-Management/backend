@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/tex-word.counter.ts
+ * modules/pages/clsi/domain/tex-word.counter.ts
  * Pure in-process academic word and structural element counter following Overleaf texcount rules.
  */
 

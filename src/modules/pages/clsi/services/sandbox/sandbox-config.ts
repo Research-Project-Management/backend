@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/services/sandbox/sandbox-config.ts
+ * modules/pages/clsi/services/sandbox/sandbox-config.ts
  * Strongly typed configuration for CLSI compile sandbox isolation.
  * Enforces production fail-closed invariants.
  */
@@ -39,6 +39,23 @@ export interface ClsiSandboxConfig {
 export interface ParseSandboxConfigOptions {
   env?: Record<string, string | undefined>;
   isProduction?: boolean;
+}
+
+/**
+ * Resolves a TeX Live version (e.g. '2024', '2025', '2026') to a configured Docker image
+ * via `CLSI_TEXLIVE_IMAGE_<YEAR>`, falling back to the default sandbox image.
+ */
+export function resolveTexLiveImage(
+  texLiveVersion: string | undefined,
+  defaultImage: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const year = (texLiveVersion || '').trim();
+  if (/^\d{4}$/.test(year)) {
+    const override = (env[`CLSI_TEXLIVE_IMAGE_${year}`] || '').trim();
+    if (override) return override;
+  }
+  return defaultImage;
 }
 
 const DIGEST_REGEX = /^[^\s@]+@sha256:[0-9a-f]{64}$/;

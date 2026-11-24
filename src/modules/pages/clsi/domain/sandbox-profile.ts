@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/sandbox-profile.ts
+ * modules/pages/clsi/domain/sandbox-profile.ts
  * Security profile defining container sandbox resource limits and isolation parameters.
  * Normative defaults reflect Overleaf/Flux zero-trust compile requirements.
  */

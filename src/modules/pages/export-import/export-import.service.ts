@@ -50,7 +50,7 @@ import {
 } from './repositories/aggregator.repository';
 import { TemplatesService } from '@/modules/pages/templates/templates.service';
 import { TemplateNotFoundException } from '@/modules/pages/templates/domain';
-import { HistoryService } from '@/modules/pages/history/services/history.service';
+import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
 import {
   ExportZipQueryDto,
   ImportSummaryResponseDto,
@@ -85,7 +85,7 @@ export class ExportImportService {
   private readonly hydrator: IPageArchiveHydratorPort;
   private readonly templatesService?: TemplatesService;
   private readonly transpiler: IDocumentTranspilerPort;
-  private readonly projectHistoryService?: HistoryService;
+  private readonly snapshotService?: SnapshotService;
   private readonly docstoreService?: DocstoreService;
   private readonly pageScopeRepo?: ScopeRepository;
   private readonly liveCollab: LiveCollaborationPort;
@@ -96,7 +96,7 @@ export class ExportImportService {
     hydrator: PageArchiveHydratorAdapter,
     @Optional() templatesService?: TemplatesService,
     @Optional() transpiler?: TranspilerAdapter,
-    @Optional() projectHistoryService?: HistoryService,
+    @Optional() snapshotService?: SnapshotService,
     @Optional() docstoreService?: DocstoreService,
     @Optional() pageScopeRepo?: ScopeRepository,
     @Optional()
@@ -109,7 +109,7 @@ export class ExportImportService {
     this.templatesService = templatesService;
     this.transpiler =
       transpiler ?? new TranspilerAdapter(this.zipEngine as ZipAdapter);
-    this.projectHistoryService = projectHistoryService;
+    this.snapshotService = snapshotService;
     this.docstoreService = docstoreService;
     this.pageScopeRepo = pageScopeRepo;
     this.liveCollab =
@@ -237,9 +237,9 @@ export class ExportImportService {
     projectId: string,
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipStreamOutput> {
-    if (query?.version && this.projectHistoryService) {
+    if (query?.version && this.snapshotService) {
       const versionResult =
-        await this.projectHistoryService.exportVersionZipStream(
+        await this.snapshotService.exportVersionZipStream(
           projectId,
           Number(query.version),
           query.projectName,

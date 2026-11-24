@@ -109,28 +109,39 @@ export class BibEntry {
       .trim();
   }
 
-  public toJSON() {
-    const fieldsObj: Record<string, string> = {};
-    for (const [k, v] of this.fields.entries()) {
-      fieldsObj[k] = v;
-    }
-
-    const authorsDisplay = this.authors.toDisplayString();
+  public toJSON(sourceFile = 'references.bib') {
     return {
-      id: this.id,
       key: this.key.value,
-      entryType: this.entryType,
+      sourceFile,
       type: this.entryType,
-      title: this.title,
-      year: this.year,
-      journal: this.journal,
-      doi: this.doi,
-      author: authorsDisplay,
-      authorsDisplay,
+      title: this.title ?? '',
       authors: this.authors.toFullNameList(),
-      displayLabel: this.getDisplayLabel(),
-      fields: fieldsObj,
-      rawBibtex: this.rawBibtex,
+      ...(this.year ? { year: this.year } : {}),
+      ...(this.cleanField(this.fields.get('journal'))
+        ? { journal: this.cleanField(this.fields.get('journal')) }
+        : {}),
+      ...(this.cleanField(this.fields.get('booktitle'))
+        ? { booktitle: this.cleanField(this.fields.get('booktitle')) }
+        : {}),
+      ...(this.cleanField(this.fields.get('publisher'))
+        ? { publisher: this.cleanField(this.fields.get('publisher')) }
+        : {}),
+      ...(this.cleanField(this.fields.get('volume'))
+        ? { volume: this.cleanField(this.fields.get('volume')) }
+        : {}),
+      ...(this.cleanField(this.fields.get('number'))
+        ? { number: this.cleanField(this.fields.get('number')) }
+        : {}),
+      ...(this.cleanField(this.fields.get('pages'))
+        ? { pages: this.cleanField(this.fields.get('pages')) }
+        : {}),
+      ...(this.doi ? { doi: this.doi } : {}),
+      ...(this.cleanField(this.fields.get('url'))
+        ? { url: this.cleanField(this.fields.get('url')) }
+        : {}),
+      ...(this.cleanField(this.fields.get('abstract'))
+        ? { abstract: this.cleanField(this.fields.get('abstract')) }
+        : {}),
     };
   }
 }

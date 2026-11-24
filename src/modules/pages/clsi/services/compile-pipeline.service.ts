@@ -27,7 +27,7 @@ import {
   OutputFileFinder,
 } from '../repositories/workspace.repository';
 import { TexEngineDetector } from '../domain/tex-engine.detector';
-import { CompileLogAnalyzer } from '@/modules/pages/diagnostics/domain';
+import { CompileLogAnalyzer } from '../domain/log-parser/compile-log.analyzer';
 import { BibBackendDetector } from '../domain/bib-backend.detector';
 import { DraftModeManager } from '../domain/draft-mode.manager';
 import { SafePath } from '../domain/safe-path';

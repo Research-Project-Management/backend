@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/clsi.module.ts
+ * modules/pages/clsi/clsi.module.ts
  * NestJS Module bundling CLSI controllers, workspace repository, and real engine/sandbox seams.
  * Pure in-process domain modules (log parser, synctex parser, engine detector, word counter,
  * fileset planner) are invoked directly without DI ceremony.
@@ -12,7 +12,6 @@ import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config
 import { CoreModule as AppCoreModule } from '@/core';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
-import { AiModule } from '@/modules/ai';
 import { ClsiController } from './clsi.controller';
 import { ClsiService } from './services/clsi.service';
 import { RemoteClsiClientAdapter } from './services/remote-clsi.client';
@@ -51,7 +50,6 @@ const inProcessClsiWorkers =
     AppCoreModule,
     DocstoreModule,
     FilestoreModule,
-    AiModule,
     BullModule.registerQueue({
       name: MANUSCRIPT_CLSI_QUEUE,
     }),

@@ -4,8 +4,7 @@
  *
  * Encapsulates:
  * - Project .bib file discovery and upsert (via StructureService & DocstoreService)
- * - External & local library sync (Zotero, Mendeley, LibraryFacade, Prisma fallback)
- * - DOI / arXiv academic identifier resolution
+ * - External & local library sync (Zotero, Mendeley, LibraryFacade)
  * - BibTeX AST parsing & formatting
  */
 
@@ -32,13 +31,10 @@ import {
 import {
   ICitationsAggregatorPort,
   ILibrarySyncPort,
-  LibraryCollectionSummary,
   IBibtexParserPort,
   BibliographyFile,
   BibEntry,
   BibtexParser,
-  refactorCitationKeyInBibTeX,
-  refactorCitationKeyInLatex,
 } from './domain';
 
 @Injectable()
@@ -47,8 +43,6 @@ export class CitationsRepository
 {
   private readonly logger = new Logger(CitationsRepository.name);
   protected bibParser: IBibtexParserPort;
-  private readonly liveCollab?: LiveCollaborationPort;
-  private readonly domainEventBus?: PageDomainEventBus;
 
   constructor(
     @Optional()
@@ -64,47 +58,11 @@ export class CitationsRepository
     bibParser?: BibtexParser,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    liveCollabOrLegacy?: LiveCollaborationPort,
+    private readonly liveCollab?: LiveCollaborationPort,
     @Optional()
-    domainEventBusOrParser?: PageDomainEventBus | BibtexParser,
-    @Optional()
-    legacyLiveCollab?: LiveCollaborationPort,
-    @Optional()
-    legacyDomainEventBus?: PageDomainEventBus,
+    private readonly domainEventBus?: PageDomainEventBus,
   ) {
-    const isParser = (obj: unknown): obj is IBibtexParserPort =>
-      Boolean(
-        obj &&
-        typeof (obj as IBibtexParserPort).parse === 'function' &&
-        typeof (obj as IBibtexParserPort).format === 'function',
-      );
-    const isEventBus = (obj: unknown): obj is PageDomainEventBus =>
-      Boolean(obj && typeof (obj as PageDomainEventBus).publish === 'function');
-    const isLiveCollab = (obj: unknown): obj is LiveCollaborationPort =>
-      Boolean(
-        obj &&
-        (typeof (obj as LiveCollaborationPort).flushDocs === 'function' ||
-          typeof (obj as LiveCollaborationPort).applyExternalText ===
-            'function'),
-      );
-
-    this.bibParser = isParser(bibParser)
-      ? bibParser
-      : isParser(domainEventBusOrParser)
-        ? domainEventBusOrParser
-        : new BibtexParser();
-
-    this.liveCollab = isLiveCollab(liveCollabOrLegacy)
-      ? liveCollabOrLegacy
-      : isLiveCollab(legacyLiveCollab)
-        ? legacyLiveCollab
-        : undefined;
-
-    this.domainEventBus = isEventBus(domainEventBusOrParser)
-      ? domainEventBusOrParser
-      : isEventBus(legacyDomainEventBus)
-        ? legacyDomainEventBus
-        : undefined;
+    this.bibParser = bibParser ?? new BibtexParser();
   }
 
   // ─── Project .bib File Aggregation & Upsert ─────────────────────────────────
@@ -195,21 +153,6 @@ export class CitationsRepository
     }
 
     return bibFiles;
-  }
-
-  public async appendEntryToBib(
-    projectId: string,
-    entry: BibEntry,
-    targetFilename = 'references.bib',
-    pageId?: string,
-  ): Promise<string> {
-    const res = await this.appendEntriesToBib(
-      projectId,
-      [entry],
-      targetFilename,
-      pageId,
-    );
-    return res.filePath;
   }
 
   public async appendEntriesToBib(
@@ -350,241 +293,7 @@ export class CitationsRepository
     return { filePath: newNode.path, docId: createdDocId, conflicts };
   }
 
-  /**
-   * Atomically refactors a citation key across all .bib and .tex/.md documents in the project.
-   */
-  public async refactorCitationKey(
-    projectId: string,
-    oldKey: string,
-    newKey: string,
-    pageId?: string,
-  ): Promise<{
-    affectedFiles: Array<{
-      docId: string;
-      path: string;
-      count: number;
-      newContent: string;
-    }>;
-    totalReplacements: number;
-  }> {
-    const affectedFiles: Array<{
-      docId: string;
-      path: string;
-      count: number;
-      newContent: string;
-    }> = [];
-    let totalReplacements = 0;
-
-    if (!this.docstoreService) {
-      return { affectedFiles, totalReplacements };
-    }
-
-    const nodePathByDocId = new Map<string, string>();
-    if (this.structureService) {
-      try {
-        const nodes = await this.structureService.getAllNodes(
-          projectId,
-          undefined,
-          pageId,
-        );
-        for (const n of nodes) {
-          if (n.isDoc() && n.docId) {
-            nodePathByDocId.set(n.docId, n.path || n.name);
-          }
-        }
-      } catch {
-        // Non-blocking fallback to doc.path
-      }
-    }
-
-    if (this.liveCollab) {
-      const collabWithFlushProject = this
-        .liveCollab as LiveCollaborationPort & {
-        flushProject?: (projectId: string) => Promise<void>;
-      };
-      if (typeof collabWithFlushProject.flushProject === 'function') {
-        await collabWithFlushProject.flushProject(projectId).catch(() => {});
-      } else if (
-        typeof this.liveCollab.flushDocs === 'function' &&
-        nodePathByDocId.size > 0
-      ) {
-        await this.liveCollab
-          .flushDocs(projectId, Array.from(nodePathByDocId.keys()))
-          .catch(() => []);
-      }
-    }
-
-    const docs = await this.docstoreService.getAllDocs(projectId, pageId);
-    const pendingMutations: Array<{
-      docId: string;
-      filePath: string;
-      nextLines: string[];
-      nextVersion: number;
-      expectedRev: number | undefined;
-      count: number;
-      newContent: string;
-    }> = [];
-
-    for (const doc of docs) {
-      const docId = doc._id;
-      const filePath = nodePathByDocId.get(docId) || doc.path || 'main.tex';
-      const ext = filePath.split('.').pop()?.toLowerCase() || '';
-      const currentText = (doc.lines || []).join('\n');
-      if (!currentText) continue;
-
-      const refactorRes =
-        ext === 'bib'
-          ? refactorCitationKeyInBibTeX(currentText, oldKey, newKey)
-          : refactorCitationKeyInLatex(currentText, oldKey, newKey);
-
-      if (refactorRes.count > 0 && refactorRes.content !== currentText) {
-        pendingMutations.push({
-          docId,
-          filePath,
-          nextLines: refactorRes.content.split('\n'),
-          nextVersion: (doc.version ?? 0) + 1,
-          expectedRev: doc.rev,
-          count: refactorRes.count,
-          newContent: refactorRes.content,
-        });
-      }
-    }
-
-    const docstore = this.docstoreService;
-    if (docstore) {
-      await Promise.all(
-        pendingMutations.map(async (m) => {
-          await docstore.updateDoc(projectId, m.docId, {
-            lines: m.nextLines,
-            version: m.nextVersion,
-            expectedRev: m.expectedRev,
-          });
-          await this.notifyDocMutated(
-            projectId,
-            m.docId,
-            m.nextLines,
-            m.nextVersion,
-          );
-        }),
-      );
-    }
-
-    for (const m of pendingMutations) {
-      totalReplacements += m.count;
-      affectedFiles.push({
-        docId: m.docId,
-        path: m.filePath,
-        count: m.count,
-        newContent: m.newContent,
-      });
-    }
-
-    return { affectedFiles, totalReplacements };
-  }
-
-  /**
-   * Reads and optionally updates a single document's content in DocstoreService + Yjs.
-   */
-  public async getDocContent(
-    projectId: string,
-    docId: string,
-  ): Promise<{ content: string; path: string } | null> {
-    if (!this.docstoreService) return null;
-    await (
-      this.liveCollab?.flushDoc?.(projectId, docId) ??
-      this.liveCollab?.flushDocs?.(projectId, [docId])
-    )?.catch(() => {});
-
-    try {
-      const doc = await this.docstoreService.getDoc(projectId, docId);
-      return {
-        content: (doc.lines || []).join('\n'),
-        path: doc.path || 'main.tex',
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  public async updateDocContent(
-    projectId: string,
-    docId: string,
-    nextContent: string,
-  ): Promise<void> {
-    if (!this.docstoreService) return;
-    const doc = await this.docstoreService.getDoc(projectId, docId);
-    const nextLines = nextContent.split('\n');
-    const nextVersion = (doc.version ?? 0) + 1;
-
-    await this.docstoreService.updateDoc(projectId, docId, {
-      lines: nextLines,
-      version: nextVersion,
-      expectedRev: doc.rev,
-    });
-
-    await this.notifyDocMutated(projectId, docId, nextLines, nextVersion);
-  }
-
   // ─── Library Sync (Zotero, Mendeley, Flux Library) ──────────────────────────
-
-  public async listCollections(
-    userId: string,
-    projectId?: string,
-  ): Promise<LibraryCollectionSummary[]> {
-    const fetchExternal = async (
-      provider: 'zotero' | 'mendeley',
-      label: string,
-    ): Promise<LibraryCollectionSummary[]> => {
-      if (!this.integrationsService) return [];
-      try {
-        const cols = await this.integrationsService.listCollections(
-          userId,
-          provider,
-        );
-        return (cols || []).map((col) => ({
-          id: `${provider}:${col.id}`,
-          name: `[${label}] ${col.name}`,
-          itemCount: col.itemCount,
-        }));
-      } catch (err: unknown) {
-        if (!(err instanceof NotFoundException)) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `Failed to fetch remote ${label} collections for user ${userId}: ${msg}`,
-          );
-        }
-        return [];
-      }
-    };
-
-    const fetchLocal = async (): Promise<LibraryCollectionSummary[]> => {
-      if (!this.libraryFacade) return [];
-      try {
-        const collections = await this.libraryFacade.listCollections(
-          userId,
-          projectId,
-        );
-        return (collections || []).map((c) => ({
-          id: c.id,
-          name: c.name,
-          itemCount: c._count?.collectionItems ?? c.itemCount ?? 0,
-        }));
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Failed to list collections via LibraryFacade: ${(err as Error)?.message}`,
-        );
-        return [];
-      }
-    };
-
-    const [zoteroCols, mendeleyCols, localCols] = await Promise.all([
-      fetchExternal('zotero', 'Zotero'),
-      fetchExternal('mendeley', 'Mendeley'),
-      fetchLocal(),
-    ]);
-
-    return [...zoteroCols, ...mendeleyCols, ...localCols];
-  }
 
   public async fetchCollectionBibtex(
     userId: string,

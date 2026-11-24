@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/safe-path.ts
+ * modules/pages/clsi/domain/safe-path.ts
  * Path Traversal Guard preventing directory traversal, prefix collisions,
  * and symlink breakouts.
  */

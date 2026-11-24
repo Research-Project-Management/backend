@@ -129,6 +129,16 @@ export class LatexmkEngine extends BaseLatexEngine {
       compilerFlag = '-pdflua';
     }
 
+    const isLinuxContainer = this.runner.name === 'docker-sandbox';
+    let customLatexmkrc: string | null = null;
+    if (isLinuxContainer) {
+      if (await this.fileExists(path.join(options.cwd, 'latexmkrc'))) {
+        customLatexmkrc = 'latexmkrc';
+      } else if (await this.fileExists(path.join(options.cwd, '.latexmkrc'))) {
+        customLatexmkrc = '.latexmkrc';
+      }
+    }
+
     const args: string[] = [
       compilerFlag,
       '-cd',
@@ -136,6 +146,7 @@ export class LatexmkEngine extends BaseLatexEngine {
       '-synctex=1',
       '-file-line-error',
       '-no-shell-escape',
+      ...(customLatexmkrc ? ['-r', customLatexmkrc] : []),
       options.stopOnFirstError ? '-halt-on-error' : '-interaction=batchmode',
       ...(options.stopOnFirstError ? [] : ['-f']),
       ...(options.force ? ['-g'] : []),
@@ -143,7 +154,6 @@ export class LatexmkEngine extends BaseLatexEngine {
       safeMainFile,
     ];
 
-    const isLinuxContainer = this.runner.name === 'docker-sandbox';
     const cwdPath = path.resolve(options.cwd);
     const texInputs = isLinuxContainer
       ? `.:/compile//:${options.env?.TEXINPUTS || ''}`

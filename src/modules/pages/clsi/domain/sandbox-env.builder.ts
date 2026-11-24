@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/sandbox-env.builder.ts
+ * modules/pages/clsi/domain/sandbox-env.builder.ts
  * Pure function building an allow-listed environment for sandbox executions.
  * Purges all sensitive host environment variables (DATABASE_URL, JWT_SECRET, etc.)
  * and injects paranoid TeX I/O flags.

@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/repositories/workspace.repository.ts
+ * modules/pages/clsi/repositories/workspace.repository.ts
  * Repository managing local filesystem scratch workspaces with Overleaf ResourceWriter
  * incremental MD5 hashing, auxiliary artifact preservation, project locks, disk usage cleaning,
  * output file discovery, and PKZIP streaming.
@@ -14,7 +14,7 @@ import {
   WorkspaceFile,
   WorkspaceSyncStats,
   AuxFileInfo,
-} from '../domain';
+} from '../domain/clsi.ports';
 import { SafePath } from '../domain/safe-path';
 import { mapWithConcurrency } from '@/core/utils/concurrency.util';
 

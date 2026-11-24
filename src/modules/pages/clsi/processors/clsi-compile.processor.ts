@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/processors/clsi-compile.processor.ts
+ * modules/pages/clsi/processors/clsi-compile.processor.ts
  *
  * BullMQ Worker Processor for asynchronous LaTeX compilation tasks.
  * Executes on background worker nodes to isolate compute-heavy compiler workloads

@@ -8,11 +8,9 @@ import {
   Injectable,
   Logger,
   HttpException,
-  Inject,
   Optional,
   OnModuleDestroy,
 } from '@nestjs/common';
-import { AI_FACADE } from '@/modules/ai';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
@@ -27,9 +25,6 @@ import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import {
   CompilePageDto,
   ClsiWordCountDto,
-  ClsiAiFixErrorDto,
-  ClsiAiGenerateTableDto,
-  ClsiAiGenerateEquationDto,
 } from '../dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { WordCountStats } from '../domain/clsi.ports';
@@ -38,11 +33,7 @@ import {
   DiskUsageCleaner,
   DiskUsageOptions,
 } from '../repositories/workspace.repository';
-import {
-  CompileLogAnalyzer,
-  SyntaxLinter,
-} from '@/modules/pages/diagnostics/domain';
-import { AiErrorFixResult } from '../domain/ai-assistant';
+import { CompileLogAnalyzer } from '../domain/log-parser/compile-log.analyzer';
 import { SyncTexProcessor } from '../domain/synctex.parser';
 import { TexWordCounter } from '../domain/tex-word.counter';
 import {
@@ -83,12 +74,6 @@ import {
   getLastBuildSummaryHelper,
   syncCachedArtifactsToScratchHelper,
 } from './clsi-artifacts.helper';
-import {
-  type ClsiAiEngine,
-  fixLatexErrorHelper,
-  generateLatexTableHelper,
-  generateLatexEquationHelper,
-} from './clsi-ai.helper';
 
 export type ClsiCompileResult = CompilePipelineResult;
 export type { EditorLastBuildSummary };
@@ -99,7 +84,6 @@ export class ClsiService implements OnModuleDestroy {
   private readonly workspace: WorkspaceRepository;
   private readonly pipeline: CompilePipeline;
   private readonly logParser: CompileLogAnalyzer;
-  private readonly syntaxLinter: SyntaxLinter = new SyntaxLinter();
   private readonly synctexParser: SyncTexProcessor;
   private readonly wordCounter: TexWordCounter;
   private readonly compileLock: CompileLockService;
@@ -129,9 +113,6 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() healthCheck?: ClsiHealthCheck,
     @Optional() pipeline?: CompilePipeline,
     @Optional() compileLock?: CompileLockService,
-    @Optional()
-    @Inject(AI_FACADE)
-    private readonly aiEngine?: ClsiAiEngine,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly filestoreService?: FilestoreService,
@@ -710,42 +691,5 @@ export class ClsiService implements OnModuleDestroy {
       res,
       pageId,
     );
-  }
-
-  /**
-   * Server-side LaTeX compiler error remediation:
-   * Queries EngineService for structured JSON fix, falls back to FastSyntaxLinter.autoFix
-   * and expert heuristic rules.
-   */
-  public async fixLatexError(
-    dto: ClsiAiFixErrorDto,
-    userId?: string,
-  ): Promise<AiErrorFixResult> {
-    return await fixLatexErrorHelper(
-      this.aiEngine,
-      this.syntaxLinter,
-      dto,
-      userId,
-    );
-  }
-
-  /**
-   * Server-side LaTeX table generator from a natural language prompt.
-   */
-  public async generateLatexTable(
-    dto: ClsiAiGenerateTableDto,
-    userId?: string,
-  ): Promise<{ table: string }> {
-    return await generateLatexTableHelper(this.aiEngine, dto, userId);
-  }
-
-  /**
-   * Server-side LaTeX equation generator from a natural language prompt.
-   */
-  public async generateLatexEquation(
-    dto: ClsiAiGenerateEquationDto,
-    userId?: string,
-  ): Promise<{ equation: string }> {
-    return await generateLatexEquationHelper(this.aiEngine, dto, userId);
   }
 }

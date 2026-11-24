@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/sandbox.errors.ts
+ * modules/pages/clsi/domain/sandbox.errors.ts
  * Typed domain errors for CLSI compilation sandbox isolation.
  * User-facing messages are strictly sanitized to prevent host path and environment leakage.
  */

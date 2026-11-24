@@ -22,7 +22,7 @@ import {
   createZipStreamFromDisk,
   ZipDiskEntry,
 } from '../repositories/workspace.repository';
-import { CompileLogAnalyzer } from '@/modules/pages/diagnostics/domain';
+import { CompileLogAnalyzer } from '../domain/log-parser/compile-log.analyzer';
 import { CompilePipelineResult } from './compile-pipeline.service';
 import { getCompileName } from './compile-lock.service';
 import type { RemoteClsiClientAdapter } from './remote-clsi.client';

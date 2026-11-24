@@ -26,15 +26,12 @@ export interface ICitationsAggregatorPort {
    */
   collectBibFiles(projectId: string): Promise<BibliographyFile[]>;
 
-  /**
-   * Appends a newly resolved BibEntry to an existing or new .bib file in the project.
-   * Returns the final path of the .bib file (e.g. '/references.bib').
-   */
-  appendEntryToBib(
+  appendEntriesToBib(
     projectId: string,
-    entry: BibEntry,
+    entries: BibEntry[],
     targetFilename?: string,
-  ): Promise<string>;
+    pageId?: string,
+  ): Promise<{ filePath: string; docId?: string; conflicts: string[] }>;
 }
 
 export interface IIdentifierResolverPort {
@@ -45,18 +42,7 @@ export interface IIdentifierResolverPort {
   resolve(identifier: IdentifierVo): Promise<BibEntry | null>;
 }
 
-export interface LibraryCollectionSummary {
-  id: string;
-  name: string;
-  itemCount: number;
-}
-
 export interface ILibrarySyncPort {
-  /**
-   * List accessible reference collections for a given user.
-   */
-  listCollections(userId: string): Promise<LibraryCollectionSummary[]>;
-
   /**
    * Fetch all items in a collection serialized as a clean BibTeX stream.
    */

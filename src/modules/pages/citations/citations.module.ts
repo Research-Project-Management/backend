@@ -6,15 +6,11 @@
 import { Module } from '@nestjs/common';
 import { StructureModule } from '@/modules/pages/structure/structure.module';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { PrismaModule } from '@/core';
 import { PagesCoreModule } from '@/modules/pages/core';
 import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { LibraryModule } from '@/modules/library';
 
-import {
-  CitationsController,
-  CitationsUtilityController,
-} from './citations.controller';
+import { CitationsController } from './citations.controller';
 import { CitationsService } from './citations.service';
 import { CitationsRepository } from './citations.repository';
 import { BibtexParser, IdentifierResolver } from './domain';
@@ -24,11 +20,10 @@ import { BibtexParser, IdentifierResolver } from './domain';
     PagesCoreModule,
     StructureModule,
     DocstoreModule,
-    PrismaModule,
     IntegrationsModule,
     LibraryModule,
   ],
-  controllers: [CitationsController, CitationsUtilityController],
+  controllers: [CitationsController],
   providers: [
     CitationsRepository,
     CitationsService,

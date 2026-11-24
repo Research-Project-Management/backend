@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/clsi.metrics.ts
+ * modules/pages/clsi/domain/clsi.metrics.ts
  * Telemetry and metrics aggregator for CLSI compilation performance.
  * Emits standard Prometheus format matching Overleaf Metrics.js.
  */

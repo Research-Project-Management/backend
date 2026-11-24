@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/domain/clsi.ports.ts
+ * modules/pages/clsi/domain/clsi.ports.ts
  * Domain contracts and port interfaces for CLSI artifacts, engines, sandbox runners, and workspaces.
  */
 

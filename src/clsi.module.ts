@@ -56,7 +56,7 @@ import {
   LatexmkEngine,
   ClsiHealthCheck,
 } from './modules/pages/clsi/services/compile-pipeline.service';
-import { CompileLogAnalyzer } from './modules/pages/diagnostics/domain';
+import { CompileLogAnalyzer } from './modules/pages/clsi/domain/log-parser/compile-log.analyzer';
 import { SyncTexProcessor } from './modules/pages/clsi/domain/synctex.parser';
 import { TexWordCounter } from './modules/pages/clsi/domain/tex-word.counter';
 import { ClsiMetrics } from './modules/pages/clsi/domain/clsi.metrics';

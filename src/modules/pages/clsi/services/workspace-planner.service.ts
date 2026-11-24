@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/services/workspace-planner.service.ts
+ * modules/pages/clsi/services/workspace-planner.service.ts
  * Service encapsulating project resolution, lightweight metadata planning,
  * database document hydration (including Docstore cold-storage unarchiving
  * and Filestore binary asset streaming), and post-compile snapshot checkpointing.
@@ -33,7 +33,7 @@ import {
   ManifestFile,
   PlannedFileSet,
 } from '../domain/fileset.planner';
-import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.domain';
+import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.vo';
 import {
   WorkspaceRepository,
   createUnchangedDiskPlaceholder,

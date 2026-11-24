@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { Readable } from 'node:stream';
 import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 import { createZipStream, ZipEntry } from '../../core/utils/zip-builder';
-import { IOutputFileFinder, DiscoveredOutputFile } from '../domain';
+import { IOutputFileFinder, DiscoveredOutputFile } from '../domain/clsi.ports';
 
 // ─────────────────────────────────────────────────────────────────
 // Project Lock Manager (.project-lock)

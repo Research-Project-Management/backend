@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/clsi/services/remote-clsi.client.ts
+ * modules/pages/clsi/services/remote-clsi.client.ts
  *
  * Canonical Remote CLSI Microservice Client Adapter.
  * Communicates with the dedicated `flux-clsi` container over a single canonical HTTP contract:

@@ -1,13 +1,12 @@
 /**
- * modules/manuscripts/clsi/clsi.controller.ts
- * NestJS Controller exposing CLSI compilation, SyncTeX, and artifact endpoints.
+ * clsi.controller.ts
+ * REST controller for LaTeX compilation, SyncTeX, word count, and output artifacts.
  */
 
 import {
   Controller,
   Post,
   Get,
-  Delete,
   Body,
   Param,
   Res,
@@ -16,8 +15,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/identity/auth';
-import { CurrentUser } from '@/modules/identity/auth';
+import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import {
   ProjectAccessGuard,
   RequireRole,
@@ -30,13 +28,7 @@ import {
 import { FastifyReply } from 'fastify';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { ClsiService } from './services/clsi.service';
-import {
-  CompilePageDto,
-  ClsiWordCountDto,
-  ClsiAiFixErrorDto,
-  ClsiAiGenerateTableDto,
-  ClsiAiGenerateEquationDto,
-} from './dto/clsi.dto';
+import { CompilePageDto, ClsiWordCountDto } from './dto/clsi.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
 @ApiTags('Pages - CLSI')
@@ -46,14 +38,25 @@ import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 export class ClsiController {
   constructor(private readonly clsiService: ClsiService) {}
 
+  private resolveSpaceId(
+    resolvedSpace?: string | { id?: string },
+    routeSpaceId?: string,
+    routePageId?: string,
+  ): string {
+    return (
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId ||
+      routePageId ||
+      ''
+    );
+  }
+
   @Post(['compile', 'spaces/:spaceId/compile', 'pages/:pageId/compile'])
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('compile')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Compile LaTeX manuscript source to PDF via CLSI',
-  })
+  @ApiOperation({ summary: 'Compile LaTeX source to PDF via CLSI' })
   async compile(
     @Body() dto: CompilePageDto,
     @CurrentUser('id') userId: string,
@@ -61,37 +64,29 @@ export class ClsiController {
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedSpaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId;
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId);
     if (authorizedSpaceId && !dto.spaceId) {
       dto.spaceId = authorizedSpaceId;
     }
     if (routePageId && !dto.pageId) {
       dto.pageId = routePageId;
     }
-    return this.clsiService.compile(dto, userId, authorizedSpaceId);
+    return this.clsiService.compile(dto, userId, authorizedSpaceId || undefined);
   }
 
   @Post(['spaces/:spaceId/compile/cancel', 'pages/:pageId/compile/cancel'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Cancel an ongoing compilation for a manuscript page or project',
-  })
+  @ApiOperation({ summary: 'Cancel an ongoing compilation' })
   cancelCompile(
     @CurrentUser('id') userId?: string,
     @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const spaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId ||
-      routePageId ||
-      '';
-    const targetId = routePageId || spaceId;
+    const targetId =
+      routePageId || this.resolveSpaceId(resolvedSpace, routeSpaceId);
     const cancelled = this.clsiService.cancelCompile(targetId, userId);
     return { success: true, cancelled };
   }
@@ -105,34 +100,24 @@ export class ClsiController {
   @RequireRole(Role.REVIEWER)
   @UserRateLimit('compile')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Calculate academic word count and metrics (texcount parity)',
-  })
+  @ApiOperation({ summary: 'Calculate document word count via TeXcount' })
   async wordCount(
     @Body() dto: ClsiWordCountDto,
     @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedSpaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId;
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId);
     if (authorizedSpaceId && !dto.spaceId) {
       dto.spaceId = authorizedSpaceId;
     }
     if (routePageId && !dto.pageId) {
       dto.pageId = routePageId;
     }
-    return this.clsiService.getWordCount(dto, authorizedSpaceId);
+    return this.clsiService.getWordCount(dto, authorizedSpaceId || undefined);
   }
 
-  @Post([
-    'synctex/forward',
-    'spaces/:spaceId/clsi/synctex/forward',
-    'spaces/:spaceId/synctex/forward',
-    'pages/:pageId/clsi/synctex/forward',
-    'pages/:pageId/synctex/forward',
-  ])
+  @Post('synctex/forward')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
@@ -141,52 +126,32 @@ export class ClsiController {
   })
   async forwardSync(
     @Body() dto: ForwardSyncDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedSpaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId;
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace);
     if (authorizedSpaceId && !dto.spaceId) {
       dto.spaceId = authorizedSpaceId;
     }
-    if (routePageId && !dto.pageId) {
-      dto.pageId = routePageId;
-    }
-    return this.clsiService.forwardSync(dto, authorizedSpaceId);
+    return this.clsiService.forwardSync(dto, authorizedSpaceId || undefined);
   }
 
-  @Post([
-    'synctex/reverse',
-    'spaces/:spaceId/clsi/synctex/reverse',
-    'spaces/:spaceId/synctex/reverse',
-    'pages/:pageId/clsi/synctex/reverse',
-    'pages/:pageId/synctex/reverse',
-  ])
+  @Post('synctex/reverse')
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Reverse SyncTeX: map clicked PDF page coordinates to LaTeX source line/column',
+      'Reverse SyncTeX: map PDF page coordinates to LaTeX source line/column',
   })
   async reverseSync(
     @Body() dto: ReverseSyncDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedSpaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId;
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace);
     if (authorizedSpaceId && !dto.spaceId) {
       dto.spaceId = authorizedSpaceId;
     }
-    if (routePageId && !dto.pageId) {
-      dto.pageId = routePageId;
-    }
-    return this.clsiService.reverseSync(dto, authorizedSpaceId);
+    return this.clsiService.reverseSync(dto, authorizedSpaceId || undefined);
   }
 
   @Get(['spaces/:spaceId/artifacts', 'pages/:pageId/artifacts'])
@@ -200,11 +165,7 @@ export class ClsiController {
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const spaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId ||
-      routePageId ||
-      '';
+    const spaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId, routePageId);
     return this.clsiService.listAuxFiles(spaceId, routePageId);
   }
 
@@ -222,58 +183,37 @@ export class ClsiController {
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const spaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId ||
-      routePageId ||
-      '';
-    return this.clsiService.downloadAuxFile(
-      spaceId,
-      filename,
-      res,
-      routePageId,
-    );
+    const spaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId, routePageId);
+    return this.clsiService.downloadAuxFile(spaceId, filename, res, routePageId);
   }
 
   @Get(['spaces/:spaceId/artifacts-zip', 'pages/:pageId/artifacts-zip'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.REVIEWER)
-  @ApiOperation({
-    summary: 'Download all project output artifacts packaged as a ZIP archive',
-  })
+  @ApiOperation({ summary: 'Download all output artifacts as a ZIP archive' })
   async downloadAllArtifactsZip(
     @Res() res: FastifyReply,
     @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const spaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId ||
-      routePageId ||
-      '';
+    const spaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId, routePageId);
     return this.clsiService.downloadAllArtifactsZip(spaceId, res, routePageId);
   }
 
   @Post(['spaces/:spaceId/clean-aux', 'pages/:pageId/clean-aux'])
-  @Delete(['spaces/:spaceId/artifacts', 'pages/:pageId/artifacts'])
   @UseGuards(ProjectAccessGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary:
-      'Clear cached auxiliary files and compile scratch workspace for a manuscript page or project',
+    summary: 'Clear cached auxiliary files and compile scratch workspace',
   })
   async cleanAuxFiles(
     @Param('spaceId') routeSpaceId?: string,
     @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const spaceId =
-      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
-      routeSpaceId ||
-      routePageId ||
-      '';
+    const spaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId, routePageId);
     return this.clsiService.cleanProjectScratch(spaceId, routePageId);
   }
 
@@ -319,51 +259,5 @@ export class ClsiController {
     const staleStats = await this.clsiService.cleanStaleScratch();
     const quotaStats = await this.clsiService.enforceScratchQuota();
     return { staleStats, quotaStats };
-  }
-
-  @Post('clsi/ai/fix-error')
-  @UseGuards(UserRateLimitGuard)
-  @UserRateLimit('search-replace')
-  @NoProjectContext()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary:
-      'Analyze a LaTeX compilation error and suggest an automated or heuristic fix',
-  })
-  async fixLatexError(
-    @Body() dto: ClsiAiFixErrorDto,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.clsiService.fixLatexError(dto, userId);
-  }
-
-  @Post('clsi/ai/generate-table')
-  @UseGuards(UserRateLimitGuard)
-  @UserRateLimit('search-replace')
-  @NoProjectContext()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Generate a clean LaTeX tabular or TSV table from a prompt',
-  })
-  async generateLatexTable(
-    @Body() dto: ClsiAiGenerateTableDto,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.clsiService.generateLatexTable(dto, userId);
-  }
-
-  @Post('clsi/ai/generate-equation')
-  @UseGuards(UserRateLimitGuard)
-  @UserRateLimit('search-replace')
-  @NoProjectContext()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Generate a LaTeX display equation from a natural language prompt',
-  })
-  async generateLatexEquation(
-    @Body() dto: ClsiAiGenerateEquationDto,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.clsiService.generateLatexEquation(dto, userId);
   }
 }
