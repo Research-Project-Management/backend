@@ -29,7 +29,8 @@ model Page {
   nodes          PageNode[]
   files          PageFile[]
   snapshots      PageSnapshot[]
-  labels         PageSnapshotLabel[]
+  referenceLinks PageReferenceLink[]
+  githubLink     PageGithubLink?
 
   @@unique([id, spaceId], map: "uq_pages_id_space")
   @@index([spaceId, deletedAt, updatedAt(sort: Desc)], map: "idx_pages_space_updated")

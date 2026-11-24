@@ -203,7 +203,7 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
       page: {
         findUnique: jest.fn().mockResolvedValue(null),
       },
-      projectIntegrationLink: {
+      pageGithubLink: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
       pageNode: {
@@ -707,12 +707,12 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
     }
   });
 
-  it('populates workspace.githubLink in Phase 1 when projectIntegrationLink exists', async () => {
+  it('populates workspace.githubLink in Phase 1 when pageGithubLink exists', async () => {
     const lastSynced = new Date('2026-02-10T09:30:00.000Z');
-    mockPrisma.projectIntegrationLink.findFirst.mockResolvedValue({
+    mockPrisma.pageGithubLink.findFirst.mockResolvedValue({
       id: 'gh-link-42',
-      collectionId: 'flux-lab/manuscript-paper',
-      targetBibFile: 'paper-draft',
+      repoFullName: 'flux-lab/manuscript-paper',
+      branch: 'paper-draft',
       lastSyncedAt: lastSynced,
     });
 

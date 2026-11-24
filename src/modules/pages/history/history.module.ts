@@ -10,9 +10,7 @@ import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 
 import { HistoryController } from './controllers/history.controller';
-import { VersionsController } from './controllers/versions.controller';
 import { HistoryService } from './services/history.service';
-import { VersionsService } from './services/versions.service';
 import { HistoryRepository } from './repositories/history.repository';
 import { SnapshotCollectorAdapter } from './adapters/snapshot-collector.adapter';
 import { SnapshotRestorerAdapter } from './adapters/snapshot-restorer.adapter';
@@ -20,10 +18,9 @@ import { DiffEngine } from './domain/diff.domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
-  controllers: [HistoryController, VersionsController],
+  controllers: [HistoryController],
   providers: [
     HistoryService,
-    VersionsService,
     HistoryRepository,
     DiffEngine,
     SnapshotCollectorAdapter,
@@ -31,7 +28,6 @@ import { DiffEngine } from './domain/diff.domain';
   ],
   exports: [
     HistoryService,
-    VersionsService,
     HistoryRepository,
     SnapshotCollectorAdapter,
     SnapshotRestorerAdapter,

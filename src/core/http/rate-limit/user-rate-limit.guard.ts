@@ -15,6 +15,7 @@ import {
   RateLimitKeyType,
 } from './user-rate-limit.decorator';
 import { RedisCacheService } from '../../infrastructure/redis/cache.service';
+import { RedisCommandService } from '../../infrastructure/redis/command.service';
 
 interface MemoryRateLimitEntry {
   currentCount: number;
@@ -88,11 +89,18 @@ export class UserRateLimitGuard implements CanActivate {
     return {1, estimated_count + 1, 0}
   `;
 
+  private readonly redisCommand?: RedisCommandService;
+
   constructor(
     private readonly reflector: Reflector,
     private readonly configService: RateLimitConfigService,
     @Optional() private readonly redisService?: RedisCacheService,
-  ) {}
+    @Optional() redisCommand?: RedisCommandService,
+  ) {
+    this.redisCommand =
+      redisCommand ??
+      (redisService ? new RedisCommandService(redisService) : undefined);
+  }
 
   public async canActivate(context: ExecutionContext): Promise<boolean> {
     if (!this.configService.isEnabled()) {
@@ -236,37 +244,27 @@ export class UserRateLimitGuard implements CanActivate {
     limit: number,
     windowSeconds: number,
   ): Promise<RateLimitResult> {
-    if (this.redisService?.isReady()) {
-      try {
-        const client = this.redisService.getClient();
-        if (client) {
-          const nowMs = Date.now();
-          const windowMs = windowSeconds * 1000;
-          const currentWindowIndex = Math.floor(nowMs / windowMs);
+    if (this.redisCommand?.isReady()) {
+      const nowMs = Date.now();
+      const windowMs = windowSeconds * 1000;
+      const currentWindowIndex = Math.floor(nowMs / windowMs);
 
-          const currentKey = `ratelimit:${bucket}:${actorKey}:${currentWindowIndex}`;
-          const prevKey = `ratelimit:${bucket}:${actorKey}:${currentWindowIndex - 1}`;
+      const currentKey = `ratelimit:${bucket}:${actorKey}:${currentWindowIndex}`;
+      const prevKey = `ratelimit:${bucket}:${actorKey}:${currentWindowIndex - 1}`;
 
-          const rawResult = (await client.eval(
-            UserRateLimitGuard.SLIDING_WINDOW_LUA,
-            2,
-            currentKey,
-            prevKey,
-            String(limit),
-            String(windowSeconds),
-            String(nowMs),
-          )) as [number, number, number];
+      const rawResult = await this.redisCommand.evalScript<
+        [number, number, number]
+      >(
+        UserRateLimitGuard.SLIDING_WINDOW_LUA,
+        [currentKey, prevKey],
+        [String(limit), String(windowSeconds), String(nowMs)],
+      );
 
-          const allowed = rawResult[0] === 1;
-          const count = Number(rawResult[1]);
-          const retryAfter = Number(rawResult[2]);
-
-          return { allowed, count, limit, retryAfter };
-        }
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Redis sliding window evaluation failed, falling back to memory: ${err}`,
-        );
+      if (rawResult) {
+        const allowed = rawResult[0] === 1;
+        const count = Number(rawResult[1]);
+        const retryAfter = Number(rawResult[2]);
+        return { allowed, count, limit, retryAfter };
       }
     }
 

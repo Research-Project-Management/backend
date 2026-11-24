@@ -221,21 +221,16 @@ export class EditorBootstrapService {
               }),
             ).catch(() => null)
           : Promise.resolve(null),
-      params.userId && isUuid(params.userId) && isUuid(spaceId)
+      params.userId && isUuid(params.userId) && isUuid(params.pageOrProjectId)
         ? Promise.resolve(
-            this.prisma.projectIntegrationLink?.findFirst?.({
+            this.prisma.pageGithubLink?.findFirst?.({
               where: {
-                projectId: spaceId,
-                userIntegration: {
-                  userId: params.userId,
-                  provider: 'github',
-                },
+                pageId: params.pageOrProjectId,
               },
-              orderBy: { updatedAt: 'desc' },
               select: {
                 id: true,
-                collectionId: true,
-                targetBibFile: true,
+                repoFullName: true,
+                branch: true,
                 lastSyncedAt: true,
               },
             }),
@@ -589,8 +584,8 @@ export class EditorBootstrapService {
       projectRow && githubLinkRow
         ? {
             id: githubLinkRow.id,
-            repoFullName: githubLinkRow.collectionId,
-            branch: githubLinkRow.targetBibFile || 'main',
+            repoFullName: githubLinkRow.repoFullName,
+            branch: githubLinkRow.branch || 'main',
             lastSyncedAt:
               githubLinkRow.lastSyncedAt instanceof Date
                 ? githubLinkRow.lastSyncedAt.toISOString()

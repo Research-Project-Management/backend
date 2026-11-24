@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { createHash } from 'crypto';
 import { RedisCacheService } from '@/core';
 import {
@@ -48,7 +49,11 @@ export class MetadataCache {
     const hash = createHash('md5')
       .update(canonicalId.toLowerCase().trim())
       .digest('hex');
-    return `metadata:v${METADATA_POLICY_VERSION}:${queryType}:${hash}`;
+    return LIBRARY_REDIS_KEYS.metadataCache(
+      METADATA_POLICY_VERSION,
+      queryType,
+      hash,
+    );
   }
 
   private resolveQueryTypeFromKey(

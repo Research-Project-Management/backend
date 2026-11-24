@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisCacheService } from '@/core/infrastructure/redis/cache.service';
+import { RedisCommandService } from '@/core/infrastructure/redis/command.service';
 
 export interface ChatCacheConfig {
   maxCachedMessages: number;
@@ -62,10 +63,15 @@ export class ChatCacheService {
   // In-memory fallback if Redis is unreachable
   private memoryCache = new Map<string, CachedMessage[]>();
 
+  private readonly redisCommand: RedisCommandService;
+
   constructor(
     private readonly redisCache: RedisCacheService,
     @Optional() private readonly configService?: ConfigService,
-  ) {}
+    @Optional() redisCommand?: RedisCommandService,
+  ) {
+    this.redisCommand = redisCommand ?? new RedisCommandService(redisCache);
+  }
 
   private get cacheConfig(): ChatCacheConfig {
     return {
@@ -93,24 +99,14 @@ export class ChatCacheService {
     limit = this.cacheConfig.maxCachedMessages,
   ): Promise<CachedMessage[] | null> {
     const key = this.getKey(conversationId);
-    const client = this.redisCache.getClient();
     const { maxCachedMessages } = this.cacheConfig;
 
-    if (this.redisCache.isReady() && client) {
-      try {
-        const rawList = await client.lrange(
-          key,
-          0,
-          Math.min(limit, maxCachedMessages) - 1,
-        );
-        if (rawList && rawList.length > 0) {
-          return rawList.map((item) => JSON.parse(item) as CachedMessage);
-        }
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Redis getRecentMessages error on ${key}: ${(err as Error)?.message}`,
-        );
-      }
+    const rawList = await this.redisCommand.withClient(
+      `chat:getRecentMessages:${key}`,
+      (client) => client.lrange(key, 0, Math.min(limit, maxCachedMessages) - 1),
+    );
+    if (rawList && rawList.length > 0) {
+      return rawList.map((item) => JSON.parse(item) as CachedMessage);
     }
 
     // Check in-memory fallback
@@ -131,7 +127,6 @@ export class ChatCacheService {
   ): Promise<void> {
     const key = this.getKey(conversationId);
     const serialized = JSON.stringify(message);
-    const client = this.redisCache.getClient();
     const { maxCachedMessages, cacheTtlSeconds } = this.cacheConfig;
 
     // 1. In-memory fallback
@@ -143,19 +138,16 @@ export class ChatCacheService {
     this.memoryCache.set(conversationId, currentMem);
 
     // 2. Redis RAM
-    if (this.redisCache.isReady() && client) {
-      try {
+    await this.redisCommand.withClient(
+      `chat:pushMessage:${key}`,
+      async (client) => {
         const pipeline = client.pipeline();
         pipeline.lpush(key, serialized);
         pipeline.ltrim(key, 0, maxCachedMessages - 1);
         pipeline.expire(key, cacheTtlSeconds);
         await pipeline.exec();
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Redis pushMessage error on ${key}: ${(err as Error)?.message}`,
-        );
-      }
-    }
+      },
+    );
   }
 
   /**
@@ -170,12 +162,12 @@ export class ChatCacheService {
     const key = this.getKey(conversationId);
     const { maxCachedMessages, cacheTtlSeconds } = this.cacheConfig;
     const bounded = messages.slice(0, maxCachedMessages);
-    const client = this.redisCache.getClient();
 
     this.memoryCache.set(conversationId, [...bounded]);
 
-    if (this.redisCache.isReady() && client) {
-      try {
+    await this.redisCommand.withClient(
+      `chat:cacheRecentMessages:${key}`,
+      async (client) => {
         const pipeline = client.pipeline();
         pipeline.del(key);
         // rpush in order of descending messages so index 0 is newest
@@ -183,12 +175,8 @@ export class ChatCacheService {
         pipeline.rpush(key, ...serialized);
         pipeline.expire(key, cacheTtlSeconds);
         await pipeline.exec();
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Redis cacheRecentMessages error on ${key}: ${(err as Error)?.message}`,
-        );
-      }
-    }
+      },
+    );
   }
 
   /**

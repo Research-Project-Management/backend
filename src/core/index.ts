@@ -13,6 +13,7 @@ export * from './infrastructure/database/prisma.service';
 export * from './infrastructure/redis/client.factory';
 export * from './infrastructure/redis/redis.module';
 export * from './infrastructure/redis/cache.service';
+export * from './infrastructure/redis/command.service';
 export * from './infrastructure/redis/lock.service';
 export * from './infrastructure/redis/pubsub.service';
 export * from './infrastructure/redis/invalidation.listener';

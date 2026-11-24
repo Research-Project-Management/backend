@@ -25,6 +25,7 @@ import {
   executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
 import { DistributedLockService, RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { ReferenceMatcherService } from './reference-matcher.service';
 import { ExtractionMetadataSynchronizer } from './metadata-sync.service';
 import { isRejectedCitedIdentifier } from '@/modules/library/extraction/domain/metadata-merge.policy';
@@ -139,7 +140,7 @@ export class ExtractionHandler implements OutboxDispatchHandler {
       return;
     }
 
-    const lockKey = `flux:lock:extraction:${attachmentId}`;
+    const lockKey = LIBRARY_REDIS_KEYS.extractionLock(attachmentId);
     let lockToken: string | null = null;
     if (this.lockService && this.cache?.isReady()) {
       lockToken = await this.lockService.acquireLock(lockKey, 120000); // 2 min distributed lease

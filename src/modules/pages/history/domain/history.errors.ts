@@ -2,10 +2,10 @@ import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error
 
 export class DuplicateLabelException extends PagesDomainError {
   constructor(
-    public readonly projectId: string,
+    public readonly spaceId: string,
     public readonly label: string,
   ) {
-    super(`Label '${label}' already exists in project '${projectId}'.`, {
+    super(`Label '${label}' already exists in space '${spaceId}'.`, {
       code: 'DUPLICATE_VERSION_LABEL',
       statusCode: 409,
     });
@@ -13,9 +13,9 @@ export class DuplicateLabelException extends PagesDomainError {
 }
 
 export class EmptyProjectException extends PagesDomainError {
-  constructor(public readonly projectId: string) {
+  constructor(public readonly spaceId: string) {
     super(
-      `Cannot create history snapshot for project '${projectId}' because it contains no files.`,
+      `Cannot create history snapshot for space '${spaceId}' because it contains no files.`,
       {
         code: 'EMPTY_PAGE_SNAPSHOT',
         statusCode: 400,
@@ -26,11 +26,11 @@ export class EmptyProjectException extends PagesDomainError {
 
 export class VersionNotFoundException extends PagesDomainError {
   constructor(
-    public readonly projectId: string,
+    public readonly spaceId: string,
     public readonly version: number,
   ) {
     super(
-      `Version ${version} of project '${projectId}' was not found in history.`,
+      `Version ${version} of space '${spaceId}' was not found in history.`,
       {
         code: 'VERSION_NOT_FOUND',
         statusCode: 404,

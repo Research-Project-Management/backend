@@ -1,6 +1,6 @@
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Server, ServerOptions } from 'socket.io';
-import { createAdapter } from '@socket.io/redis-adapter';
+import { createAdapter } from '@socket.io/redis-streams-adapter';
 import type Redis from 'ioredis';
 import { Logger, type INestApplicationContext } from '@nestjs/common';
 import { isOriginAllowed } from '../../http/setup/allowed-origins';
@@ -21,15 +21,15 @@ export interface RedisIoTransportOptions {
 }
 
 /**
- * Enterprise Redis IO Adapter for Socket.IO
- * Enables cross-node room fan-out, horizontal pod scaling,
- * and graceful fallback to in-memory adapter when Redis is offline.
+ * Enterprise Redis Streams IO Adapter for Socket.IO.
+ * Uses a single Redis connection (`@socket.io/redis-streams-adapter`) with
+ * bounded stream length (`maxLen: 10_000`) and Connection State Recovery so
+ * clients automatically replay missed events after brief network drops.
  */
 export class RedisIoAdapter extends IoAdapter {
   private readonly logger = new Logger(RedisIoAdapter.name);
   private adapterConstructor: ReturnType<typeof createAdapter> | null = null;
-  private pubClient: Redis | null = null;
-  private subClient: Redis | null = null;
+  private redisClient: Redis | null = null;
 
   constructor(
     appOrHttpServer?: INestApplicationContext,
@@ -47,30 +47,28 @@ export class RedisIoAdapter extends IoAdapter {
     }
 
     try {
-      this.pubClient = createRedisClient(redisUrl, {
-        label: 'SocketIoAdapter',
+      this.redisClient = createRedisClient(redisUrl, {
+        label: 'SocketIoStreamsAdapter',
         logger: this.logger,
         maxRetriesPerRequest: 3,
       });
 
-      this.subClient = this.pubClient.duplicate();
-
-      this.pubClient.on('error', (err) => {
-        this.logger.warn(`Redis adapter pubClient error: ${err.message}`);
-      });
-      this.subClient.on('error', (err) => {
-        this.logger.warn(`Redis adapter subClient error: ${err.message}`);
+      this.redisClient.on('error', (err) => {
+        this.logger.warn(`Redis streams adapter error: ${err.message}`);
       });
 
-      await Promise.all([this.pubClient.connect(), this.subClient.connect()]);
+      await this.redisClient.connect();
 
-      this.adapterConstructor = createAdapter(this.pubClient, this.subClient);
+      this.adapterConstructor = createAdapter(this.redisClient, {
+        streamName: 'flux:socket.io',
+        maxLen: 10_000,
+      });
       this.logger.log(
-        'Socket.IO Redis adapter connected successfully (multi-node horizontal fan-out active)',
+        'Socket.IO Redis Streams adapter connected (multi-node fan-out + Connection State Recovery active)',
       );
     } catch (err: unknown) {
       this.logger.warn(
-        `Failed to connect Socket.IO Redis adapter (${getErrorMessage(err)}). Falling back to in-memory adapter.`,
+        `Failed to connect Socket.IO Redis Streams adapter (${getErrorMessage(err)}). Falling back to in-memory adapter.`,
       );
       this.adapterConstructor = null;
     }
@@ -121,6 +119,10 @@ export class RedisIoAdapter extends IoAdapter {
         fallbackMaxMessageSizeBytes,
       connectTimeout: this.transportOptions?.connectTimeoutMs ?? 45000,
       allowUpgrades: true,
+      connectionStateRecovery: {
+        maxDisconnectionDuration: 2 * 60 * 1000,
+        skipMiddlewares: false,
+      },
     };
     const server = super.createIOServer(port, serverOptions) as Server;
     if (this.adapterConstructor) {
@@ -130,10 +132,8 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   async close(): Promise<void> {
-    const pub = this.pubClient;
-    const sub = this.subClient;
-    this.pubClient = null;
-    this.subClient = null;
-    await Promise.all([closeRedisClient(pub), closeRedisClient(sub)]);
+    const client = this.redisClient;
+    this.redisClient = null;
+    await closeRedisClient(client);
   }
 }

@@ -1,9 +1,14 @@
-import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '@/core';
 import {
   UserIntegration,
-  ProjectIntegrationLink,
-  IntegrationProvider,
+  PageReferenceLink,
+  PageGithubLink,
   Prisma,
 } from '@prisma/client';
 import { IntegrationProviderType } from './providers/integration-provider.interface';
@@ -20,7 +25,7 @@ export class IntegrationsRepository {
       where: {
         userId_provider: {
           userId,
-          provider: provider,
+          provider,
         },
       },
     });
@@ -87,7 +92,7 @@ export class IntegrationsRepository {
     await this.prisma.userIntegration.updateMany({
       where: {
         userId,
-        provider: provider,
+        provider,
       },
       data: {
         status: 'error',
@@ -103,22 +108,22 @@ export class IntegrationsRepository {
     await this.prisma.userIntegration.deleteMany({
       where: {
         userId,
-        provider: provider,
+        provider,
       },
     });
   }
 
-  async upsertProjectLink(data: {
-    projectId: string;
+  async upsertReferenceLink(data: {
+    pageId: string;
     userIntegrationId: string;
     collectionId: string;
     collectionName: string;
     targetBibFile?: string;
-  }): Promise<ProjectIntegrationLink> {
-    return this.prisma.projectIntegrationLink.upsert({
+  }): Promise<PageReferenceLink> {
+    return this.prisma.pageReferenceLink.upsert({
       where: {
-        projectId_userIntegrationId_collectionId: {
-          projectId: data.projectId,
+        pageId_userIntegrationId_collectionId: {
+          pageId: data.pageId,
           userIntegrationId: data.userIntegrationId,
           collectionId: data.collectionId,
         },
@@ -129,7 +134,7 @@ export class IntegrationsRepository {
         updatedAt: new Date(),
       },
       create: {
-        projectId: data.projectId,
+        pageId: data.pageId,
         userIntegrationId: data.userIntegrationId,
         collectionId: data.collectionId,
         collectionName: data.collectionName,
@@ -138,38 +143,100 @@ export class IntegrationsRepository {
     });
   }
 
-  async updateProjectLinkLastSynced(linkId: string): Promise<void> {
-    await this.prisma.projectIntegrationLink.update({
+  async updateReferenceLinkLastSynced(linkId: string): Promise<void> {
+    await this.prisma.pageReferenceLink.update({
       where: { id: linkId },
       data: { lastSyncedAt: new Date() },
     });
   }
 
-  async findProjectLink(
-    projectId: string,
-    userIntegrationId: string,
-  ): Promise<ProjectIntegrationLink | null> {
-    return this.prisma.projectIntegrationLink.findFirst({
-      where: {
-        projectId,
-        userIntegrationId,
+  async upsertGithubLink(data: {
+    pageId: string;
+    userIntegrationId: string;
+    repoFullName: string;
+    branch?: string;
+  }): Promise<PageGithubLink> {
+    return this.prisma.pageGithubLink.upsert({
+      where: { pageId: data.pageId },
+      update: {
+        userIntegrationId: data.userIntegrationId,
+        repoFullName: data.repoFullName,
+        branch: data.branch || 'main',
+        updatedAt: new Date(),
       },
-      orderBy: { updatedAt: 'desc' },
+      create: {
+        pageId: data.pageId,
+        userIntegrationId: data.userIntegrationId,
+        repoFullName: data.repoFullName,
+        branch: data.branch || 'main',
+      },
     });
   }
 
-  async assertUserProjectAccess(
+  async findGithubLink(
+    pageId: string,
+    userIntegrationId?: string,
+  ): Promise<PageGithubLink | null> {
+    return this.prisma.pageGithubLink.findFirst({
+      where: {
+        pageId,
+        ...(userIntegrationId ? { userIntegrationId } : {}),
+      },
+    });
+  }
+
+  async updateGithubLinkLastSynced(linkId: string): Promise<void> {
+    await this.prisma.pageGithubLink.update({
+      where: { id: linkId },
+      data: { lastSyncedAt: new Date() },
+    });
+  }
+
+  async assertUserPageAccess(
     userId: string,
-    projectId: string,
-    writeRequired = false,
+    pageId: string,
+    access: 'read' | 'write' | 'manage' = 'read',
   ): Promise<void> {
-    if (!projectId || !userId) {
-      throw new BadRequestException('Project ID and User ID are required.');
+    if (!pageId || !userId) {
+      throw new BadRequestException('Page ID and User ID are required.');
     }
+
+    const page = await this.prisma.page.findUnique({
+      where: { id: pageId },
+      select: {
+        id: true,
+        deletedAt: true,
+        space: {
+          select: {
+            type: true,
+            ownerUserId: true,
+            projectId: true,
+          },
+        },
+      },
+    });
+
+    if (!page || page.deletedAt) {
+      throw new NotFoundException('Page not found.');
+    }
+
+    if (page.space.type === 'personal') {
+      if (page.space.ownerUserId !== userId) {
+        throw new ForbiddenException(
+          'Access denied: You do not own this personal page.',
+        );
+      }
+      return;
+    }
+
+    if (!page.space.projectId) {
+      throw new ForbiddenException('Access denied: Invalid page space.');
+    }
+
     const member = await this.prisma.projectMember.findUnique({
       where: {
         projectId_userId: {
-          projectId,
+          projectId: page.space.projectId,
           userId,
         },
       },
@@ -181,9 +248,15 @@ export class IntegrationsRepository {
       );
     }
 
-    if (writeRequired && member.role === 'reviewer') {
+    if (access === 'manage' && member.role !== 'owner' && member.role !== 'coordinator') {
       throw new ForbiddenException(
-        'Access denied: You do not have write access to this project.',
+        'Access denied: Only project owners or coordinators can manage repository links.',
+      );
+    }
+
+    if (access === 'write' && member.role === 'reviewer') {
+      throw new ForbiddenException(
+        'Access denied: You do not have write access to this page.',
       );
     }
   }

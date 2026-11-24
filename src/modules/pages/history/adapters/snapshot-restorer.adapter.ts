@@ -21,7 +21,7 @@ import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
 import { HistoryRepository } from '../repositories/history.repository';
 import {
-  IProjectRestorerPort,
+  ISnapshotRestorerPort,
   RestoreResult,
   RestoreSingleFileResult,
 } from '../domain/history.ports';
@@ -30,7 +30,7 @@ import { FileSnapshotVo } from '../domain/file-snapshot.domain';
 import { SnapshotFileNotFoundException } from '../domain/history.errors';
 
 @Injectable()
-export class SnapshotRestorerAdapter extends IProjectRestorerPort {
+export class SnapshotRestorerAdapter extends ISnapshotRestorerPort {
   private readonly logger = new Logger(SnapshotRestorerAdapter.name);
   private readonly liveCollab: LiveCollaborationPort;
 
@@ -39,7 +39,7 @@ export class SnapshotRestorerAdapter extends IProjectRestorerPort {
     private readonly docstoreService: DocstoreService,
     @Optional()
     @Inject(IDistributedLockPort)
-    private readonly lockOrLegacyRef?: IDistributedLockPort | unknown,
+    private readonly distributedLock?: IDistributedLockPort,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly domainEventBus?: PageDomainEventBus,
     @Optional()
@@ -48,15 +48,10 @@ export class SnapshotRestorerAdapter extends IProjectRestorerPort {
     @Optional()
     private readonly historyRepository?: HistoryRepository,
     @Optional()
-    private readonly distributedLock?: IDistributedLockPort,
-    @Optional()
     private readonly filestoreService?: FilestoreService,
   ) {
     super();
-    this.liveCollab =
-      liveCollab && typeof liveCollab.flushDocs === 'function'
-        ? liveCollab
-        : NOOP_LIVE_COLLABORATION;
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
   private getDeps(): RestorerDeps {
@@ -85,18 +80,11 @@ export class SnapshotRestorerAdapter extends IProjectRestorerPort {
             () => undefined,
           )
         : undefined);
-    const lockPort =
-      this.distributedLock ??
-      (this.lockOrLegacyRef &&
-      typeof (this.lockOrLegacyRef as IDistributedLockPort).withLock ===
-        'function'
-        ? (this.lockOrLegacyRef as IDistributedLockPort)
-        : undefined);
     const restoreAction = async () =>
       this.executeRestoreWorkflow(projectId, snapshot, resolvedPageId);
 
-    if (lockPort) {
-      return lockPort.withLock(
+    if (this.distributedLock) {
+      return this.distributedLock.withLock(
         `manuscript:restore:${projectId}:${resolvedPageId ?? 'default'}`,
         restoreAction,
         60000,
@@ -599,18 +587,14 @@ async function createPreRestoreSafetySnapshot(
       });
       const filesJson = safetySnapshot.toFilesJson();
       const sizeBytes = Buffer.byteLength(JSON.stringify(filesJson), 'utf8');
-      await deps.prisma.pageSnapshot.create({
+      await (deps.prisma.pageSnapshot as any).create({
         data: {
           spaceId: projectId,
           pageId: snapshotPageId,
           version: backupVersion,
           summary: backupSummary,
           isAutomatic: true,
-          files:
-            Object.keys(filesJson).length > 0
-              ? (filesJson as unknown as Prisma.InputJsonValue)
-              : Prisma.JsonNull,
-          sizeBytes,
+          totalBytes: sizeBytes,
         },
       });
     }

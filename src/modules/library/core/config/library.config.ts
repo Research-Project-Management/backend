@@ -295,6 +295,28 @@ export const LIBRARY_REDIS_KEYS = {
   cslCustomStylesList: (spaceId?: string) =>
     spaceId ? `csl:${spaceId}:custom-styles-list` : 'csl:custom-styles-list',
   cslStylesCatalogIndex: () => 'csl:catalog:styles-index',
+
+  // Ingestion, Extraction, Inbox & Resilience Keys
+  metadataCache: (
+    policyVersion: string | number,
+    queryType: string,
+    hash: string,
+  ) => `metadata:v${policyVersion}:${queryType}:${hash}`,
+  retractionDoi: (cleanDoi: string) => `library:retraction:doi:${cleanDoi}`,
+  inboxPrefix: () => 'library:inbox:',
+  inbox: (consumer: string, eventId: string) =>
+    `library:inbox:${consumer}:${eventId}`,
+  domainRateLimit: (normalizedDomain: string) =>
+    `library:ratelimit:${normalizedDomain}:last_exec`,
+  tokenBucketRateLimit: (name: string) => `flux:ratelimit:${name}`,
+  extractionLock: (attachmentId: string) =>
+    `flux:lock:extraction:${attachmentId}`,
+  ingestionLock: (
+    userId: string,
+    projectId: string | null | undefined,
+    idempotencyKey: string,
+  ) =>
+    `flux:lock:ingest:${userId}:${projectId ?? 'personal'}:${idempotencyKey}`,
 };
 
 export const LIBRARY_OUTBOX_QUEUE = libraryConfig().outbox.queue;

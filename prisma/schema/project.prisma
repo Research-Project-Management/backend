@@ -71,7 +71,6 @@ model Project {
   workItems        WorkItem[]
   activityEvents   ActivityEvent[]
   updates          ProjectUpdate[]
-  integrationLinks ProjectIntegrationLink[]
   channels         Conversation[]           @relation("ProjectChannels")
 
   @@unique([createdById, identifier], map: "uq_projects_creator_identifier")

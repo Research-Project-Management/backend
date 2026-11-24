@@ -435,6 +435,80 @@ export class HistoryService {
     );
   }
 
+  public async listLabels(
+    spaceId: string,
+    pageId?: string,
+  ): Promise<VersionLabelDto[]> {
+    const labels = await this.repository.listLabels(spaceId, pageId);
+    return labels.map((label) => this.toLabelDto(label));
+  }
+
+  public async getBlob(
+    spaceId: string,
+    contentHash: string,
+  ): Promise<{
+    contentHash: string;
+    content: string | null;
+    sizeBytes: number;
+    inStorage: boolean;
+    storageKey: string | null;
+  }> {
+    const blob = await this.repository.findBlobInSpace(spaceId, contentHash);
+    if (!blob) {
+      throw new NotFoundException(
+        `History blob '${contentHash}' was not found in space '${spaceId}'.`,
+      );
+    }
+    return blob;
+  }
+
+  public async flushHistory(
+    spaceId: string,
+    userId?: string | null,
+    pageId?: string,
+  ): Promise<{ flushed: boolean; snapshot: SnapshotDetailDto | null }> {
+    const currentFiles = await this.collector.collectCurrentState(
+      spaceId,
+      pageId,
+    );
+    if (currentFiles.size === 0) {
+      return { flushed: false, snapshot: null };
+    }
+
+    const latestVersion = await this.repository.getLatestVersion(
+      spaceId,
+      pageId,
+    );
+    if (latestVersion > 0) {
+      const latestSnap = await this.repository.findByVersion(
+        spaceId,
+        latestVersion,
+        pageId,
+      );
+      if (latestSnap && latestSnap.files.size === currentFiles.size) {
+        let identical = true;
+        for (const [pathname, vo] of currentFiles.entries()) {
+          const prev = latestSnap.files.get(pathname);
+          if (!prev || prev.hash !== vo.hash) {
+            identical = false;
+            break;
+          }
+        }
+        if (identical) {
+          return { flushed: false, snapshot: null };
+        }
+      }
+    }
+
+    const created = await this.createSnapshot(
+      spaceId,
+      { summary: 'Auto-saved history checkpoint', isAutomatic: true, pageId },
+      userId,
+      pageId,
+    );
+    return { flushed: true, snapshot: created };
+  }
+
   public toLabelDto(label: VersionLabel): VersionLabelDto {
     return {
       id: label.id,

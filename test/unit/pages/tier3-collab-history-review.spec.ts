@@ -194,7 +194,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
         createdById: AUTHOR_ID,
         isAutomatic: false,
         createdAt: now,
-        files: { '/main.tex': { type: 'doc', docId: DOC_ID, lines: ['hi'] } },
+        _count: { files: 1 },
       });
       const label = VersionLabel.create({
         projectId: SPACE_ID,

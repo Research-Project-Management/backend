@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 
 interface DomainRateLimitConfig {
   minIntervalMs: number;
@@ -147,7 +148,7 @@ export class DomainRateLimiterService {
       try {
         const client = this.cache.getClient?.();
         if (client) {
-          const redisKey = `library:ratelimit:${normalizedDomain}:last_exec`;
+          const redisKey = LIBRARY_REDIS_KEYS.domainRateLimit(normalizedDomain);
           const ttlMs = Math.max(minIntervalMs * 3, 5000);
           const luaScript = `
             local last = tonumber(redis.call('GET', KEYS[1]) or '0') or 0
@@ -221,7 +222,7 @@ export class DomainRateLimiterService {
   ): Promise<void> {
     const client = this.cache?.getClient?.();
     if (!client) return;
-    const redisKey = `library:ratelimit:${normalizedDomain}:last_exec`;
+    const redisKey = LIBRARY_REDIS_KEYS.domainRateLimit(normalizedDomain);
     const refundScript = `
       local last = tonumber(redis.call('GET', KEYS[1]) or '0') or 0
       local interval = tonumber(ARGV[1])

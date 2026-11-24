@@ -517,12 +517,12 @@ export class IntegrationsService {
     );
   }
 
-  async syncProjectCollection(
+  async syncPageCollection(
     userId: string,
     provider: IntegrationProviderType,
     dto: SyncCollectionDto,
   ) {
-    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
+    await this.repo.assertUserPageAccess(userId, dto.pageId, 'write');
     const conn = await this.repo.findConnection(userId, provider);
     if (!conn) {
       throw new NotFoundException(
@@ -552,20 +552,19 @@ export class IntegrationsService {
       );
     }
 
-    // Sync .bib document cleanly as a text DOC in Docstore & Structure tree (no duplicate binary Filestore blob)
     if (this.docstoreService && this.structureService) {
       try {
         const existingNode = await this.structureService.getNodeByPath(
-          dto.projectId,
+          dto.pageId,
           targetBibFile,
         );
         if (existingNode && existingNode.docId) {
           const currentDoc = await this.docstoreService
-            .getDoc(dto.projectId, existingNode.docId)
+            .getDoc(dto.pageId, existingNode.docId)
             .catch(() => null);
           const lines = bibtexContent.split(/\r?\n/);
           await this.docstoreService.updateDoc(
-            dto.projectId,
+            dto.pageId,
             existingNode.docId,
             {
               lines,
@@ -578,11 +577,11 @@ export class IntegrationsService {
               `Target file "${targetBibFile}" already exists as a non-document node.`,
             );
           }
-          const doc = await this.docstoreService.createDoc(dto.projectId, {
+          const doc = await this.docstoreService.createDoc(dto.pageId, {
             path: targetBibFile,
             text: bibtexContent,
           });
-          await this.structureService.createNode(dto.projectId, {
+          await this.structureService.createNode(dto.pageId, {
             name: targetBibFile,
             type: 'DOC',
             docId: doc._id,
@@ -601,22 +600,22 @@ export class IntegrationsService {
       typeof this.filestoreService.uploadFileFromBuffer === 'function'
     ) {
       await this.filestoreService.uploadFileFromBuffer(
-        dto.projectId,
+        dto.pageId,
         targetBibFile,
         Buffer.from(bibtexContent, 'utf-8'),
         'application/x-bibtex',
       );
     }
 
-    const link = await this.repo.upsertProjectLink({
-      projectId: dto.projectId,
+    const link = await this.repo.upsertReferenceLink({
+      pageId: dto.pageId,
       userIntegrationId: conn.id,
       collectionId: dto.collectionId,
       collectionName: dto.collectionName || dto.collectionId,
       targetBibFile,
     });
 
-    await this.repo.updateProjectLinkLastSynced(link.id);
+    await this.repo.updateReferenceLinkLastSynced(link.id);
 
     return {
       linkId: link.id,
@@ -710,74 +709,70 @@ export class IntegrationsService {
     );
   }
 
-  async linkProjectGithub(userId: string, dto: LinkGithubRepoDto) {
-    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
+  async linkPageGithub(userId: string, dto: LinkGithubRepoDto) {
+    await this.repo.assertUserPageAccess(userId, dto.pageId, 'manage');
     const { connId } = await this.getDecryptedGithubToken(userId);
     const branch = dto.branch || 'main';
 
-    const link = await this.repo.upsertProjectLink({
-      projectId: dto.projectId,
+    const link = await this.repo.upsertGithubLink({
+      pageId: dto.pageId,
       userIntegrationId: connId,
-      collectionId: dto.repoFullName,
-      collectionName: dto.repoFullName,
-      targetBibFile: branch,
+      repoFullName: dto.repoFullName,
+      branch,
     });
 
     return {
       linkId: link.id,
-      projectId: link.projectId,
-      repoFullName: link.collectionId,
-      branch: link.targetBibFile,
+      pageId: link.pageId,
+      repoFullName: link.repoFullName,
+      branch: link.branch,
       lastSyncedAt: link.lastSyncedAt,
     };
   }
 
-  async getProjectGithubLink(userId: string, projectId: string) {
-    await this.repo.assertUserProjectAccess(userId, projectId, false);
-    const conn = await this.repo.findConnection(userId, 'github');
-    if (!conn) {
-      return { isConnected: false, link: null };
-    }
+  async getPageGithubLink(userId: string, pageId: string) {
+    await this.repo.assertUserPageAccess(userId, pageId, 'read');
+    const [conn, link] = await Promise.all([
+      this.repo.findConnection(userId, 'github'),
+      this.repo.findGithubLink(pageId),
+    ]);
 
-    const link = await this.repo.findProjectLink(projectId, conn.id);
     return {
-      isConnected: true,
-      accountName: conn.accountName,
+      isConnected: Boolean(conn && !conn.authFailedAt && conn.status === 'connected'),
+      accountName: conn?.accountName ?? null,
       link: link
         ? {
             id: link.id,
-            repoFullName: link.collectionId,
-            branch: link.targetBibFile,
+            repoFullName: link.repoFullName,
+            branch: link.branch,
             lastSyncedAt: link.lastSyncedAt,
           }
         : null,
     };
   }
 
-  async pushProjectToGithub(userId: string, dto: PushGithubDto) {
-    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
-    const { token, connId } = await this.getDecryptedGithubToken(userId);
+  async pushPageToGithub(userId: string, dto: PushGithubDto) {
+    await this.repo.assertUserPageAccess(userId, dto.pageId, 'write');
+    const { token } = await this.getDecryptedGithubToken(userId);
 
-    const link = await this.repo.findProjectLink(dto.projectId, connId);
+    const link = await this.repo.findGithubLink(dto.pageId);
     if (!link) {
       throw new BadRequestException(
-        'This project is not linked to a GitHub repository. Please link a repository first.',
+        'This page is not linked to a GitHub repository. Please link a repository first.',
       );
     }
 
-    const repoFullName = link.collectionId;
-    const branch = dto.branch || link.targetBibFile || 'main';
+    const repoFullName = link.repoFullName;
+    const branch = dto.branch || link.branch || 'main';
 
-    // 1. Gather all project entries (text documents and binary assets)
     const entries = await this.exportImportService.collectProjectEntries(
-      dto.projectId,
+      dto.pageId,
       false,
     );
     if (entries.length === 0) {
-      throw new BadRequestException('Project has no files to commit.');
+      throw new BadRequestException('Page has no files to commit.');
     }
 
-    // 2. Commit and push tree to GitHub
     const filesToPush = await Promise.all(
       entries.map(async (e) => ({
         path: e.path,
@@ -793,8 +788,7 @@ export class IntegrationsService {
       commitMessage: dto.commitMessage,
     });
 
-    // 3. Mark link as synced
-    await this.repo.updateProjectLinkLastSynced(link.id);
+    await this.repo.updateGithubLinkLastSynced(link.id);
 
     return {
       success: true,
@@ -807,21 +801,20 @@ export class IntegrationsService {
     };
   }
 
-  async pullProjectFromGithub(userId: string, dto: PullGithubDto) {
-    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
-    const { token, connId } = await this.getDecryptedGithubToken(userId);
+  async pullPageFromGithub(userId: string, dto: PullGithubDto) {
+    await this.repo.assertUserPageAccess(userId, dto.pageId, 'write');
+    const { token } = await this.getDecryptedGithubToken(userId);
 
-    const link = await this.repo.findProjectLink(dto.projectId, connId);
+    const link = await this.repo.findGithubLink(dto.pageId);
     if (!link) {
       throw new BadRequestException(
-        'This project is not linked to a GitHub repository. Please link a repository first.',
+        'This page is not linked to a GitHub repository. Please link a repository first.',
       );
     }
 
-    const repoFullName = link.collectionId;
-    const branch = dto.branch || link.targetBibFile || 'main';
+    const repoFullName = link.repoFullName;
+    const branch = dto.branch || link.branch || 'main';
 
-    // 1. Fetch all blobs from GitHub tree
     const pulledFiles = await this.githubProvider.pullProjectTree({
       decryptedToken: token,
       repoFullName,
@@ -834,20 +827,17 @@ export class IntegrationsService {
       );
     }
 
-    // 2. Wrap into ArchiveEntryVo for safe reconstitution
     const archiveEntries = pulledFiles.map((file) =>
       ArchiveEntryVo.create(file.path, file.data),
     );
 
-    // 3. Hydrate project entries via domain port
     const summary = await this.exportImportService.hydrateProjectEntries(
-      dto.projectId,
+      dto.pageId,
       archiveEntries,
       userId,
     );
 
-    // 4. Mark link as synced
-    await this.repo.updateProjectLinkLastSynced(link.id);
+    await this.repo.updateGithubLinkLastSynced(link.id);
 
     return {
       success: true,
@@ -860,11 +850,10 @@ export class IntegrationsService {
   }
 
   async importGithubRepo(userId: string, dto: ImportGithubRepoDto) {
-    await this.repo.assertUserProjectAccess(userId, dto.projectId, true);
+    await this.repo.assertUserPageAccess(userId, dto.pageId, 'manage');
     const { token, connId } = await this.getDecryptedGithubToken(userId);
     const branch = dto.branch || 'main';
 
-    // 1. Fetch all blobs from GitHub tree
     const pulledFiles = await this.githubProvider.pullProjectTree({
       decryptedToken: token,
       repoFullName: dto.repoFullName,
@@ -877,27 +866,23 @@ export class IntegrationsService {
       );
     }
 
-    // 2. Wrap into ArchiveEntryVo
     const archiveEntries = pulledFiles.map((file) =>
       ArchiveEntryVo.create(file.path, file.data),
     );
 
-    // 3. Hydrate project entries
     const summary = await this.exportImportService.hydrateProjectEntries(
-      dto.projectId,
+      dto.pageId,
       archiveEntries,
       userId,
     );
 
-    // 4. Link or update link
-    const link = await this.repo.upsertProjectLink({
-      projectId: dto.projectId,
+    const link = await this.repo.upsertGithubLink({
+      pageId: dto.pageId,
       userIntegrationId: connId,
-      collectionId: dto.repoFullName,
-      collectionName: dto.repoFullName,
-      targetBibFile: branch,
+      repoFullName: dto.repoFullName,
+      branch,
     });
-    await this.repo.updateProjectLinkLastSynced(link.id);
+    await this.repo.updateGithubLinkLastSynced(link.id);
 
     return {
       success: true,

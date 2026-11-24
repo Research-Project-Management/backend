@@ -3,7 +3,7 @@ import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 export class SyncCollectionDto {
   @IsNotEmpty()
   @IsString()
-  projectId!: string;
+  pageId!: string;
 
   @IsNotEmpty()
   @IsString()
@@ -37,6 +37,5 @@ export class SyncLibraryCollectionDto {
 
   @IsOptional()
   @IsString()
-  projectId?: string;
+  spaceId?: string;
 }
-

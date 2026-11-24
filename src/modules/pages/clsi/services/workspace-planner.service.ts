@@ -807,7 +807,7 @@ export class WorkspacePlannerService {
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
-          await this.prisma.pageSnapshot.create({
+          await (this.prisma.pageSnapshot as any).create({
             data: {
               spaceId: projectId,
               pageId: canonicalPageId,
@@ -815,8 +815,7 @@ export class WorkspacePlannerService {
               summary: `Compilation milestone (${metricEngine})`,
               createdById: userId || null,
               isAutomatic: true,
-              files: filesJson as unknown as Prisma.InputJsonValue,
-              sizeBytes: snapshotSizeBytes,
+              totalBytes: snapshotSizeBytes,
             },
           });
           savedVersion = candidateVersion;

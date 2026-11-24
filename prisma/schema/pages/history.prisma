@@ -1,7 +1,20 @@
 // ============================================================================
-// Pages Subsystem: History & Snapshots Sub-Domain
-// Self-managed domain schema: PageSnapshot, PageSnapshotLabel
+// Pages Subsystem: History & Snapshots Sub-Domain (Normalized 3NF / BCNF)
+// Models: HistoryBlob, PageSnapshot, PageSnapshotFile, PageSnapshotLabel
 // ============================================================================
+
+model HistoryBlob {
+  contentHash String   @id @map("content_hash") @db.Char(64)
+  content     String?  @db.Text
+  sizeBytes   Int      @default(0) @map("size_bytes")
+  inStorage   Boolean  @default(false) @map("in_storage")
+  storageKey  String?  @map("storage_key") @db.VarChar(512)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  snapshotFiles PageSnapshotFile[]
+
+  @@map("history_blobs")
+}
 
 model PageSnapshot {
   id          String   @id @default(uuid(7)) @db.Uuid
@@ -12,41 +25,47 @@ model PageSnapshot {
   summary     String?  @db.VarChar(500)
   createdById String?  @map("created_by_id") @db.Uuid
   isAutomatic Boolean  @default(false) @map("is_automatic")
-  files       Json     @default("{}") @db.JsonB
-  sizeBytes   Int      @default(0) @map("size_bytes")
-  inStorage   Boolean  @default(false) @map("in_storage")
-  storageKey  String?  @map("storage_key") @db.VarChar(512)
+  totalBytes  Int      @default(0) @map("total_bytes")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  files  PageSnapshotFile[]
   labels PageSnapshotLabel[]
 
   @@unique([id, pageId], map: "uq_page_snapshots_id_page")
   @@unique([pageId, version], map: "uq_page_snapshots_page_version")
   @@index([spaceId, version], map: "idx_page_snapshots_space_version")
-  @@index([spaceId, createdAt(sort: Desc)], map: "idx_page_snapshots_space_created_desc")
   @@index([pageId, createdAt(sort: Desc)], map: "idx_page_snapshots_page_created_desc")
-  @@index([spaceId, inStorage], map: "idx_page_snapshots_storage")
-  @@index([pageId, inStorage], map: "idx_page_snapshots_page_storage")
   @@map("page_snapshots")
+}
+
+model PageSnapshotFile {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  snapshotId  String       @map("snapshot_id") @db.Uuid
+  snapshot    PageSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade, map: "fk_page_snapshot_files_snapshot")
+  pathname    String       @db.VarChar(512)
+  kind        String       @db.VarChar(16) // 'doc' | 'file'
+  isRoot      Boolean      @default(false) @map("is_root")
+  entityId    String?      @map("entity_id") @db.Uuid
+  contentHash String       @map("content_hash") @db.Char(64)
+  blob        HistoryBlob  @relation(fields: [contentHash], references: [contentHash], onDelete: Restrict, map: "fk_page_snapshot_files_blob")
+
+  @@unique([snapshotId, pathname], map: "uq_page_snapshot_files_snapshot_path")
+  @@index([contentHash], map: "idx_page_snapshot_files_blob_hash")
+  @@index([pathname], map: "idx_page_snapshot_files_pathname")
+  @@map("page_snapshot_files")
 }
 
 model PageSnapshotLabel {
   id          String       @id @default(uuid(7)) @db.Uuid
-  spaceId     String       @map("space_id") @db.Uuid
   pageId      String       @map("page_id") @db.Uuid
-  page        Page         @relation(fields: [pageId, spaceId], references: [id, spaceId], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_snapshot_labels_page_space")
   snapshotId  String       @map("snapshot_id") @db.Uuid
-  snapshot    PageSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade, map: "fk_page_snapshot_labels_snapshot_id")
-  version     Int
+  snapshot    PageSnapshot @relation(fields: [snapshotId, pageId], references: [id, pageId], onDelete: Cascade, map: "fk_page_snapshot_labels_snapshot_page")
   label       String       @db.VarChar(255)
   createdById String?      @map("created_by_id") @db.Uuid
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([pageId, label], map: "uq_page_snapshot_labels_page_label")
-  @@index([spaceId, label], map: "idx_page_snapshot_labels_space_label")
-  @@index([spaceId, version], map: "idx_page_snapshot_labels_space_version")
-  @@index([pageId, version], map: "idx_page_snapshot_labels_page_version")
   @@index([snapshotId], map: "idx_page_snapshot_labels_snapshot_id")
   @@map("page_snapshot_labels")
 }

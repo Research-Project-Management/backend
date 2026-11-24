@@ -25,10 +25,10 @@ export class CreateGithubRepoDto {
 }
 
 export class LinkGithubRepoDto {
-  @ApiProperty({ description: 'Target Project UUID' })
+  @ApiProperty({ description: 'Target Page UUID' })
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  pageId!: string;
 
   @ApiProperty({
     description: 'GitHub repository full name (owner/repo)',
@@ -45,14 +45,14 @@ export class LinkGithubRepoDto {
 }
 
 export class PushGithubDto {
-  @ApiProperty({ description: 'Target Project UUID' })
+  @ApiProperty({ description: 'Target Page UUID' })
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  pageId!: string;
 
   @ApiPropertyOptional({
     description: 'Commit message',
-    default: 'Update manuscript from Flux LaTeX Platform',
+    default: 'Update manuscript from Flux',
   })
   @IsString()
   @IsOptional()
@@ -65,10 +65,10 @@ export class PushGithubDto {
 }
 
 export class PullGithubDto {
-  @ApiProperty({ description: 'Target Project UUID' })
+  @ApiProperty({ description: 'Target Page UUID' })
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  pageId!: string;
 
   @ApiPropertyOptional({ description: 'Target branch', default: 'main' })
   @IsString()
@@ -77,10 +77,10 @@ export class PullGithubDto {
 }
 
 export class ImportGithubRepoDto {
-  @ApiProperty({ description: 'Target Project UUID' })
+  @ApiProperty({ description: 'Target Page UUID' })
   @IsString()
   @IsNotEmpty()
-  projectId!: string;
+  pageId!: string;
 
   @ApiProperty({
     description: 'GitHub repository full name (owner/repo)',

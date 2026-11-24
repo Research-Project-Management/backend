@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { randomUUID } from 'crypto';
 import { RedisCacheService } from '@/core';
 import {
@@ -60,13 +61,12 @@ export class IdempotentConsumerService implements IIdempotentConsumer {
    * Generates standardized inbox deduplication key.
    */
   public buildKey(consumer: string, eventId: string): string {
-    return `library:inbox:${consumer}:${eventId}`;
+    return LIBRARY_REDIS_KEYS.inbox(consumer, eventId);
   }
 
   private extractDbIdempotencyKey(key: string): string {
-    return key.startsWith('library:inbox:')
-      ? key.slice('library:inbox:'.length)
-      : key;
+    const prefix = LIBRARY_REDIS_KEYS.inboxPrefix();
+    return key.startsWith(prefix) ? key.slice(prefix.length) : key;
   }
 
   /**

@@ -117,49 +117,49 @@ export class IntegrationsController {
     return await this.service.createGithubRepo(userId, dto);
   }
 
-  @Get('github/projects/:projectId')
-  @ApiOperation({ summary: 'Get GitHub link status for a project' })
-  async getProjectGithubLink(
+  @Get('github/pages/:pageId')
+  @ApiOperation({ summary: 'Get GitHub link status for a page' })
+  async getPageGithubLink(
     @CurrentUser('id') userId: string,
-    @Param('projectId') projectId: string,
+    @Param('pageId') pageId: string,
   ) {
-    return await this.service.getProjectGithubLink(userId, projectId);
+    return await this.service.getPageGithubLink(userId, pageId);
   }
 
-  @Post('github/projects/link')
-  @ApiOperation({ summary: 'Link a project to a GitHub repository' })
-  async linkProjectGithub(
+  @Post('github/pages/link')
+  @ApiOperation({ summary: 'Link a page to a GitHub repository' })
+  async linkPageGithub(
     @CurrentUser('id') userId: string,
     @Body() dto: LinkGithubRepoDto,
   ) {
-    return await this.service.linkProjectGithub(userId, dto);
+    return await this.service.linkPageGithub(userId, dto);
   }
 
-  @Post('github/projects/push')
+  @Post('github/pages/push')
   @ApiOperation({
     summary: 'Push manuscript files to linked GitHub repository',
   })
-  async pushProjectGithub(
+  async pushPageGithub(
     @CurrentUser('id') userId: string,
     @Body() dto: PushGithubDto,
   ) {
-    return await this.service.pushProjectToGithub(userId, dto);
+    return await this.service.pushPageToGithub(userId, dto);
   }
 
-  @Post('github/projects/pull')
+  @Post('github/pages/pull')
   @ApiOperation({
-    summary: 'Pull latest files from linked GitHub repository into project',
+    summary: 'Pull latest files from linked GitHub repository into page',
   })
-  async pullProjectGithub(
+  async pullPageGithub(
     @CurrentUser('id') userId: string,
     @Body() dto: PullGithubDto,
   ) {
-    return await this.service.pullProjectFromGithub(userId, dto);
+    return await this.service.pullPageFromGithub(userId, dto);
   }
 
-  @Post('github/projects/import')
+  @Post('github/pages/import')
   @ApiOperation({
-    summary: 'Import a GitHub repository into the project and establish a link',
+    summary: 'Import a GitHub repository into the page and establish a link',
   })
   async importGithubRepo(
     @CurrentUser('id') userId: string,
@@ -314,9 +314,9 @@ export class IntegrationsController {
 
   @Post(':provider/sync')
   @ApiOperation({
-    summary: 'Sync remote collection to project references.bib file',
+    summary: 'Sync remote collection to page references.bib file',
   })
-  async syncProject(
+  async syncPage(
     @CurrentUser('id') userId: string,
     @Param('provider') provider: string,
     @Body() dto: SyncCollectionDto,
@@ -327,7 +327,7 @@ export class IntegrationsController {
       );
     }
 
-    return await this.service.syncProjectCollection(userId, provider, dto);
+    return await this.service.syncPageCollection(userId, provider, dto);
   }
 
   @Post('zotero/api-key')

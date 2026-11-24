@@ -17,14 +17,14 @@ import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
-import { IProjectCollectorPort } from '../domain/history.ports';
+import { ISnapshotCollectorPort } from '../domain/history.ports';
 import { Snapshot } from '../domain/snapshot.domain';
 import { FileSnapshotVo } from '../domain/file-snapshot.domain';
 
 const COLLECT_CONCURRENCY = 6;
 
 @Injectable()
-export class SnapshotCollectorAdapter extends IProjectCollectorPort {
+export class SnapshotCollectorAdapter extends ISnapshotCollectorPort {
   private readonly logger = new Logger(SnapshotCollectorAdapter.name);
   private readonly liveCollab: LiveCollaborationPort;
 
@@ -34,17 +34,10 @@ export class SnapshotCollectorAdapter extends IProjectCollectorPort {
     private readonly filestoreService: FilestoreService,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
-    @Optional()
     liveCollab?: LiveCollaborationPort,
   ) {
     super();
-    const candidate = liveCollab ?? liveCollabOrLegacyRef;
-    this.liveCollab =
-      candidate &&
-      typeof (candidate as LiveCollaborationPort).flushDocs === 'function'
-        ? (candidate as LiveCollaborationPort)
-        : NOOP_LIVE_COLLABORATION;
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
   private getLiveCollab(): LiveCollaborationPort {

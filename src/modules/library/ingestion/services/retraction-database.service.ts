@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { RetractionRepository } from '@/modules/library/ingestion/repositories/retraction.repository';
 import {
   RetractionDetails,
@@ -54,7 +55,7 @@ export class RetractionDatabaseService implements OnModuleInit {
   ) {}
 
   private getRedisDoiKey(cleanDoi: string): string {
-    return `library:retraction:doi:${cleanDoi}`;
+    return LIBRARY_REDIS_KEYS.retractionDoi(cleanDoi);
   }
 
   private setBoundedMap<K, V>(

@@ -1,7 +1,7 @@
 /**
  * project-history/domain/history.ports.ts
  * Consolidated domain value objects (DiffHunkVo, FileDiffVo) and outbound ports
- * (IDiffEnginePort, IHistoryRepositoryPort, IProjectCollectorPort, IProjectRestorerPort)
+ * (IDiffEnginePort, IHistoryRepositoryPort, ISnapshotCollectorPort, ISnapshotRestorerPort)
  * for Project History.
  */
 
@@ -168,7 +168,7 @@ export abstract class IHistoryRepositoryPort {
   ): Promise<VersionLabel | null>;
 }
 
-export abstract class IProjectCollectorPort {
+export abstract class ISnapshotCollectorPort {
   /**
    * Reads all current active files across Structure, Docstore, and Filestore
    * and builds an in-memory map of relative path -> FileSnapshotVo.
@@ -192,7 +192,7 @@ export interface RestoreSingleFileResult {
   rev?: number;
 }
 
-export abstract class IProjectRestorerPort {
+export abstract class ISnapshotRestorerPort {
   /**
    * Applies the files and structure from an immutable snapshot onto the current project/page.
    */

@@ -32,7 +32,11 @@ import {
   ResolvedSpace,
   Role,
 } from '@/modules/project/access';
-import { AuthenticatedRequest } from '@/core';
+import {
+  AuthenticatedRequest,
+  UserRateLimit,
+  UserRateLimitGuard,
+} from '@/core';
 import { HistoryService } from '../services/history.service';
 import {
   CreateSnapshotDto,
@@ -232,8 +236,63 @@ export class HistoryController {
     );
   }
 
+  @Get('labels')
+  @ApiOperation({ summary: 'List all named milestone labels in history' })
+  @ApiResponse({ status: 200, type: [VersionLabelDto] })
+  async listLabels(
+    @Param('spaceId') routeSpaceId: string,
+    @Query('pageId') pageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+  ): Promise<VersionLabelDto[]> {
+    return await this.historyService.listLabels(
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      pageId,
+    );
+  }
+
+  @Get('blobs/:contentHash')
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('files-download')
+  @ApiOperation({
+    summary: 'Fetch a content-addressable historical file blob by SHA-256 hash',
+  })
+  async getBlob(
+    @Param('spaceId') routeSpaceId: string,
+    @Param('contentHash') contentHash: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+  ) {
+    return await this.historyService.getBlob(
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      contentHash,
+    );
+  }
+
+  @Post('flush')
+  @RequireRole(Role.CONTRIBUTOR)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('default')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Flush live Yjs collaboration changes into history if modified since latest snapshot',
+  })
+  async flushHistory(
+    @Param('spaceId') routeSpaceId: string,
+    @Query('pageId') pageId?: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
+  ) {
+    return await this.historyService.flushHistory(
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      this.resolveUserId(req),
+      pageId,
+    );
+  }
+
   @Get('versions/:version/export-zip')
   @RequireRole(Role.REVIEWER)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('files-download')
   @ApiOperation({
     summary: 'Export historical version snapshot as a streaming PKZIP archive',
   })

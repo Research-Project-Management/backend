@@ -113,6 +113,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     coalesced: number;
     hitRate: number;
     memoryKeys: number;
+    memoryBytes: number;
   } {
     const total = this.cacheHits + this.cacheMisses;
     return {
@@ -122,6 +123,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       coalesced: this.singleflightCoalesced,
       hitRate: total > 0 ? Number((this.cacheHits / total).toFixed(4)) : 0,
       memoryKeys: this.memoryStore.size,
+      memoryBytes: this.memoryStore.calculatedSizeBytes,
     };
   }
 

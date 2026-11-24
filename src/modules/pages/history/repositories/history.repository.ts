@@ -1,15 +1,18 @@
 /**
- * project-history/history.repository.ts
- * Direct Injectable Prisma Persistence Repository & Domain Mapper for Project History Snapshots & Labels.
+ * history/repositories/history.repository.ts
+ * Prisma Persistence Repository & Domain Mapper for 3NF History Schema
+ * (HistoryBlob, PageSnapshot, PageSnapshotFile, PageSnapshotLabel).
  */
 
 import { Injectable, ConflictException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
 import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
 import {
-  Prisma,
+  HistoryBlob as PrismaBlob,
   PageSnapshot as PrismaSnapshot,
+  PageSnapshotFile as PrismaSnapshotFile,
   PageSnapshotLabel as PrismaLabel,
 } from '@prisma/client';
 import { IHistoryRepositoryPort } from '../domain/history.ports';
@@ -23,22 +26,46 @@ import {
 
 export type { RawSnapshotFileEntry };
 
-export type PrismaSnapshotWithLabels = PrismaSnapshot & {
-  labels?: PrismaLabel[];
+export type PrismaSnapshotFileWithBlob = PrismaSnapshotFile & {
+  blob?: PrismaBlob | null;
 };
+
+export type PrismaLabelWithSnapshot = PrismaLabel & {
+  snapshot?: { spaceId: string; version: number } | null;
+  spaceId?: string;
+  projectId?: string;
+  version?: number;
+};
+
+export type PrismaSnapshotWithRelations = PrismaSnapshot & {
+  files?: PrismaSnapshotFileWithBlob[] | unknown;
+  labels?: PrismaLabelWithSnapshot[];
+  _count?: { files?: number };
+};
+
+function computeContentHash(raw: string): string {
+  return createHash('sha256').update(raw, 'utf8').digest('hex');
+}
 
 export class HistoryMapper {
   public static toDomainLabel(
-    prisma: PrismaLabel & { projectId?: string },
+    prisma: PrismaLabelWithSnapshot,
+    fallbackContext?: { spaceId?: string; version?: number },
   ): VersionLabel {
-    const spaceId = prisma.spaceId ?? prisma.projectId ?? '';
+    const spaceId =
+      prisma.snapshot?.spaceId ??
+      prisma.spaceId ??
+      prisma.projectId ??
+      fallbackContext?.spaceId ??
+      '';
+    const version = prisma.snapshot?.version ?? prisma.version ?? fallbackContext?.version ?? 1;
     return VersionLabel.create({
       id: prisma.id,
       projectId: spaceId,
       spaceId,
       pageId: prisma.pageId,
       snapshotId: prisma.snapshotId,
-      version: prisma.version,
+      version,
       label: prisma.label,
       createdById: prisma.createdById,
       createdAt: prisma.createdAt,
@@ -49,6 +76,38 @@ export class HistoryMapper {
   public static parseSnapshotFiles(
     rawFiles: unknown,
   ): Map<string, FileSnapshotVo> {
+    if (Array.isArray(rawFiles)) {
+      const map = new Map<string, FileSnapshotVo>();
+      for (const row of rawFiles as PrismaSnapshotFileWithBlob[]) {
+        const pathname = row.pathname.startsWith('/')
+          ? row.pathname
+          : `/${row.pathname}`;
+        if (row.kind === 'file') {
+          map.set(
+            pathname,
+            FileSnapshotVo.createFile(
+              pathname,
+              row.entityId ?? '',
+              row.contentHash,
+              row.blob?.sizeBytes ?? 0,
+            ),
+          );
+        } else {
+          const text = row.blob?.content ?? '';
+          map.set(
+            pathname,
+            FileSnapshotVo.createDoc(
+              pathname,
+              row.entityId ?? '',
+              text.split('\n'),
+              row.contentHash,
+              row.isRoot,
+            ),
+          );
+        }
+      }
+      return map;
+    }
     return SnapshotNormalizer.parseSnapshotFiles(rawFiles);
   }
 
@@ -64,27 +123,21 @@ export class HistoryMapper {
     createdAt: Date;
     files?: unknown;
     fileCount?: number;
-    sizeBytes?: number;
-    labels?: PrismaLabel[];
+    totalBytes?: number;
+    _count?: { files?: number };
+    labels?: PrismaLabelWithSnapshot[];
   }): Snapshot {
-    const labels = record.labels
-      ? record.labels.map((l) => this.toDomainLabel(l))
-      : [];
-    let resolvedFileCount = record.fileCount;
-    if (resolvedFileCount === undefined) {
-      if (
-        record.files &&
-        typeof record.files === 'object' &&
-        !Array.isArray(record.files)
-      ) {
-        resolvedFileCount = Object.keys(
-          record.files as Record<string, unknown>,
-        ).filter((k) => !k.startsWith('__')).length;
-      } else {
-        resolvedFileCount = record.sizeBytes ?? 0;
-      }
-    }
     const spaceId = record.spaceId ?? record.projectId ?? '';
+    const labels = record.labels
+      ? record.labels.map((l) =>
+          this.toDomainLabel(l, { spaceId, version: record.version }),
+        )
+      : [];
+    const resolvedFileCount =
+      record._count?.files ??
+      record.fileCount ??
+      (Array.isArray(record.files) ? record.files.length : 0);
+
     return Snapshot.create({
       id: record.id,
       projectId: spaceId,
@@ -102,13 +155,15 @@ export class HistoryMapper {
   }
 
   public static toDomain(
-    prisma: PrismaSnapshotWithLabels & { projectId?: string },
+    prisma: PrismaSnapshotWithRelations & { projectId?: string },
   ): Snapshot {
-    const filesMap = SnapshotNormalizer.parseSnapshotFiles(prisma.files);
-    const labels = prisma.labels
-      ? prisma.labels.map((l) => this.toDomainLabel(l))
-      : [];
     const spaceId = prisma.spaceId ?? prisma.projectId ?? '';
+    const filesMap = this.parseSnapshotFiles(prisma.files);
+    const labels = prisma.labels
+      ? prisma.labels.map((l) =>
+          this.toDomainLabel(l, { spaceId, version: prisma.version }),
+        )
+      : [];
 
     return Snapshot.create({
       id: prisma.id,
@@ -132,7 +187,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     super();
   }
 
-  public toDomain(record: PrismaSnapshotWithLabels): Snapshot {
+  public toDomain(record: PrismaSnapshotWithRelations): Snapshot {
     return HistoryMapper.toDomain(record);
   }
 
@@ -164,10 +219,69 @@ export class HistoryRepository extends IHistoryRepositoryPort {
       snapshot.pageId,
     );
 
+    const blobMap = new Map<
+      string,
+      {
+        contentHash: string;
+        content: string | null;
+        sizeBytes: number;
+        inStorage: boolean;
+        storageKey: string | null;
+      }
+    >();
+    const fileRows: Array<{
+      pathname: string;
+      kind: string;
+      isRoot: boolean;
+      entityId: string | null;
+      contentHash: string;
+    }> = [];
+    let totalBytes = 0;
+
+    for (const [pathname, vo] of snapshot.files.entries()) {
+      const isDoc = vo.type === 'doc';
+      const content = isDoc ? (vo.lines ?? []).join('\n') : null;
+      const sizeBytes = isDoc
+        ? Buffer.byteLength(content ?? '', 'utf8')
+        : (vo.sizeBytes ?? 0);
+      totalBytes += sizeBytes;
+
+      const rawHash =
+        vo.hash && vo.hash.length === 64
+          ? vo.hash
+          : computeContentHash(
+              isDoc ? (content ?? '') : `${pathname}:${vo.fileId ?? ''}:${sizeBytes}`,
+            );
+
+      if (!blobMap.has(rawHash)) {
+        blobMap.set(rawHash, {
+          contentHash: rawHash,
+          content,
+          sizeBytes,
+          inStorage: !isDoc,
+          storageKey: null,
+        });
+      }
+
+      const rawEntityId = isDoc ? vo.docId : vo.fileId;
+      fileRows.push({
+        pathname,
+        kind: isDoc ? 'doc' : 'file',
+        isRoot: Boolean(vo.isRootDoc),
+        entityId: rawEntityId && isUUID(rawEntityId) ? rawEntityId : null,
+        contentHash: rawHash,
+      });
+    }
+
+    if (blobMap.size > 0 && this.prisma.historyBlob?.createMany) {
+      await this.prisma.historyBlob.createMany({
+        data: Array.from(blobMap.values()),
+        skipDuplicates: true,
+      });
+    }
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        const filesJson = snapshot.toFilesJson() as Prisma.InputJsonValue;
-        const sizeBytes = Buffer.byteLength(JSON.stringify(filesJson), 'utf8');
         const created = await this.prisma.pageSnapshot.create({
           data: {
             id: snapshot.id,
@@ -177,11 +291,14 @@ export class HistoryRepository extends IHistoryRepositoryPort {
             summary: snapshot.summary,
             createdById: snapshot.createdById,
             isAutomatic: snapshot.isAutomatic,
-            files: filesJson,
-            sizeBytes,
+            totalBytes,
             createdAt: snapshot.createdAt,
+            ...(fileRows.length > 0
+              ? { files: { create: fileRows } }
+              : {}),
           },
           include: {
+            files: { include: { blob: true } },
             labels: true,
           },
         });
@@ -218,6 +335,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
         version,
       },
       include: {
+        files: { include: { blob: true } },
         labels: true,
       },
     });
@@ -264,10 +382,10 @@ export class HistoryRepository extends IHistoryRepositoryPort {
         summary: true,
         createdById: true,
         isAutomatic: true,
-        files: true,
-        sizeBytes: true,
+        totalBytes: true,
         createdAt: true,
         labels: true,
+        _count: { select: { files: true } },
       },
     });
 
@@ -279,7 +397,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
       ? await Promise.resolve(
           this.prisma.pageSnapshot.findUnique({
             where: { id: label.snapshotId },
-            select: { pageId: true },
+            select: { pageId: true, spaceId: true, version: true },
           }),
         ).catch(() => null)
       : null;
@@ -289,7 +407,6 @@ export class HistoryRepository extends IHistoryRepositoryPort {
 
     const existing = await this.prisma.pageSnapshotLabel.findFirst?.({
       where: {
-        spaceId: label.projectId,
         pageId: targetPageId,
         label: label.label,
       },
@@ -300,26 +417,28 @@ export class HistoryRepository extends IHistoryRepositoryPort {
           where: { id: existing.id },
           data: {
             snapshotId: label.snapshotId,
-            version: label.version,
             label: label.label,
             updatedAt: label.updatedAt,
           },
+          include: { snapshot: { select: { spaceId: true, version: true } } },
         })
       : await this.prisma.pageSnapshotLabel.create({
           data: {
             id: label.id,
-            spaceId: label.projectId,
             pageId: targetPageId,
             snapshotId: label.snapshotId,
-            version: label.version,
             label: label.label,
             createdById: label.createdById,
             createdAt: label.createdAt,
             updatedAt: label.updatedAt,
           },
+          include: { snapshot: { select: { spaceId: true, version: true } } },
         });
 
-    return HistoryMapper.toDomainLabel(saved);
+    return HistoryMapper.toDomainLabel(saved, {
+      spaceId: snapRow?.spaceId ?? label.projectId,
+      version: snapRow?.version ?? label.version,
+    });
   }
 
   public async deleteLabel(
@@ -333,7 +452,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     await this.prisma.pageSnapshotLabel.deleteMany({
       where: {
         id: labelId,
-        spaceId: projectId,
+        snapshot: { spaceId: projectId },
         ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
       },
     });
@@ -347,33 +466,78 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     const canonicalPageId = await this.resolveTargetPageId(projectId, pageId);
     const found = await this.prisma.pageSnapshotLabel.findFirst({
       where: {
-        spaceId: projectId,
         pageId: canonicalPageId,
         label,
+        snapshot: { spaceId: projectId },
       },
+      include: { snapshot: { select: { spaceId: true, version: true } } },
     });
 
     if (!found) return null;
-    return HistoryMapper.toDomainLabel(found);
+    return HistoryMapper.toDomainLabel(found, { spaceId: projectId });
   }
 
-  /**
-   * Finds a snapshot version conditioned strictly on projectId.
-   */
+  public async listLabels(
+    spaceId: string,
+    pageId?: string,
+  ): Promise<VersionLabel[]> {
+    const canonicalPageId = pageId
+      ? await this.resolveTargetPageId(spaceId, pageId)
+      : undefined;
+    const rows = await this.prisma.pageSnapshotLabel.findMany({
+      where: {
+        snapshot: { spaceId },
+        ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
+      },
+      include: { snapshot: { select: { spaceId: true, version: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) =>
+      HistoryMapper.toDomainLabel(row, { spaceId }),
+    );
+  }
+
+  public async findBlobInSpace(
+    spaceId: string,
+    contentHash: string,
+  ): Promise<{
+    contentHash: string;
+    content: string | null;
+    sizeBytes: number;
+    inStorage: boolean;
+    storageKey: string | null;
+  } | null> {
+    const match = await this.prisma.pageSnapshotFile.findFirst({
+      where: {
+        contentHash,
+        snapshot: { spaceId },
+      },
+      include: { blob: true },
+    });
+    if (!match?.blob) return null;
+    return {
+      contentHash: match.blob.contentHash,
+      content: match.blob.content,
+      sizeBytes: match.blob.sizeBytes,
+      inStorage: match.blob.inStorage,
+      storageKey: match.blob.storageKey,
+    };
+  }
+
   public async findSnapshotInProject(
     projectId: string,
     versionOrId: string | number,
-  ): Promise<PrismaSnapshotWithLabels | null> {
+  ): Promise<PrismaSnapshotWithRelations | null> {
     if (typeof versionOrId === 'number' || !isNaN(Number(versionOrId))) {
       const snap = await this.prisma.pageSnapshot.findFirst({
         where: { spaceId: projectId, version: Number(versionOrId) },
-        include: { labels: true },
+        include: { files: { include: { blob: true } }, labels: true },
       });
       if (snap) return snap;
       return this.prisma.pageSnapshot
         .findFirst({
           where: { pageId: projectId, version: Number(versionOrId) },
-          include: { labels: true },
+          include: { files: { include: { blob: true } }, labels: true },
         })
         .catch(() => null);
     }
@@ -381,13 +545,13 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     if (isUUID(String(versionOrId))) {
       const snap = await this.prisma.pageSnapshot.findFirst({
         where: { id: String(versionOrId), spaceId: projectId },
-        include: { labels: true },
+        include: { files: { include: { blob: true } }, labels: true },
       });
       if (snap) return snap;
       return this.prisma.pageSnapshot
         .findFirst({
           where: { id: String(versionOrId), pageId: projectId },
-          include: { labels: true },
+          include: { files: { include: { blob: true } }, labels: true },
         })
         .catch(() => null);
     }

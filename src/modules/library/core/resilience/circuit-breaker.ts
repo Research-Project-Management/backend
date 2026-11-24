@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { LIBRARY_REDIS_KEYS } from '../config/library.config';
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
@@ -376,7 +377,7 @@ export class TokenBucketRateLimiter {
     const client = this.getRedisClient();
     if (client) {
       try {
-        const redisKey = `flux:ratelimit:${this.name}`;
+        const redisKey = LIBRARY_REDIS_KEYS.tokenBucketRateLimit(this.name);
         const res = (await client.eval(
           TokenBucketRateLimiter.ACQUIRE_LUA_SCRIPT,
           1,
@@ -511,7 +512,7 @@ export class TokenBucketRateLimiter {
         .eval(
           TokenBucketRateLimiter.RESET_LUA_SCRIPT,
           1,
-          `flux:ratelimit:${this.name}`,
+          LIBRARY_REDIS_KEYS.tokenBucketRateLimit(this.name),
           this.capacity,
           Date.now(),
         )

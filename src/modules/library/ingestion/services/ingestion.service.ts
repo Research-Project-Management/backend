@@ -39,6 +39,7 @@ import {
   MetadataPort,
 } from '@/modules/library/ingestion/types/metadata.types';
 import { DistributedLockService, RedisCacheService } from '@/core';
+import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import {
   MetadataResolverService,
   ReResolveMetadataOptions,
@@ -177,7 +178,11 @@ export class IngestionService {
 
     const idempotencyKey = envelope.idempotencyKey?.trim();
     if (idempotencyKey) {
-      const lockKey = `flux:lock:ingest:${envelope.userId}:${envelope.projectId ?? 'personal'}:${idempotencyKey}`;
+      const lockKey = LIBRARY_REDIS_KEYS.ingestionLock(
+        envelope.userId,
+        envelope.projectId,
+        idempotencyKey,
+      );
 
       if (this.lockService && this.cache?.isReady()) {
         const lockToken = await this.lockService.acquireLock(lockKey, 30000);
