@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PrismaModule, CacheModule } from '@/core';
+import { PrismaModule, RedisModule } from '@/core';
 import { LiveCollaborationPort } from '@/modules/pages/core/ports/live-collaboration.port';
 
 import { RealtimeCoreModule } from '../../core/module';
@@ -19,7 +19,7 @@ import {
 } from './bridge';
 
 @Module({
-  imports: [ConfigModule, PrismaModule, CacheModule, RealtimeCoreModule],
+  imports: [ConfigModule, PrismaModule, RedisModule, RealtimeCoreModule],
   providers: [
     PagesRealtimeConfigService,
     PagesGateway,

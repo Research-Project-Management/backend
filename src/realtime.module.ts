@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import {
-  CacheModule,
+  RedisModule,
   HealthModule,
   LoggerModule,
   PrismaModule,
@@ -23,7 +23,7 @@ import { RealtimeServerModule } from './modules/realtime/server/module';
     }),
     ResourceModule,
     PrismaModule,
-    CacheModule,
+    RedisModule,
     LoggerModule,
     HealthModule,
     RealtimeServerModule,

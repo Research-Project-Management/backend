@@ -12,7 +12,7 @@ import { applyTextEditsAndCapture } from './util';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 
-import { RedisCacheService, SystemResourceGovernor } from '@/core';
+import { RedisCacheService, RedisPubSubService, SystemResourceGovernor } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   PAGES_REALTIME_DEFAULTS,
@@ -71,6 +71,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     @Optional() validator?: YjsUpdateValidator,
     @Optional() private readonly config?: PagesRealtimeConfigService,
     @Optional() private readonly resourceGovernor?: SystemResourceGovernor,
+    @Optional() private readonly pubSub?: RedisPubSubService,
   ) {
     const raw = this.config?.getYjsConfig?.();
     const d = PAGES_REALTIME_DEFAULTS.yjs;
@@ -177,6 +178,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
       this.redis,
       this.logger,
       (raw) => this.handleClusterRelayRaw(raw),
+      this.pubSub,
     );
   }
 
@@ -384,12 +386,13 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     if (inFlight) {
       await inFlight.catch(() => {});
     }
-    publishClusterRelayHelper(this.redis, this.logger, this.instanceId, {
-      type: 'external-text',
-      projectId,
-      docId,
-      text: nextText,
-    });
+    publishClusterRelayHelper(
+      this.redis,
+      this.logger,
+      this.instanceId,
+      { type: 'external-text', projectId, docId, text: nextText },
+      this.pubSub,
+    );
     if (!this.isActive(projectId, docId)) {
       await this.deleteRedisSnapshot(projectId, docId);
       return { active: false, frame: null };

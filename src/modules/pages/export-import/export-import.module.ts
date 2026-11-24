@@ -12,7 +12,7 @@ import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 import { ClsiModule } from '@/modules/pages/clsi/clsi.module';
 import { TemplatesModule } from '@/modules/pages/templates/templates.module';
 import { TemplatesService } from '@/modules/pages/templates/templates.service';
-import { ProjectHistoryModule } from '@/modules/pages/project-history/project-history.module';
+import { HistoryModule } from '@/modules/pages/history/history.module';
 
 // Adapters & Repositories
 import { ZipAdapter } from './services/zip.adapter';
@@ -34,7 +34,7 @@ import { ExportImportController } from './export-import.controller';
     FilestoreModule,
     ClsiModule,
     TemplatesModule,
-    ProjectHistoryModule,
+    HistoryModule,
   ],
   controllers: [ExportImportController],
   providers: [

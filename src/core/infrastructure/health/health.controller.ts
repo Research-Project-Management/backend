@@ -6,7 +6,7 @@ import {
   MemoryHealthIndicator,
 } from '@nestjs/terminus';
 import { PrismaHealthIndicator } from './prisma.health';
-import { RedisCacheService } from '../redis/redis.service';
+import { RedisCacheService } from '../redis/cache.service';
 import {
   getDefaultResourceGovernor,
   SystemResourceGovernor,
@@ -63,35 +63,17 @@ export class HealthController {
     let redisStats: Record<string, unknown> = { connected: isRedisReady };
 
     if (isRedisReady && this.redisCache) {
-      try {
-        const client = this.redisCache.getClient();
-        if (client) {
-          const rawInfo = await client.info('stats');
-          const lines = rawInfo
-            .split('\r\n')
-            .filter((l) => l && !l.startsWith('#'));
-          const parsedStats: Record<string, string> = {};
-          lines.slice(0, 8).forEach((line) => {
-            const [k, v] = line.split(':');
-            if (k && v) parsedStats[k] = v;
-          });
-          redisStats = {
-            connected: true,
-            stats: parsedStats,
-          };
-        }
-      } catch (_err) {
-        redisStats = {
-          connected: false,
-          error: 'Redis connection unavailable',
-        };
-      }
+      const parsedStats = await this.redisCache.getServerInfoStats(8);
+      redisStats = parsedStats
+        ? { connected: true, stats: parsedStats }
+        : { connected: false, error: 'Redis connection unavailable' };
     }
 
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
       redis: redisStats,
+      cache: this.redisCache?.getStats() ?? null,
       queues: {
         compilation: {
           active: 0,

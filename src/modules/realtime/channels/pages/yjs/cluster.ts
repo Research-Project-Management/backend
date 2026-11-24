@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 import { applyTextEditsAndCapture } from './util';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, RedisPubSubService } from '@/core';
 import { emitToLocalRoom } from '../../../core/rooms';
 import {
   PAGES_EVENTS,
@@ -137,7 +137,21 @@ export async function initRedisClusterRelayHelper(
   redis: RedisCacheService | undefined,
   logger: Logger,
   onRawMessage: (raw: string) => void,
+  pubSub?: RedisPubSubService,
 ): Promise<YjsRelaySubscriber | null> {
+  if (pubSub?.isEnabled()) {
+    const unsubscribe = await pubSub.subscribe(
+      PAGES_REDIS_CHANNELS.YJS_CLUSTER,
+      (_channel, raw) => onRawMessage(raw),
+    );
+    return {
+      quit: unsubscribe,
+      disconnect: () => {
+        void unsubscribe();
+      },
+    };
+  }
+
   if (!redis || !redis.isReady()) return null;
   const baseClient = redis.getClient?.();
   if (!baseClient || typeof baseClient.duplicate !== 'function') return null;
@@ -168,15 +182,28 @@ export function publishClusterRelayHelper(
   logger: Logger,
   instanceId: string,
   payload: Omit<YjsClusterRelayMessage, 'instanceId'>,
+  pubSub?: RedisPubSubService,
 ): void {
-  if (!redis || !redis.isReady()) return;
-  const client = redis.getClient?.();
-  if (!client || typeof client.publish !== 'function') return;
-
   const fullMsg: YjsClusterRelayMessage = {
     instanceId,
     ...payload,
   };
+
+  if (pubSub?.isReady()) {
+    void pubSub
+      .publish(PAGES_REDIS_CHANNELS.YJS_CLUSTER, JSON.stringify(fullMsg))
+      .catch((err: unknown) => {
+        logger.warn(
+          `Failed to publish Yjs cluster relay message: ${(err as Error)?.message}`,
+        );
+      });
+    return;
+  }
+
+  if (!redis || !redis.isReady()) return;
+  const client = redis.getClient?.();
+  if (!client || typeof client.publish !== 'function') return;
+
   Promise.resolve(
     client.publish(PAGES_REDIS_CHANNELS.YJS_CLUSTER, JSON.stringify(fullMsg)),
   ).catch((err: unknown) => {

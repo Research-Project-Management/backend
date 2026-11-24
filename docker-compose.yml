@@ -47,13 +47,13 @@ services:
           - postgres
 
   # ----------------------------------------------------------------------------
-  # 2. Redis Cache & Queue Service
+  # 2. Redis Service (Unified Port 31679: Cache + Realtime Pub/Sub + BullMQ Queue)
   # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: flux_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-140mb} --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-140mb} --maxmemory-policy noeviction
     ports:
       - "127.0.0.1:${REDIS_PORT:-31679}:6379"
     volumes:
@@ -106,6 +106,7 @@ services:
       DIRECT_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
       REDIS_URL: "redis://redis:6379"
       REDIS_CACHE_URL: "redis://redis:6379"
+      REDIS_REALTIME_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
       CLSI_URL: http://flux_clsi:3013
       CLSI_SANDBOX_MODE: remote
@@ -166,6 +167,7 @@ services:
       DIRECT_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
       REDIS_URL: "redis://redis:6379"
       REDIS_CACHE_URL: "redis://redis:6379"
+      REDIS_REALTIME_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
       CLSI_URL: http://flux_clsi:3013
       CLSI_SANDBOX_MODE: remote
@@ -272,6 +274,7 @@ services:
       DIRECT_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-flux-db}?schema=public"
       REDIS_URL: "redis://redis:6379"
       REDIS_CACHE_URL: "redis://redis:6379"
+      REDIS_REALTIME_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}

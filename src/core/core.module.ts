@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './infrastructure/database/prisma.module';
-import { CacheModule } from './infrastructure/redis/cache.module';
+import { RedisModule } from './infrastructure/redis/redis.module';
 import { LoggerModule } from './logger/logger.module';
 import { IdempotencyModule } from './infrastructure/idempotency/idempotency.module';
 import { HealthModule } from './infrastructure/health/health.module';
@@ -16,7 +16,7 @@ import { UserRateLimitGuard } from './http/rate-limit/user-rate-limit.guard';
   imports: [
     ResourceModule,
     PrismaModule,
-    CacheModule,
+    RedisModule,
     LoggerModule,
     IdempotencyModule,
     HealthModule,
@@ -34,7 +34,7 @@ import { UserRateLimitGuard } from './http/rate-limit/user-rate-limit.guard';
   exports: [
     ResourceModule,
     PrismaModule,
-    CacheModule,
+    RedisModule,
     LoggerModule,
     IdempotencyModule,
     HealthModule,

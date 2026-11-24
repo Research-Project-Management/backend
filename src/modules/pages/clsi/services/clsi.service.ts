@@ -150,7 +150,7 @@ export class ClsiService implements OnModuleDestroy {
 
     this.remoteClient =
       remoteClient ??
-      new RemoteClsiClientAdapter(this.configService, this.cache);
+      new RemoteClsiClientAdapter(this.configService);
     this.workspacePlanner =
       workspacePlanner ??
       new WorkspacePlannerService(

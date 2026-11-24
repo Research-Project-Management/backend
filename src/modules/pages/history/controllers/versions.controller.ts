@@ -1,5 +1,5 @@
 /**
- * modules/pages/project-history/controllers/page-versions.controller.ts
+ * modules/pages/history/controllers/versions.controller.ts
  * Domain controller exposing version history, diff, label, timeline, and point-in-time endpoints.
  */
 
@@ -24,7 +24,7 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
-import { PageVersionsService } from '../services/page-versions.service';
+import { PageVersionsService } from '../services/versions.service';
 
 @ApiTags('Manuscripts - Pages History & Export')
 @ApiBearerAuth('JWT-auth')

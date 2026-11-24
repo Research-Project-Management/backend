@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { RedisCacheService } from '../redis/redis.service';
+import { RedisCacheService } from '../redis/cache.service';
 import { Prisma } from '@prisma/client';
 import {
   IdempotencyCheckResult,

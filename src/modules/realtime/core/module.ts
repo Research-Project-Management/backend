@@ -1,7 +1,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
-import { CacheModule } from '@/core';
+import { RedisModule } from '@/core';
 
 import { WsAuthService } from './auth';
 import { REALTIME_BUS_MODE, RealtimeEventBus } from './bus';
@@ -10,7 +10,7 @@ import { WsAllExceptionsFilter } from './errors';
 import { WsRateLimiter } from './rate-limit';
 
 @Module({
-  imports: [ConfigModule, CacheModule, JwtModule.register({})],
+  imports: [ConfigModule, RedisModule, JwtModule.register({})],
   providers: [
     WsAuthService,
     WsAllExceptionsFilter,
@@ -30,7 +30,7 @@ export class RealtimeCoreModule {
   public static forPublisher(): DynamicModule {
     return {
       module: RealtimeCoreModule,
-      imports: [ConfigModule, CacheModule],
+      imports: [ConfigModule, RedisModule],
       providers: [
         RealtimeConfigService,
         { provide: REALTIME_BUS_MODE, useValue: 'publisher' },

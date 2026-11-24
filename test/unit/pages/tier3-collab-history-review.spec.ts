@@ -12,25 +12,25 @@ import {
   PAGES_REALTIME_DEFAULTS,
   PagesRealtimeConfigService,
 } from '@/modules/realtime/channels/pages/config';
+import { Snapshot } from '@/modules/pages/history/domain/snapshot.domain';
 import {
-  Snapshot,
   VersionLabel,
+  InvalidVersionLabelException,
+} from '@/modules/pages/history/domain/version-label.domain';
+import {
   VersionNotFoundException,
   DuplicateLabelException,
   EmptyProjectException,
-  InvalidVersionLabelException,
-  FileSnapshotVo,
-  DiffEngine,
-} from '@/modules/pages/project-history/domain';
+} from '@/modules/pages/history/domain/history.errors';
+import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.domain';
+import { DiffEngine } from '@/modules/pages/history/domain/diff.domain';
 import {
   PageHistoryMapper,
-  ProjectHistoryRepository,
-} from '@/modules/pages/project-history/project-history.repository';
-import { ProjectHistoryService } from '@/modules/pages/project-history/project-history.service';
-import type {
-  PageSnapshotCollectorAdapter,
-  PageSnapshotRestorerAdapter,
-} from '@/modules/pages/project-history/adapters/project-history.adapters';
+  HistoryRepository,
+} from '@/modules/pages/history/repositories/history.repository';
+import { HistoryService } from '@/modules/pages/history/services/history.service';
+import type { PageSnapshotCollectorAdapter } from '@/modules/pages/history/adapters/snapshot-collector.adapter';
+import type { PageSnapshotRestorerAdapter } from '@/modules/pages/history/adapters/snapshot-restorer.adapter';
 import { TrackChange } from '@/modules/pages/review/domain/change.domain';
 import { LinePatcher } from '@/modules/pages/review/domain/patcher.domain';
 import {
@@ -212,7 +212,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
       expect(label.pageId).toBe(PAGE_B_ID);
     });
 
-    it('ProjectHistoryService.restoreSingleFile forwards pageId and records non-destructive snapshot', async () => {
+    it('HistoryService.restoreSingleFile forwards pageId and records non-destructive snapshot', async () => {
       const targetSnapshot = Snapshot.create({
         id: 'snap-v2',
         projectId: SPACE_ID,
@@ -239,7 +239,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
         findByVersion: jest.fn().mockResolvedValue(targetSnapshot),
         getLatestVersion: jest.fn().mockResolvedValue(4),
         saveSnapshot: jest.fn().mockImplementation(async (s: Snapshot) => s),
-      } as unknown as ProjectHistoryRepository;
+      } as unknown as HistoryRepository;
 
       const mockCollector = {
         collectCurrentState: jest
@@ -270,7 +270,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
         }),
       } as unknown as PageSnapshotRestorerAdapter;
 
-      const service = new ProjectHistoryService(
+      const service = new HistoryService(
         mockRepo,
         mockCollector,
         mockRestorer,

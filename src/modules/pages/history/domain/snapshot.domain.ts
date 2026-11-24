@@ -1,12 +1,12 @@
 /**
- * project-history/core/domain/entities/snapshot.entity.ts
+ * project-history/core/domain/entities/snapshot.domain.ts
  * Domain Aggregate Entity representing an immutable project snapshot at a specific version.
  */
 
 import * as crypto from 'node:crypto';
-import { FileSnapshotVo, FileSnapshotProps } from './file-snapshot';
-import { VersionLabel } from './version-label.entity';
-import { EmptyProjectException } from './project-history.errors';
+import { FileSnapshotVo, FileSnapshotProps } from './file-snapshot.domain';
+import { VersionLabel } from './version-label.domain';
+import { EmptyProjectException } from './history.errors';
 
 export interface CreateSnapshotProps {
   id?: string;

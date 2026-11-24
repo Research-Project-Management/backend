@@ -11,15 +11,10 @@ export interface OriginConfigOptions {
 }
 
 const DEFAULT_ORIGINS = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:3002',
-  'http://localhost:5173',
-  'http://localhost:2915',
-  'http://localhost:2916',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:3001',
-  'http://127.0.0.1:2915',
+  'http://localhost:18295',
+  'http://127.0.0.1:18295',
+  'http://localhost:18300',
+  'http://127.0.0.1:18300',
 ];
 
 const LOCAL_LAN_REGEX =
@@ -33,9 +28,9 @@ const VERCEL_REGEX =
  *
  * Rules:
  * - Empty/undefined/null origin: Allowed (non-browser clients, cURL, server-to-server)
- * - Exact matches in allowlist (default local ports + CLIENT_URL + ORIGINS env)
- * - Any localhost / 127.0.0.1 / private LAN IP
- * - Vercel preview environments when enabled or in non-production environments
+ * - Exact matches in allowlist (CLIENT_URL + ORIGINS env, plus dev DEFAULT_ORIGINS outside production)
+ * - Any localhost / 127.0.0.1 / private LAN IP outside production
+ * - Vercel preview environments when explicitly enabled or configured in clientUrl (or outside production)
  */
 export function isOriginAllowed(
   origin: string | undefined | null,
@@ -57,10 +52,13 @@ export function isOriginAllowed(
   const allowVercelPreview =
     options?.allowVercelPreview ?? (process.env.ALLOW_VERCEL_PREVIEW === 'true');
   const nodeEnv = options?.nodeEnv ?? process.env.NODE_ENV;
+  const isProduction = nodeEnv === 'production';
 
   const allowedSet = new Set<string>();
-  for (const def of DEFAULT_ORIGINS) {
-    allowedSet.add(def.replace(/\/+$/, ''));
+  if (!isProduction) {
+    for (const def of DEFAULT_ORIGINS) {
+      allowedSet.add(def.replace(/\/+$/, ''));
+    }
   }
   if (clientUrl) {
     allowedSet.add(clientUrl.trim().replace(/\/+$/, ''));
@@ -76,8 +74,8 @@ export function isOriginAllowed(
     return true;
   }
 
-  // 2. Allow any localhost / 127.0.0.1 / private LAN IP origins
-  if (LOCAL_LAN_REGEX.test(normalizedOrigin)) {
+  // 2. Allow localhost / 127.0.0.1 / private LAN IP origins only outside production
+  if (!isProduction && LOCAL_LAN_REGEX.test(normalizedOrigin)) {
     return true;
   }
 
@@ -85,7 +83,7 @@ export function isOriginAllowed(
   const isVercelConfigured =
     clientUrl?.includes('.vercel.app') ||
     allowVercelPreview ||
-    nodeEnv !== 'production';
+    !isProduction;
 
   if (isVercelConfigured && VERCEL_REGEX.test(normalizedOrigin)) {
     return true;

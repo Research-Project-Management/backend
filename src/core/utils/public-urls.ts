@@ -4,8 +4,8 @@
  * missing value instead of silently emitting localhost redirects.
  */
 const DEV_FALLBACKS = {
-  API_URL: 'http://localhost:3000',
-  CLIENT_URL: 'http://localhost:2915',
+  API_URL: 'http://localhost:18300',
+  CLIENT_URL: 'http://localhost:18295',
 } as const;
 
 export type PublicUrlKey = keyof typeof DEV_FALLBACKS;
@@ -37,4 +37,11 @@ export function resolveServiceUrl(
     throw new Error(`${name} must be configured in production`);
   }
   return devDefault;
+}
+
+export function resolveRedisUrl(
+  configured?: string | null,
+  name = 'REDIS_URL',
+): string {
+  return resolveServiceUrl(name, configured, 'redis://127.0.0.1:31679');
 }

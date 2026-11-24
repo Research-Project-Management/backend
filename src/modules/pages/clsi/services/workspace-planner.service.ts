@@ -33,7 +33,7 @@ import {
   ManifestFile,
   PlannedFileSet,
 } from '../domain/fileset.planner';
-import { FileSnapshotVo } from '@/modules/pages/project-history/domain/file-snapshot';
+import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.domain';
 import {
   WorkspaceRepository,
   createUnchangedDiskPlaceholder,

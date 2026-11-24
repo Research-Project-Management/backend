@@ -1,4 +1,4 @@
-import { resolveServiceUrl } from '../../utils/public-urls';
+import { resolveLaneRedisUrl } from '../redis/client.factory';
 import { ConfigService } from '@nestjs/config';
 import type { BullRootModuleOptions } from '@nestjs/bullmq';
 
@@ -10,27 +10,18 @@ export const MANUSCRIPT_CLSI_QUEUE = 'MANUSCRIPT_CLSI_QUEUE';
  * to ensure uniform retry policies, cleanup thresholds, and socket resilience.
  */
 export function getBullMqConfig(config: ConfigService): BullRootModuleOptions {
-  const rawUrl =
-    config.get<string>('REDIS_QUEUE_URL') ||
-    config.get<string>('REDIS_URL') ||
-    process.env.REDIS_QUEUE_URL ||
-    process.env.REDIS_URL;
-  const redisUrl = resolveServiceUrl(
-    'REDIS_QUEUE_URL',
-    rawUrl,
-    'redis://localhost:6379',
-  );
+  const redisUrl = resolveLaneRedisUrl(config, 'queue');
 
-  let host = 'localhost';
-  let port = 6379;
+  let host = '127.0.0.1';
+  let port = 31679;
   let password: string | undefined;
   let username: string | undefined;
   let isTls = false;
 
   try {
     const parsed = new URL(redisUrl);
-    host = parsed.hostname || 'localhost';
-    port = parseInt(parsed.port || '6379', 10);
+    host = parsed.hostname || '127.0.0.1';
+    port = parseInt(parsed.port || '31679', 10);
     if (parsed.password) password = decodeURIComponent(parsed.password);
     if (parsed.username && parsed.username !== 'default') {
       username = decodeURIComponent(parsed.username);

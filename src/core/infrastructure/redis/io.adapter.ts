@@ -1,9 +1,15 @@
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Server, ServerOptions } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
-import Redis from 'ioredis';
+import type Redis from 'ioredis';
 import { Logger, type INestApplicationContext } from '@nestjs/common';
 import { isOriginAllowed } from '../../http/setup/allowed-origins';
+import { getErrorMessage } from '../../utils/error.util';
+import {
+  closeRedisClient,
+  createRedisClient,
+  isRedisDisabled,
+} from './client.factory';
 
 export interface RedisIoTransportOptions {
   path?: string;
@@ -33,10 +39,7 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   async connectToRedis(redisUrl: string): Promise<void> {
-    if (
-      process.env.NODE_ENV === 'test' ||
-      process.env.DISABLE_REDIS === 'true'
-    ) {
+    if (isRedisDisabled()) {
       this.logger.log(
         'Redis is disabled or in test mode. Operating with default in-memory Socket.IO adapter.',
       );
@@ -44,12 +47,10 @@ export class RedisIoAdapter extends IoAdapter {
     }
 
     try {
-      this.pubClient = new Redis(redisUrl, {
+      this.pubClient = createRedisClient(redisUrl, {
+        label: 'SocketIoAdapter',
+        logger: this.logger,
         maxRetriesPerRequest: 3,
-        retryStrategy: (times) =>
-          times > 3 ? null : Math.min(times * 500, 2000),
-        lazyConnect: true,
-        enableOfflineQueue: false,
       });
 
       this.subClient = this.pubClient.duplicate();
@@ -68,9 +69,8 @@ export class RedisIoAdapter extends IoAdapter {
         'Socket.IO Redis adapter connected successfully (multi-node horizontal fan-out active)',
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Failed to connect Socket.IO Redis adapter (${msg}). Falling back to in-memory adapter.`,
+        `Failed to connect Socket.IO Redis adapter (${getErrorMessage(err)}). Falling back to in-memory adapter.`,
       );
       this.adapterConstructor = null;
     }
@@ -130,21 +130,10 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   async close(): Promise<void> {
-    if (this.pubClient) {
-      try {
-        await this.pubClient.quit();
-      } catch {
-        this.pubClient.disconnect();
-      }
-      this.pubClient = null;
-    }
-    if (this.subClient) {
-      try {
-        await this.subClient.quit();
-      } catch {
-        this.subClient.disconnect();
-      }
-      this.subClient = null;
-    }
+    const pub = this.pubClient;
+    const sub = this.subClient;
+    this.pubClient = null;
+    this.subClient = null;
+    await Promise.all([closeRedisClient(pub), closeRedisClient(sub)]);
   }
 }

@@ -50,7 +50,7 @@ import {
 } from './repositories/aggregator.repository';
 import { TemplatesService } from '@/modules/pages/templates/templates.service';
 import { TemplateNotFoundException } from '@/modules/pages/templates/domain';
-import { ProjectHistoryService } from '@/modules/pages/project-history/project-history.service';
+import { HistoryService } from '@/modules/pages/history/services/history.service';
 import {
   ExportZipQueryDto,
   ImportSummaryResponseDto,
@@ -85,7 +85,7 @@ export class ExportImportService {
   private readonly hydrator: IPageArchiveHydratorPort;
   private readonly templatesService?: TemplatesService;
   private readonly transpiler: IDocumentTranspilerPort;
-  private readonly projectHistoryService?: ProjectHistoryService;
+  private readonly projectHistoryService?: HistoryService;
   private readonly docstoreService?: DocstoreService;
   private readonly pageScopeRepo?: ScopeRepository;
   private readonly liveCollab: LiveCollaborationPort;
@@ -96,7 +96,7 @@ export class ExportImportService {
     hydrator: PageArchiveHydratorAdapter,
     @Optional() templatesService?: TemplatesService,
     @Optional() transpiler?: TranspilerAdapter,
-    @Optional() projectHistoryService?: ProjectHistoryService,
+    @Optional() projectHistoryService?: HistoryService,
     @Optional() docstoreService?: DocstoreService,
     @Optional() pageScopeRepo?: ScopeRepository,
     @Optional()

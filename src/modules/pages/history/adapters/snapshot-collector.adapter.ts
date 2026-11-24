@@ -17,7 +17,9 @@ import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
-import { IProjectCollectorPort, Snapshot, FileSnapshotVo } from '../domain';
+import { IProjectCollectorPort } from '../domain/history.ports';
+import { Snapshot } from '../domain/snapshot.domain';
+import { FileSnapshotVo } from '../domain/file-snapshot.domain';
 
 const COLLECT_CONCURRENCY = 6;
 

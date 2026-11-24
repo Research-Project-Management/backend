@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { CacheModule } from '@/core';
+import { RedisModule } from '@/core';
 import { LiveCollaborationPort } from '@/modules/pages/core/ports/live-collaboration.port';
 import { PagesEventsPublisher } from '../adapters/pages';
 import { WorkItemsEventsBridge } from '../adapters/work-items';
@@ -11,7 +11,7 @@ import { RealtimeFacade } from '../realtime.facade';
 
 @Global()
 @Module({
-  imports: [ConfigModule, CacheModule, RealtimeCoreModule.forPublisher()],
+  imports: [ConfigModule, RedisModule, RealtimeCoreModule.forPublisher()],
   providers: [
     RealtimeControlClient,
     RemoteLiveCollaborationAdapter,

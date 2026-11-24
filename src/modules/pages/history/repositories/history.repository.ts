@@ -1,5 +1,5 @@
 /**
- * project-history/project-history.repository.ts
+ * project-history/history.repository.ts
  * Direct Injectable Prisma Persistence Repository & Domain Mapper for Project History Snapshots & Labels.
  */
 
@@ -12,14 +12,14 @@ import {
   PageSnapshot as PrismaSnapshot,
   PageSnapshotLabel as PrismaLabel,
 } from '@prisma/client';
+import { IHistoryRepositoryPort } from '../domain/history.ports';
+import { Snapshot } from '../domain/snapshot.domain';
+import { VersionLabel } from '../domain/version-label.domain';
+import { FileSnapshotVo } from '../domain/file-snapshot.domain';
 import {
-  IHistoryRepositoryPort,
-  Snapshot,
-  VersionLabel,
-  FileSnapshotVo,
   SnapshotNormalizer,
   RawSnapshotFileEntry,
-} from './domain';
+} from '../domain/snapshot.mapper';
 
 export type { RawSnapshotFileEntry };
 
@@ -127,7 +127,7 @@ export class PageHistoryMapper {
 }
 
 @Injectable()
-export class ProjectHistoryRepository extends IHistoryRepositoryPort {
+export class HistoryRepository extends IHistoryRepositoryPort {
   constructor(private readonly prisma: PrismaService) {
     super();
   }

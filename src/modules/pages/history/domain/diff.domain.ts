@@ -1,18 +1,20 @@
 /**
- * project-history/domain/diff.engine.ts
+ * project-history/domain/diff.domain.ts
  * Pure, side-effect-free Myers LCS line-diff and intra-line word-diff engine
  * for comparing Manuscript Snapshots.
  */
 
 import { Injectable } from '@nestjs/common';
-import { Snapshot } from './snapshot.entity';
+import { Snapshot } from './snapshot.domain';
 import {
   DiffHunkVo,
   DiffLine,
   FileDiffVo,
   TextDiffResult,
   WordDiffToken,
-} from './project-history.ports';
+} from './history.ports';
+
+export { FileDiffVo };
 
 @Injectable()
 export class DiffEngine {

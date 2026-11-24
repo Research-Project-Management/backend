@@ -21,7 +21,7 @@ import { UpdateDocDto } from './docstore/dto/doc.dto';
 import { StructureService } from './structure/structure.service';
 import { FilestoreService } from './filestore/filestore.service';
 import { ClsiService } from './clsi/services/clsi.service';
-import { ProjectHistoryService } from './project-history/project-history.service';
+import { HistoryService } from './history/services/history.service';
 import { CitationsService } from './citations/citations.service';
 import { ExportImportService } from './export-import/export-import.service';
 import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
@@ -44,7 +44,7 @@ import {
   CitationQueryDto,
   ResolveIdentifierDto,
 } from './citations/dto/citations.dto';
-import { CreateSnapshotDto } from './project-history/dto/history.dto';
+import { CreateSnapshotDto } from './history/dto/history.dto';
 import { ExportZipQueryDto } from './export-import/dto/export-import.dto';
 
 @Injectable()
@@ -54,7 +54,7 @@ export class PagesFacade {
     public readonly structure: StructureService,
     public readonly filestore: FilestoreService,
     public readonly clsi: ClsiService,
-    public readonly projectHistory: ProjectHistoryService,
+    public readonly projectHistory: HistoryService,
     public readonly citations: CitationsService,
     public readonly exportImport: ExportImportService,
     public readonly workspaceCollector: WorkspaceCollectorService,

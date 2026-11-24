@@ -1,5 +1,5 @@
 import { CacheInvalidationListener } from '@/core/infrastructure/redis/invalidation.listener';
-import { RedisCacheService } from '@/core/infrastructure/redis/redis.service';
+import { RedisCacheService } from '@/core/infrastructure/redis/cache.service';
 
 describe('Zero-Latency Access Revocation & Cache Invalidation', () => {
   let listener: CacheInvalidationListener;

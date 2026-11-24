@@ -6,7 +6,7 @@
  * - Subsystem 0 (Shared Kernel): PagesCoreModule
  * - Subsystem 1 (Virtual File System & Storage): FilestoreModule -> DocstoreModule -> StructureModule
  * - Subsystem 3 (Compilation & Diagnostics): DiagnosticsModule -> ClsiModule
- * - Subsystem 4 (Review & Versioning): ReviewModule -> ProjectHistoryModule
+ * - Subsystem 4 (Review & Versioning): ReviewModule -> HistoryModule
  * - Subsystem 5 (Academic Authoring & Packaging): SpellingModule -> CitationsModule -> TemplatesModule -> ExportImportModule -> GitBridgeModule
  * (Note: Subsystem 2 - Real-time Collaboration lives in @/modules/realtime/channels/pages)
  */
@@ -27,7 +27,7 @@ import { ClsiModule } from './clsi/clsi.module';
 
 // Subsystem 4: Review & Versioning
 import { ReviewModule } from './review/review.module';
-import { ProjectHistoryModule } from './project-history/project-history.module';
+import { HistoryModule } from './history/history.module';
 
 // Subsystem 5: Academic Authoring & Packaging
 import { SpellingModule } from './spelling/spelling.module';
@@ -55,7 +55,7 @@ import { PagesFacade } from './pages.facade';
 
     // Tier 3 (Subsystem 4): Review & Versioning
     ReviewModule,
-    ProjectHistoryModule,
+    HistoryModule,
 
     // Tier 4 (Subsystem 5): Academic Authoring & Packaging
     SpellingModule,
@@ -84,7 +84,7 @@ import { PagesFacade } from './pages.facade';
 
     // Subsystem 4: Review & Versioning
     ReviewModule,
-    ProjectHistoryModule,
+    HistoryModule,
 
     // Subsystem 5: Academic Authoring & Packaging
     SpellingModule,

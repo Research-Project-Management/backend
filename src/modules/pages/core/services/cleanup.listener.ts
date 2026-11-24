@@ -230,11 +230,10 @@ export class CleanupListener {
         );
       }
 
-      if (this.redis?.isReady?.()) {
+      if (this.redis) {
         await this.redis
-          .getClient()
-          ?.del(`manuscript:linked_files:${projectId}`)
-          ?.catch(() => undefined);
+          .del(`manuscript:linked_files:${projectId}`)
+          .catch(() => undefined);
       }
 
       this.logger.log(

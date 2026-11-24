@@ -52,7 +52,7 @@ export class RealtimeControlClient {
       this.baseUrl = resolveServiceUrl(
         'REALTIME_SERVICE_URL',
         configuredUrl,
-        'http://127.0.0.1:3014',
+        'http://127.0.0.1:18314',
       ).replace(/\/+$/, '');
       this.remoteEnabled = true;
     }

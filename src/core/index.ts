@@ -10,10 +10,13 @@ export * from './infrastructure/database/prisma.module';
 export * from './infrastructure/database/prisma.service';
 
 // Infrastructure - Redis & Cache
-export * from './infrastructure/redis/cache.module';
-export * from './infrastructure/redis/redis.service';
+export * from './infrastructure/redis/client.factory';
+export * from './infrastructure/redis/redis.module';
+export * from './infrastructure/redis/cache.service';
+export * from './infrastructure/redis/lock.service';
+export * from './infrastructure/redis/pubsub.service';
 export * from './infrastructure/redis/invalidation.listener';
-export * from './infrastructure/redis/redis-io.adapter';
+export * from './infrastructure/redis/io.adapter';
 
 // Infrastructure - Queue
 export * from './infrastructure/queue/bullmq.config';

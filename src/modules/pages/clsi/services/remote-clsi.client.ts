@@ -11,7 +11,6 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RedisCacheService } from '@/core';
 import {
   CompilePipelineResult,
   ClsiHealthReport,
@@ -39,10 +38,7 @@ export class RemoteClsiClientAdapter {
   private readonly logger = new Logger(RemoteClsiClientAdapter.name);
   private remoteClsiBackoffUntil = 0;
 
-  constructor(
-    @Optional() private readonly configService?: ConfigService,
-    @Optional() private readonly cache?: RedisCacheService,
-  ) {}
+  constructor(@Optional() private readonly configService?: ConfigService) {}
 
   private getRemoteUrl(): string | null {
     const raw = (

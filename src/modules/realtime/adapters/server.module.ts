@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { CacheModule, PrismaModule } from '@/core';
+import { RedisModule, PrismaModule } from '@/core';
 import { ChatCacheService } from '@/modules/chat/services/chat-cache.service';
 import { ChatService } from '@/modules/chat/services/chat.service';
 import { IdentityFacade } from '@/modules/identity/identity.facade';
@@ -27,7 +27,7 @@ import { WorkItemsAccessAdapter } from './work-items';
 
 @Global()
 @Module({
-  imports: [ConfigModule, PrismaModule, CacheModule],
+  imports: [ConfigModule, PrismaModule, RedisModule],
   providers: [
     UserRepository,
     RealtimeIdentityLookup,

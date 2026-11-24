@@ -1,13 +1,13 @@
 /**
- * project-history/domain/project-history.ports.ts
+ * project-history/domain/history.ports.ts
  * Consolidated domain value objects (DiffHunkVo, FileDiffVo) and outbound ports
  * (IDiffEnginePort, IHistoryRepositoryPort, IProjectCollectorPort, IProjectRestorerPort)
  * for Project History.
  */
 
-import { FileSnapshotType, FileSnapshotVo } from './file-snapshot';
-import { Snapshot } from './snapshot.entity';
-import { VersionLabel } from './version-label.entity';
+import { FileSnapshotType, FileSnapshotVo } from './file-snapshot.domain';
+import { Snapshot } from './snapshot.domain';
+import { VersionLabel } from './version-label.domain';
 
 export type LineDiffType = 'added' | 'deleted' | 'unchanged';
 export type WordDiffType = 'added' | 'deleted' | 'unchanged';

@@ -1,12 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { RedisCacheService } from './redis.service';
+import { RedisCacheService } from './cache.service';
 
-export interface EntityChangeEvent {
+interface EntityChangeEvent {
   entityType?: string;
   entityId?: string;
   verb?: string;
   userId?: string;
+  targetUserId?: string;
+  oldValue?: string;
+  newValue?: string;
   projectId?: string;
   spaceId?: string;
 }
@@ -32,13 +35,13 @@ export class CacheInvalidationListener {
       await this.redisCache.delPattern(payload.pattern);
     }
     if (payload.userId) {
-      await this.redisCache.invalidateUser(payload.userId);
+      await this.redisCache.delPattern(`*${payload.userId}*`);
     }
     if (payload.projectId) {
-      await this.redisCache.invalidateProject(payload.projectId);
+      await this.redisCache.delPattern(`*${payload.projectId}*`);
     }
     if (payload.spaceId) {
-      await this.redisCache.invalidateSpace(payload.spaceId);
+      await this.redisCache.delPattern(`*${payload.spaceId}*`);
     }
   }
 
@@ -137,14 +140,13 @@ export class CacheInvalidationListener {
     }
 
     // Zero-Latency Stale Window Eviction: Immediately purge cached access contexts on membership changes
-    const anyEvent = event as Record<string, unknown>;
     const targetUserIds = [
-      anyEvent.targetUserId,
-      anyEvent.userId,
-      event.verb === 'member_removed' ? anyEvent.oldValue : undefined,
-      event.verb === 'member_added' ? anyEvent.newValue : undefined,
-      event.verb === 'ownership_transferred' ? anyEvent.oldValue : undefined,
-      event.verb === 'ownership_transferred' ? anyEvent.newValue : undefined,
+      event.targetUserId,
+      event.userId,
+      event.verb === 'member_removed' ? event.oldValue : undefined,
+      event.verb === 'member_added' ? event.newValue : undefined,
+      event.verb === 'ownership_transferred' ? event.oldValue : undefined,
+      event.verb === 'ownership_transferred' ? event.newValue : undefined,
     ].filter((id): id is string => typeof id === 'string' && id.length > 0);
 
     if (pid && targetUserIds.length > 0) {

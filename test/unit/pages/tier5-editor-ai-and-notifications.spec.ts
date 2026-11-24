@@ -413,11 +413,11 @@ describe('Khá»‘i 2 / Táº§ng 5 Backend â€” AI Writing Assistant & Pag
         engineMock,
       );
 
-      const session = await sessionService.getOrCreatePageChat(
-        canonicalPageId,
-        userId,
-        'personal',
-      );
+      const session = await sessionService.createChat(userId, {
+        pageId: canonicalPageId,
+        spaceId: 'personal',
+        title: 'My Manuscript Discussion',
+      });
       expect(session.id).toBe('chat-created');
       expect(createFn).toHaveBeenCalledWith(
         expect.objectContaining({

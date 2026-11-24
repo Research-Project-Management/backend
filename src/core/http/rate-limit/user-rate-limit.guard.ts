@@ -14,7 +14,7 @@ import {
   UserRateLimitRule,
   RateLimitKeyType,
 } from './user-rate-limit.decorator';
-import { RedisCacheService } from '../../infrastructure/redis/redis.service';
+import { RedisCacheService } from '../../infrastructure/redis/cache.service';
 
 interface MemoryRateLimitEntry {
   currentCount: number;

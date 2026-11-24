@@ -1,6 +1,6 @@
 /**
- * project-history/project-history.service.ts
- * Deep Module Service orchestrating Manuscript Project History directly via ProjectHistoryRepository
+ * project-history/history.service.ts
+ * Deep Module Service orchestrating Manuscript Project History directly via HistoryRepository
  * and pure DiffEngine.
  */
 
@@ -12,18 +12,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Readable } from 'node:stream';
-import { ProjectHistoryRepository } from './project-history.repository';
+import { HistoryRepository } from '../repositories/history.repository';
+import { PageSnapshotCollectorAdapter } from '../adapters/snapshot-collector.adapter';
+import { PageSnapshotRestorerAdapter } from '../adapters/snapshot-restorer.adapter';
+import { Snapshot } from '../domain/snapshot.domain';
+import { VersionLabel } from '../domain/version-label.domain';
 import {
-  PageSnapshotCollectorAdapter,
-  PageSnapshotRestorerAdapter,
-} from './adapters/project-history.adapters';
-import {
-  Snapshot,
-  VersionLabel,
   VersionNotFoundException,
   DuplicateLabelException,
-  DiffEngine,
-} from './domain';
+} from '../domain/history.errors';
+import { DiffEngine } from '../domain/diff.domain';
 import {
   CreateSnapshotDto,
   SnapshotDetailDto,
@@ -32,17 +30,17 @@ import {
   DiffResponseDto,
   RestoreSingleFileDto,
   RestoreSingleFileResponseDto,
-} from './dto/history.dto';
+} from '../dto/history.dto';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
 
 @Injectable()
-export class ProjectHistoryService {
-  private readonly logger = new Logger(ProjectHistoryService.name);
+export class HistoryService {
+  private readonly logger = new Logger(HistoryService.name);
   private readonly diffEngine: DiffEngine;
 
   constructor(
-    private readonly repository: ProjectHistoryRepository,
+    private readonly repository: HistoryRepository,
     private readonly collector: PageSnapshotCollectorAdapter,
     private readonly restorer: PageSnapshotRestorerAdapter,
     @Optional() private readonly realtimeService?: RealtimeFacade,

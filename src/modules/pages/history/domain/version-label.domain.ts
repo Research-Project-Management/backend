@@ -1,5 +1,5 @@
 /**
- * project-history/core/domain/entities/version-label.entity.ts
+ * project-history/core/domain/entities/version-label.domain.ts
  * Domain Entity representing a user-assigned named label for a project version.
  */
 

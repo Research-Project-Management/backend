@@ -25,9 +25,13 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Http2ServerRequest } from 'node:http2';
-import { GlobalExceptionFilter, LoggerService, RedisIoAdapter } from './core';
+import {
+  GlobalExceptionFilter,
+  LoggerService,
+  RedisIoAdapter,
+  resolveLaneRedisUrl,
+} from './core';
 import { setupCors } from './core/http/setup/cors.setup';
-import { resolveServiceUrl } from './core/utils/public-urls';
 import { REALTIME_NAMESPACES, RealtimeConfigService } from './modules/realtime';
 import { RealtimeServiceAppModule } from './realtime.module';
 
@@ -92,11 +96,7 @@ async function bootstrap(): Promise<void> {
   );
   app.useLogger(logger);
 
-  const redisUrl = resolveServiceUrl(
-    'REDIS_URL',
-    process.env.REDIS_URL,
-    'redis://localhost:6379',
-  );
+  const redisUrl = resolveLaneRedisUrl(undefined, 'pubsub');
   let realtimeConfig: RealtimeConfigService | undefined;
   try {
     realtimeConfig = app.get(RealtimeConfigService, { strict: false });

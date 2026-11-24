@@ -31,7 +31,22 @@ export * from './review/domain/patcher.domain';
 export * from './review/domain/review.errors';
 export * from './review/domain/review.policy';
 export * from './review/domain/review.mapper';
-export * from './project-history';
+export * from './history/history.module';
+export * from './history/controllers/history.controller';
+export * from './history/controllers/versions.controller';
+export * from './history/services/history.service';
+export * from './history/services/versions.service';
+export * from './history/repositories/history.repository';
+export * from './history/adapters/snapshot-collector.adapter';
+export * from './history/adapters/snapshot-restorer.adapter';
+export * from './history/dto/history.dto';
+export * from './history/domain/diff.domain';
+export * from './history/domain/file-snapshot.domain';
+export * from './history/domain/snapshot.domain';
+export * from './history/domain/snapshot.mapper';
+export * from './history/domain/version-label.domain';
+export * from './history/domain/history.errors';
+export * from './history/domain/history.ports';
 
 // Subsystem 5: Academic Authoring & Packaging
 export * from './spelling';

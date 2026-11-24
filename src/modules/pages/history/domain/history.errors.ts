@@ -1,10 +1,5 @@
 import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 
-/**
- * project-history/core/domain/exceptions/duplicate-label.exception.ts
- * Domain Exception thrown when attempting to create a label that already exists in the project.
- */
-
 export class DuplicateLabelException extends PagesDomainError {
   constructor(
     public readonly projectId: string,
@@ -17,11 +12,6 @@ export class DuplicateLabelException extends PagesDomainError {
   }
 }
 
-/**
- * project-history/core/domain/exceptions/empty-project.exception.ts
- * Domain Exception thrown when attempting to snapshot a project with 0 files.
- */
-
 export class EmptyProjectException extends PagesDomainError {
   constructor(public readonly projectId: string) {
     super(
@@ -33,11 +23,6 @@ export class EmptyProjectException extends PagesDomainError {
     );
   }
 }
-
-/**
- * project-history/core/domain/exceptions/version-not-found.exception.ts
- * Domain Exception thrown when a requested version snapshot does not exist in a project.
- */
 
 export class VersionNotFoundException extends PagesDomainError {
   constructor(
