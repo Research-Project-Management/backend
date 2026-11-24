@@ -373,3 +373,26 @@ export function classifyObjectKey(rawKey: string): {
 
   return { key, normalizedKey, isPublicAsset, isDerivative };
 }
+
+const DEV_FILES_SIGNING_SECRET = 'flux-files-signing-dev-secret';
+
+export function resolveFilesSigningSecret(config?: {
+  get<T = string>(key: string): T | undefined;
+}): string {
+  const configured = (
+    config?.get<string>('STORAGE_HMAC_SECRET') ||
+    config?.get<string>('JWT_SECRET') ||
+    process.env.STORAGE_HMAC_SECRET ||
+    process.env.JWT_SECRET ||
+    ''
+  ).trim();
+  if (configured) {
+    return configured;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'STORAGE_HMAC_SECRET or JWT_SECRET must be configured in production',
+    );
+  }
+  return DEV_FILES_SIGNING_SECRET;
+}

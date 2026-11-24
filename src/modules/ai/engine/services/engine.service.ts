@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { getErrorMessage, tryCatch } from '@/core';
+import { AI_ENGINE_TIMEOUTS_MS } from '../../ai.constant';
 import type { AiHealthStatus } from '../../ai.type';
 import {
   mapArtifactsToWidgets,
@@ -39,7 +40,7 @@ export class EngineService implements IAiEnginePort {
     const res = await tryCatch(
       this.http.requestJson<Record<string, unknown>>('/health', {
         method: 'GET',
-        timeoutMs: 5000,
+        timeoutMs: AI_ENGINE_TIMEOUTS_MS.HEALTH,
         skipCircuitBreaker: true,
       }),
     );
@@ -66,7 +67,7 @@ export class EngineService implements IAiEnginePort {
   async listAgents(): Promise<EngineAgentInfo[]> {
     const res = await this.http.requestJson<{ agents?: EngineAgentInfo[] }>(
       '/agents',
-      { method: 'GET', timeoutMs: 10000 },
+      { method: 'GET', timeoutMs: AI_ENGINE_TIMEOUTS_MS.METADATA },
     );
     return Array.isArray(res.agents) ? res.agents : [];
   }
@@ -74,7 +75,7 @@ export class EngineService implements IAiEnginePort {
   async listModels(): Promise<EngineModelInfo[]> {
     const res = await this.http.requestJson<{ models?: EngineModelInfo[] }>(
       '/models',
-      { method: 'GET', timeoutMs: 10000 },
+      { method: 'GET', timeoutMs: AI_ENGINE_TIMEOUTS_MS.METADATA },
     );
     return Array.isArray(res.models) ? res.models : [];
   }
@@ -86,7 +87,7 @@ export class EngineService implements IAiEnginePort {
       {
         method: 'POST',
         body: payload,
-        timeoutMs: 120000,
+        timeoutMs: AI_ENGINE_TIMEOUTS_MS.CHAT_SYNC,
         traceId: trace_id,
         delegationToken: delegation_token,
       },
@@ -124,7 +125,7 @@ export class EngineService implements IAiEnginePort {
       {
         method: 'POST',
         body: payload,
-        timeoutMs: 120000,
+        timeoutMs: AI_ENGINE_TIMEOUTS_MS.CHAT_SYNC,
         traceId: trace_id,
         delegationToken: delegation_token,
       },
@@ -157,7 +158,7 @@ export class EngineService implements IAiEnginePort {
     const qs = new URLSearchParams({ space_id: spaceId }).toString();
     await this.http.requestJson<Record<string, unknown>>(
       `/threads/${encodeURIComponent(chatId)}/cancel?${qs}`,
-      { method: 'POST', timeoutMs: 5000 },
+      { method: 'POST', timeoutMs: AI_ENGINE_TIMEOUTS_MS.HEALTH },
     );
   }
 
@@ -172,7 +173,7 @@ export class EngineService implements IAiEnginePort {
       `/turns/${encodeURIComponent(traceId)}/revert?${qs}`,
       {
         method: 'POST',
-        timeoutMs: 30000,
+        timeoutMs: AI_ENGINE_TIMEOUTS_MS.SEARCH,
         delegationToken: authToken,
         ...(entityIds?.length ? { body: { entity_ids: entityIds } } : {}),
       },
@@ -190,7 +191,7 @@ export class EngineService implements IAiEnginePort {
     }
     return this.http.requestJson<EngineThreadCheckpointsResponse>(
       `/threads/${encodeURIComponent(chatId)}/checkpoints?${params.toString()}`,
-      { method: 'GET', timeoutMs: 10000 },
+      { method: 'GET', timeoutMs: AI_ENGINE_TIMEOUTS_MS.METADATA },
     );
   }
 
@@ -206,7 +207,7 @@ export class EngineService implements IAiEnginePort {
       `/threads/${encodeURIComponent(chatId)}/rewind?${qs}`,
       {
         method: 'POST',
-        timeoutMs: 30000,
+        timeoutMs: AI_ENGINE_TIMEOUTS_MS.SEARCH,
         delegationToken: authToken,
         body: {
           checkpoint_id: checkpointId,
@@ -225,14 +226,14 @@ export class EngineService implements IAiEnginePort {
     const qs = new URLSearchParams({ space_id: spaceId }).toString();
     return this.http.requestJson<EngineDeleteResponse>(
       `/threads/${encodeURIComponent(chatId)}?${qs}`,
-      { method: 'DELETE', timeoutMs: 10000 },
+      { method: 'DELETE', timeoutMs: AI_ENGINE_TIMEOUTS_MS.METADATA },
     );
   }
 
   async deleteSpaceThreads(spaceId: string): Promise<EngineDeleteResponse> {
     return this.http.requestJson<EngineDeleteResponse>(
       `/spaces/${encodeURIComponent(spaceId)}/threads`,
-      { method: 'DELETE', timeoutMs: 10000 },
+      { method: 'DELETE', timeoutMs: AI_ENGINE_TIMEOUTS_MS.METADATA },
     );
   }
 
@@ -254,7 +255,7 @@ export class EngineService implements IAiEnginePort {
     return this.http.requestJson<EngineIngestJobResponse>('/knowledge/ingest', {
       method: 'POST',
       body: formData,
-      timeoutMs: 30000,
+      timeoutMs: AI_ENGINE_TIMEOUTS_MS.SEARCH,
     });
   }
 
@@ -263,7 +264,7 @@ export class EngineService implements IAiEnginePort {
       `/knowledge/jobs/${encodeURIComponent(jobId)}`,
       {
         method: 'GET',
-        timeoutMs: 10000,
+        timeoutMs: AI_ENGINE_TIMEOUTS_MS.METADATA,
       },
     );
   }
@@ -272,13 +273,15 @@ export class EngineService implements IAiEnginePort {
     input: EngineIngestInput,
   ): Promise<EngineIngestResponse> {
     let current = await this.enqueueKnowledgeIngest(input);
-    const deadline = Date.now() + 120_000;
+    const deadline = Date.now() + AI_ENGINE_TIMEOUTS_MS.INGEST_DEADLINE;
 
     while (current.status === 'queued' || current.status === 'running') {
       if (Date.now() >= deadline) {
         throw new Error(`AI ingestion job ${current.job_id} timed out`);
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, AI_ENGINE_TIMEOUTS_MS.INGEST_POLL_INTERVAL),
+      );
       current = await this.getKnowledgeJob(current.job_id);
     }
 
@@ -306,7 +309,7 @@ export class EngineService implements IAiEnginePort {
     }>('/knowledge/search', {
       method: 'POST',
       body: input,
-      timeoutMs: 30000,
+      timeoutMs: AI_ENGINE_TIMEOUTS_MS.SEARCH,
     });
     return Array.isArray(res.hits) ? res.hits : [];
   }
@@ -319,14 +322,7 @@ export class EngineService implements IAiEnginePort {
     const qs = new URLSearchParams({ space_id: spaceId }).toString();
     return this.http.requestJson<EngineDeleteResponse>(
       `/knowledge/${encodeURIComponent(sourceType)}/${encodeURIComponent(sourceId)}?${qs}`,
-      { method: 'DELETE', timeoutMs: 15000 },
-    );
-  }
-
-  async deleteSpaceKnowledge(spaceId: string): Promise<EngineDeleteResponse> {
-    return this.http.requestJson<EngineDeleteResponse>(
-      `/spaces/${encodeURIComponent(spaceId)}/knowledge`,
-      { method: 'DELETE', timeoutMs: 15000 },
+      { method: 'DELETE', timeoutMs: AI_ENGINE_TIMEOUTS_MS.STANDARD },
     );
   }
 

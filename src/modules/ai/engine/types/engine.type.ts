@@ -179,16 +179,6 @@ export interface EngineDeleteResponse {
   deleted_threads?: number;
 }
 
-export interface EngineThreadStateResponse {
-  chat_id: string;
-  space_id: string;
-  exists: boolean;
-  status: 'empty' | 'idle' | 'interrupted';
-  message_count: number;
-  route?: string | null;
-  interrupts: unknown[];
-}
-
 export interface EngineRevertStepResult {
   tool: string;
   entity_id: string;
@@ -238,6 +228,86 @@ export interface EngineModelInfo {
   description: string;
   is_default: boolean;
 }
+
+export interface FrontendHitlInterrupt {
+  id: string;
+  tool?: string;
+  description?: string;
+  args?: Record<string, unknown>;
+  allowedDecisions: Array<'approve' | 'reject' | 'edit'>;
+  raw?: unknown;
+}
+
+export type FluxClientSseEvent =
+  | {
+      type: 'meta';
+      chatId?: string;
+      title?: string;
+      agent?: string;
+      intent?: string;
+      sources?: FrontendSourceItem[];
+      widgets?: FrontendResponseWidget[];
+    }
+  | {
+      type: 'text-delta';
+      delta: string;
+    }
+  | {
+      type: 'reasoning-delta';
+      delta: string;
+    }
+  | {
+      type: 'agent-handoff';
+      to: string;
+      parallel?: boolean;
+    }
+  | {
+      type: 'thinking';
+      agent?: string;
+    }
+  | {
+      type: 'agent-done';
+      agent?: string;
+      status?: 'done' | 'error';
+      error?: string;
+      success?: boolean;
+    }
+  | {
+      type: 'tool-start';
+      tool: string;
+      agent?: string;
+      input?: Record<string, unknown>;
+    }
+  | {
+      type: 'tool-end';
+      tool: string;
+      agent?: string;
+      status?: 'done' | 'error';
+      output?: Record<string, unknown>;
+      error?: string;
+      success?: boolean;
+      count?: number;
+      action?: string;
+      widgets?: FrontendResponseWidget[];
+    }
+  | {
+      type: 'hitl-interrupt';
+      interruptId: string;
+      interrupts: FrontendHitlInterrupt[];
+    }
+  | {
+      type: 'editor-patch-preview';
+      agent?: string;
+      patch: FrontendEditorPatchItem;
+      totalPatches?: number;
+    }
+  | {
+      type: 'error';
+      message: string;
+    }
+  | {
+      type: 'done';
+    };
 
 export interface TranslatedSseFrame {
   clientFrames: string[];

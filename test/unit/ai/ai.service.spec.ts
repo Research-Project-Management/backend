@@ -12,6 +12,7 @@ import { DocumentAccessService } from '@/modules/ai/access/services/document.ser
 import { SpaceAccessService } from '@/modules/ai/access/services/space.service';
 import { ChatRepository } from '@/modules/ai/chat/chat.repository';
 import { ChatService } from '@/modules/ai/chat/services/chat.service';
+import { PaperChatService } from '@/modules/ai/chat/services/paper.service';
 import { SessionService } from '@/modules/ai/chat/services/session.service';
 import { TitleService } from '@/modules/ai/chat/services/title.service';
 import type { IAiEnginePort } from '@/modules/ai/engine/engine.port';
@@ -182,7 +183,6 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn(),
-      deleteSpaceKnowledge: jest.fn(),
     };
 
     const existingChat = makeChatRecord();
@@ -342,7 +342,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       );
       expect(streamReply).toBe(mockReply);
       expect(streamOpts?.initialFrames).toEqual([
-        expect.stringContaining('[META]'),
+        expect.stringContaining('"type":"meta"'),
       ]);
 
       expect(capturedOnComplete).toBeDefined();
@@ -393,7 +393,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
 
       const [, , streamOpts] = mockEngine.chatStream.mock.calls[0];
       expect(streamOpts?.initialFrames).toEqual([
-        `data: [META]${JSON.stringify({ chatId: mockChatId, title: 'FluxKV Deep Dive' })}\n\n`,
+        `data: ${JSON.stringify({ type: 'meta', chatId: mockChatId, title: 'FluxKV Deep Dive' })}\n\n`,
       ]);
 
       await capturedOnComplete!({
@@ -416,7 +416,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         spaceId: mockUserId,
       });
 
-      const appendSpy = jest.spyOn(sessionService, 'appendMessages');
+      const appendSpy = jest.spyOn(sessionService, 'appendMessagesFast');
       type OnCompleteFn = (
         result: StreamCompletionResult,
       ) => Promise<void> | void;
@@ -697,7 +697,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       );
 
       expect(translated.widgets).toHaveLength(1);
-      expect(translated.clientFrames[0]).toContain('[META]');
+      expect(translated.clientFrames[0]).toContain('"type":"meta"');
       expect(translated.clientFrames[0]).toContain('editor_patches');
     });
 
@@ -784,14 +784,11 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       expect(previewTranslated.finished).toBeUndefined();
       expect(previewTranslated.widgets).toBeUndefined();
       expect(previewTranslated.clientFrames).toHaveLength(1);
-      expect(previewTranslated.clientFrames[0]).toContain('[ACTION]');
-      const actionJson: unknown = JSON.parse(
-        previewTranslated.clientFrames[0]
-          .replace(/^data: \[ACTION\]/, '')
-          .trim(),
+      const previewJson: unknown = JSON.parse(
+        previewTranslated.clientFrames[0].replace(/^data: /, '').trim(),
       );
-      expect(actionJson).toMatchObject({
-        type: 'editor_patch_preview',
+      expect(previewJson).toMatchObject({
+        type: 'editor-patch-preview',
         agent: 'editor_agent',
         totalPatches: 2,
         patch: {
@@ -933,7 +930,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       expect(storedByok.apiKeyHint).toBe('sk-o••••4321');
 
       const clientSafe = sanitizeEditorConfigForClient(
-        stored as never,
+        fromPartial(stored),
       ) as Record<string, unknown>;
       expect(clientSafe.aiByok).toEqual({
         enabled: true,
@@ -950,6 +947,61 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         model: 'anthropic/claude-3.7-sonnet',
         base_url: 'https://openrouter.ai/api/v1',
       });
+    });
+
+    it('PaperChatService delegates to ChatService so paper chats persist sessions, META, and messages', async () => {
+      const resolvePaperTarget = jest.fn().mockResolvedValue({
+        spaceId: mockUserId,
+        title: 'Adam: A Method for Stochastic Optimization',
+        authors: ['Diederik P. Kingma', 'Jimmy Ba'],
+        year: 2015,
+        doi: '10.48550/arXiv.1412.6980',
+        abstract: 'We introduce Adam, an algorithm for first-order gradient-based optimization.',
+        itemId: 'paper-adam-1',
+        fileId: 'file-adam-1',
+        ragDocId: 'file-adam-1',
+      });
+      const paperChatService = new PaperChatService(
+        chatService,
+        fromPartial({
+          resolvePaperTarget,
+        }),
+      );
+
+      const mockReply = fromPartial<FastifyReply>({
+        raw: fromPartial<FastifyReply['raw']>({
+          writableEnded: false,
+          write: jest.fn(),
+          end: jest.fn(),
+        }),
+      });
+
+      await paperChatService.stream(
+        mockUserId,
+        'paper-adam-1',
+        { query: 'tóm tắt tài liệu' },
+        mockReply,
+      );
+
+      expect(resolvePaperTarget).toHaveBeenCalledWith(mockUserId, 'paper-adam-1');
+      expect(mockPrisma.aiChat.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: 'Adam: A Method for Stochastic Optimization',
+          }),
+        }),
+      );
+      const streamCalls = mockEngine.chatStream.mock.calls;
+      const lastCall = streamCalls[streamCalls.length - 1];
+      const sentReq = lastCall?.[0];
+      const streamOpts = lastCall?.[2];
+
+      expect(sentReq?.messages?.[0]?.role).toBe('system');
+      expect(sentReq?.messages?.[0]?.content).toContain(
+        'Adam: A Method for Stochastic Optimization',
+      );
+      expect(streamOpts?.initialFrames?.[0]).toContain('"type":"meta"');
+      expect(typeof streamOpts?.onComplete).toBe('function');
     });
   });
 });

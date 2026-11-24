@@ -1,28 +1,22 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
-import * as crypto from 'node:crypto';
+import { Injectable } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { RedisCacheService } from '@/core';
-import { AI_ENGINE_PORT, AI_REDIS_KEYS } from '../../ai.constant';
 import { AccessService } from '../../access/services/access.service';
-import type { IAiEnginePort } from '../../engine/engine.port';
-import type {
-  EngineChatRequest,
-  EngineChatResponse,
-} from '../../engine/types/engine.type';
-import {
-  buildEngineChatRequest,
-  extractNormalizedMessages,
-  formatPaperGroundingPrompt,
-} from '../domain/context.mapper';
+import type { EnrichedAttachedSource } from '../../access/types/access.type';
+import { formatPaperGroundingPrompt } from '../domain/context.mapper';
 import type { QueryDto } from '../dto/query.dto';
+import type { ExecuteChatResult } from '../types/chat.type';
+import { ChatService, type ChatTurnOptions } from './chat.service';
 
+/**
+ * Paper-context adapter that resolves a target Library paper/file into
+ * authoritative grounding context and delegates turn execution & persistence
+ * to the single canonical `ChatService` pipeline.
+ */
 @Injectable()
 export class PaperChatService {
   constructor(
-    @Inject(AI_ENGINE_PORT)
-    private readonly engine: IAiEnginePort,
+    private readonly chatService: ChatService,
     private readonly accessService: AccessService,
-    @Optional() private readonly redis?: RedisCacheService,
   ) {}
 
   async stream(
@@ -32,13 +26,18 @@ export class PaperChatService {
     reply: FastifyReply,
     delegationToken?: string,
   ): Promise<void> {
-    const { engineRequest } = await this.preparePaperTurn(
+    const { effectiveDto, turnOptions } = await this.buildPaperTurnInput(
       userId,
       paperId,
       dto,
-      delegationToken,
     );
-    return this.engine.chatStream(engineRequest, reply);
+    return this.chatService.stream(
+      userId,
+      effectiveDto,
+      reply,
+      delegationToken,
+      turnOptions,
+    );
   }
 
   async execute(
@@ -46,73 +45,92 @@ export class PaperChatService {
     paperId: string,
     dto: QueryDto,
     delegationToken?: string,
-  ): Promise<EngineChatResponse> {
-    const { spaceId, ragDocId, engineRequest } = await this.preparePaperTurn(
+  ): Promise<ExecuteChatResult> {
+    const { effectiveDto, turnOptions } = await this.buildPaperTurnInput(
       userId,
       paperId,
       dto,
-      delegationToken,
     );
-
-    const normalizedMsgs = extractNormalizedMessages(dto);
-    const cleanQuery = (
-      normalizedMsgs[normalizedMsgs.length - 1]?.content || ''
-    ).trim();
-
-    if (this.redis && cleanQuery) {
-      const queryHash = crypto
-        .createHash('sha256')
-        .update(cleanQuery)
-        .digest('hex');
-      const cacheKey = AI_REDIS_KEYS.paperQa(
-        spaceId,
-        ragDocId || paperId,
-        queryHash,
-      );
-      return this.redis.wrap(
-        cacheKey,
-        () => this.engine.chatSync(engineRequest),
-        3600,
-      );
-    }
-
-    return this.engine.chatSync(engineRequest);
+    return this.chatService.execute(
+      userId,
+      effectiveDto,
+      delegationToken,
+      turnOptions,
+    );
   }
 
-  private async preparePaperTurn(
+  private async buildPaperTurnInput(
     userId: string,
     paperId: string,
     dto: QueryDto,
-    delegationToken?: string,
   ): Promise<{
-    spaceId: string;
-    ragDocId: string | null;
-    engineRequest: EngineChatRequest;
+    effectiveDto: QueryDto;
+    turnOptions: ChatTurnOptions;
   }> {
     const resolved = await this.accessService.resolvePaperTarget(
       userId,
       paperId,
     );
-    await this.accessService.verifyChatOwnership(userId, dto.chatId);
 
-    const chatId = dto.chatId || `paper-${paperId}-${userId}`;
-    const paperContext = formatPaperGroundingPrompt(resolved);
-    const scopedDocIds = resolved.ragDocId ? [resolved.ragDocId] : [];
+    const effectiveSourceId = resolved.ragDocId || resolved.fileId || null;
+    const mergedDocIds = Array.from(
+      new Set([
+        ...(effectiveSourceId ? [effectiveSourceId] : []),
+        ...(dto.documentIds ?? []),
+      ]),
+    );
+    const paperItemId = resolved.itemId ?? paperId;
 
-    const engineRequest = buildEngineChatRequest({
-      userId,
-      spaceId: resolved.spaceId,
-      chatId,
-      documentIds: scopedDocIds,
-      dto: { ...dto, intentHint: 'rag_agent' },
-      prependSystemMessage: paperContext,
-      delegationToken,
+    const authoritativeSource: EnrichedAttachedSource = {
+      kind: 'paper',
+      title: resolved.title,
+      source_id: effectiveSourceId,
+      source_type: 'file',
+      item_id: paperItemId,
+      file_id: resolved.fileId ?? null,
+      has_pdf: Boolean(resolved.fileId),
+      indexed: Boolean(resolved.ragDocId),
+    };
+
+    const existingSources = Array.isArray(dto.context?.attached_sources)
+      ? (dto.context.attached_sources as unknown[])
+      : [];
+    const dedupedRest = existingSources.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return true;
+      const rec = entry as Record<string, unknown>;
+      const entryIds = [
+        rec.item_id,
+        rec.itemId,
+        rec.source_id,
+        rec.sourceId,
+        rec.id,
+      ]
+        .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+        .map((v) => v.trim());
+      return (
+        !entryIds.includes(paperId) &&
+        !entryIds.includes(paperItemId) &&
+        (!resolved.fileId || !entryIds.includes(resolved.fileId)) &&
+        (!resolved.ragDocId || !entryIds.includes(resolved.ragDocId))
+      );
     });
 
+    const effectiveDto: QueryDto = {
+      ...dto,
+      spaceId: dto.spaceId || resolved.spaceId,
+      documentIds: mergedDocIds,
+      context: {
+        ...(dto.context && typeof dto.context === 'object' ? dto.context : {}),
+        attached_sources: [authoritativeSource, ...dedupedRest],
+      },
+    };
+
     return {
-      spaceId: resolved.spaceId,
-      ragDocId: resolved.ragDocId,
-      engineRequest,
+      effectiveDto,
+      turnOptions: {
+        prependSystemMessage: formatPaperGroundingPrompt(resolved),
+        initialTitleHint: resolved.title,
+      },
     };
   }
 }

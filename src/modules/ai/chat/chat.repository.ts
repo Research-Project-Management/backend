@@ -1,11 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/core';
-import type { AiChat, MessageRole, Prisma } from '@prisma/client';
+import type { AiChat, AiMessage, MessageRole, Prisma } from '@prisma/client';
 import type { ChatWithMessages } from './types/chat.type';
 
 const CHAT_INCLUDE = {
   messages: {
     orderBy: { createdAt: 'asc' as const },
+  },
+  space: {
+    select: { projectId: true },
+  },
+};
+
+const CHAT_SUMMARY_INCLUDE = {
+  messages: {
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+  },
+  _count: {
+    select: { messages: true },
   },
   space: {
     select: { projectId: true },
@@ -25,7 +38,7 @@ export class ChatRepository {
         spaceId: spaceId || userId,
         createdById: userId,
       },
-      include: CHAT_INCLUDE,
+      include: CHAT_SUMMARY_INCLUDE,
       orderBy: { updatedAt: 'desc' },
     });
   }
@@ -45,6 +58,33 @@ export class ChatRepository {
       where: { id: chatId, createdById: userId },
       include: CHAT_INCLUDE,
     });
+  }
+
+  async existsChatForUser(chatId: string, userId: string): Promise<boolean> {
+    const chat = await this.prisma.aiChat.findFirst({
+      where: { id: chatId, createdById: userId },
+      select: { id: true },
+    });
+    return chat !== null;
+  }
+
+  async findChatMessagesPage(
+    chatId: string,
+    skip: number,
+    take: number,
+  ): Promise<{ messages: AiMessage[]; total: number }> {
+    const [messages, total] = await Promise.all([
+      this.prisma.aiMessage.findMany({
+        where: { chatId },
+        orderBy: { createdAt: 'asc' },
+        skip,
+        take,
+      }),
+      this.prisma.aiMessage.count({
+        where: { chatId },
+      }),
+    ]);
+    return { messages, total };
   }
 
   async findPageChat(
@@ -121,7 +161,7 @@ export class ChatRepository {
     });
   }
 
-  async createMessages(
+  async insertMessagesFast(
     chatId: string,
     messages: Array<{
       role: MessageRole;
@@ -131,7 +171,7 @@ export class ChatRepository {
       selectionContext?: Prisma.InputJsonValue;
     }>,
     documentIds?: string[],
-  ): Promise<ChatWithMessages | null> {
+  ): Promise<void> {
     if (messages.length > 0) {
       await this.prisma.aiMessage.createMany({
         data: messages.map((m) => ({
@@ -152,7 +192,20 @@ export class ChatRepository {
         updatedAt: new Date(),
       },
     });
+  }
 
+  async createMessages(
+    chatId: string,
+    messages: Array<{
+      role: MessageRole;
+      content: string;
+      sources?: Prisma.InputJsonValue;
+      widgets?: Prisma.InputJsonValue;
+      selectionContext?: Prisma.InputJsonValue;
+    }>,
+    documentIds?: string[],
+  ): Promise<ChatWithMessages | null> {
+    await this.insertMessagesFast(chatId, messages, documentIds);
     return this.findChatById(chatId);
   }
 

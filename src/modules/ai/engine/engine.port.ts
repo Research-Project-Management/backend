@@ -68,5 +68,4 @@ export interface IAiEnginePort {
     sourceType: string,
     sourceId: string,
   ): Promise<EngineDeleteResponse>;
-  deleteSpaceKnowledge(spaceId: string): Promise<EngineDeleteResponse>;
 }

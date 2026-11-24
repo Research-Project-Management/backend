@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RedisCacheService } from '@/core/infrastructure/redis/redis.service';
+import { RedisCacheService } from '@/core/infrastructure/redis/cache.service';
 
 export interface ChatCacheConfig {
   maxCachedMessages: number;
@@ -197,15 +197,6 @@ export class ChatCacheService {
   async invalidate(conversationId: string): Promise<void> {
     const key = this.getKey(conversationId);
     this.memoryCache.delete(conversationId);
-    const client = this.redisCache.getClient();
-    if (this.redisCache.isReady() && client) {
-      try {
-        await client.del(key);
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Redis invalidate error on ${key}: ${(err as Error)?.message}`,
-        );
-      }
-    }
+    await this.redisCache.del(key);
   }
 }

@@ -523,6 +523,7 @@ describe('FilesModule P0 Production Hardening', () => {
         harness.sessionRepo,
         harness.finalizeCasQueue as unknown as Queue,
         redis,
+        redis as unknown as import('@/core').DistributedLockService,
       );
 
       const payload = Buffer.from('%PDF-1.7\npresigned-idempotent');

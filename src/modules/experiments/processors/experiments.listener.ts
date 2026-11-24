@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, RedisPubSubService } from '@/core';
 import {
   FileDownloadedEvent,
   FileTrashedEvent,
@@ -24,6 +24,7 @@ export class ExperimentsEventListener {
   constructor(
     @Optional() private readonly redis?: RedisCacheService,
     @Optional() private readonly queueProducer?: ExperimentsQueueProducer,
+    @Optional() private readonly pubSub?: RedisPubSubService,
   ) {}
 
   @OnEvent('file.uploaded')
@@ -99,11 +100,17 @@ export class ExperimentsEventListener {
       this.recentEvents.pop();
     }
 
+    const serialized = JSON.stringify(eventRecord);
+    if (this.pubSub?.isReady()) {
+      await this.pubSub.publish('flux:experiments:events', serialized);
+    }
+
     const client = this.redis?.getClient();
     if (client && this.redis?.isReady()) {
       try {
-        const serialized = JSON.stringify(eventRecord);
-        await client.publish('flux:experiments:events', serialized);
+        if (!this.pubSub?.isReady()) {
+          await client.publish('flux:experiments:events', serialized);
+        }
         await client.xadd(
           'flux:experiments:stream',
           'MAXLEN',

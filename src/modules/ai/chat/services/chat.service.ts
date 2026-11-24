@@ -10,6 +10,7 @@ import { AI_ENGINE_PORT } from '../../ai.constant';
 import { AccessService } from '../../access/services/access.service';
 import type { ChatOwnershipRecord } from '../../access/types/access.type';
 import type { IAiEnginePort } from '../../engine/engine.port';
+import { encodeSseEvent } from '../../engine/domain/stream.mapper';
 import type {
   EngineChatRequest,
   EngineChatResponse,
@@ -24,6 +25,11 @@ import type { QueryDto, ResumeDto } from '../dto/query.dto';
 import type { ExecuteChatResult } from '../types/chat.type';
 import { SessionService } from './session.service';
 import { TitleService } from './title.service';
+
+export interface ChatTurnOptions {
+  prependSystemMessage?: string;
+  initialTitleHint?: string;
+}
 
 interface PreparedChatTurn {
   chatId: string;
@@ -52,10 +58,16 @@ export class ChatService {
     dto: QueryDto,
     reply: FastifyReply,
     delegationToken?: string,
+    options?: ChatTurnOptions,
   ): Promise<void> {
-    const turn = await this.prepareChatTurn(userId, dto, delegationToken);
+    const turn = await this.prepareChatTurn(
+      userId,
+      dto,
+      delegationToken,
+      options,
+    );
     const initialFrames = [
-      `data: [META]${JSON.stringify({ chatId: turn.chatId, title: turn.title })}\n\n`,
+      encodeSseEvent({ type: 'meta', chatId: turn.chatId, title: turn.title }),
     ];
 
     const onComplete = async (result: StreamCompletionResult) => {
@@ -89,8 +101,14 @@ export class ChatService {
     userId: string,
     dto: QueryDto,
     delegationToken?: string,
+    options?: ChatTurnOptions,
   ): Promise<ExecuteChatResult> {
-    const turn = await this.prepareChatTurn(userId, dto, delegationToken);
+    const turn = await this.prepareChatTurn(
+      userId,
+      dto,
+      delegationToken,
+      options,
+    );
     await turn.persistUserMsgPromise;
 
     const response = await this.engine.chatSync(turn.engineRequest);
@@ -165,7 +183,11 @@ export class ChatService {
               },
             ],
           })
-          .catch(() => undefined);
+          .catch((err: unknown) => {
+            this.logger.warn(
+              `Could not persist resumed stream assistant message: ${getErrorMessage(err)}`,
+            );
+          });
       },
     });
   }
@@ -203,7 +225,11 @@ export class ChatService {
             },
           ],
         })
-        .catch(() => undefined);
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Could not persist resumed sync assistant message: ${getErrorMessage(err)}`,
+          );
+        });
     }
     return response;
   }
@@ -278,6 +304,7 @@ export class ChatService {
     userId: string,
     dto: QueryDto,
     delegationToken?: string,
+    options?: ChatTurnOptions,
   ): Promise<PreparedChatTurn> {
     const normalized = extractNormalizedMessages(dto);
     const userMsgs = normalized.filter((m) => m.role === 'user');
@@ -292,7 +319,30 @@ export class ChatService {
       chatId: dto.chatId,
       pageId: dto.pageId,
       documentIds: dto.documentIds ?? [],
+      attachedSources: dto.context?.attached_sources,
     });
+    const enrichedSources = turnAccess.enrichedSources;
+
+    const scopedDocSet = new Set<string>(turnAccess.resolvedDocumentIds);
+    for (const source of enrichedSources) {
+      if (source.source_id) {
+        scopedDocSet.add(source.source_id);
+      }
+    }
+    const scopedDocumentIds = Array.from(scopedDocSet);
+
+    const effectiveDto: QueryDto =
+      enrichedSources.length > 0
+        ? {
+            ...dto,
+            context: {
+              ...(dto.context && typeof dto.context === 'object'
+                ? dto.context
+                : {}),
+              attached_sources: enrichedSources,
+            },
+          }
+        : dto;
 
     const { chatId, title } = await this.resolveOrEstablishChat({
       userId,
@@ -301,12 +351,13 @@ export class ChatService {
       rawPageId: dto.pageId,
       existingChat: turnAccess.existingChat,
       userQuery: lastUserMsg.content,
-      documentIds: turnAccess.resolvedDocumentIds,
+      documentIds: scopedDocumentIds,
+      initialTitleHint: options?.initialTitleHint,
     });
 
     const userAttachments = lastUserMsg.attachments ?? lastUserMsg.sources;
     const persistUserMsgPromise = this.sessionService
-      .appendMessages(chatId, userId, {
+      .appendMessagesFast(chatId, userId, turnAccess.spaceId, {
         messages: [
           {
             role: 'user',
@@ -316,7 +367,7 @@ export class ChatService {
               : {}),
           },
         ],
-        documentIds: turnAccess.resolvedDocumentIds,
+        documentIds: scopedDocumentIds,
       })
       .catch((err: unknown) => {
         this.logger.warn(
@@ -330,8 +381,9 @@ export class ChatService {
       projectId: turnAccess.projectId,
       chatId,
       pageId: turnAccess.canonicalPageId ?? dto.pageId,
-      documentIds: turnAccess.resolvedDocumentIds,
-      dto,
+      documentIds: scopedDocumentIds,
+      dto: effectiveDto,
+      prependSystemMessage: options?.prependSystemMessage,
       delegationToken,
       llmOverride: turnAccess.llmOverride,
     });
@@ -341,7 +393,7 @@ export class ChatService {
       title,
       spaceId: turnAccess.spaceId,
       userQuery: lastUserMsg.content,
-      resolvedDocumentIds: turnAccess.resolvedDocumentIds,
+      resolvedDocumentIds: scopedDocumentIds,
       persistUserMsgPromise,
       engineRequest,
     };
@@ -382,19 +434,24 @@ export class ChatService {
     documentIds: string[];
   }): Promise<void> {
     try {
-      await this.sessionService.appendMessages(params.chatId, params.userId, {
-        messages: [
-          {
-            role: 'assistant',
-            content: params.assistantText,
-            ...(params.sources.length > 0 ? { sources: params.sources } : {}),
-            ...(params.widgets && params.widgets.length > 0
-              ? { widgets: params.widgets }
-              : {}),
-          },
-        ],
-        documentIds: params.documentIds,
-      });
+      await this.sessionService.appendMessagesFast(
+        params.chatId,
+        params.userId,
+        params.spaceId,
+        {
+          messages: [
+            {
+              role: 'assistant',
+              content: params.assistantText,
+              ...(params.sources.length > 0 ? { sources: params.sources } : {}),
+              ...(params.widgets && params.widgets.length > 0
+                ? { widgets: params.widgets }
+                : {}),
+            },
+          ],
+          documentIds: params.documentIds,
+        },
+      );
     } catch (err: unknown) {
       this.logger.warn(
         `Could not persist assistant message: ${getErrorMessage(err)}`,
@@ -438,6 +495,7 @@ export class ChatService {
     existingChat: ChatOwnershipRecord | null;
     userQuery: string;
     documentIds: string[];
+    initialTitleHint?: string;
   }): Promise<{ chatId: string; title: string }> {
     if (params.existingChat) {
       return {
@@ -446,10 +504,9 @@ export class ChatService {
       };
     }
 
-    const initialTitle = deriveInitialChatTitle(
-      params.userQuery,
-      params.documentIds,
-    );
+    const hint = params.initialTitleHint?.trim();
+    const initialTitle =
+      hint || deriveInitialChatTitle(params.userQuery, params.documentIds);
     const created = await this.sessionService.createChat(params.userId, {
       spaceId: params.spaceId,
       pageId: params.canonicalPageId || params.rawPageId,

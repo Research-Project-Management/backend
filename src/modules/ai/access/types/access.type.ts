@@ -21,21 +21,44 @@ export interface LlmOverridePayload {
   base_url?: string;
 }
 
+export interface ResolvedChatDocuments {
+  resolvedDocumentIds: string[];
+  enrichedSources: EnrichedAttachedSource[];
+}
+
 export interface ChatTurnAccess {
   spaceId: string;
   projectId: string | null;
   canonicalPageId?: string;
   titleHint?: string | null;
   resolvedDocumentIds: string[];
+  enrichedSources: EnrichedAttachedSource[];
   existingChat: ChatOwnershipRecord | null;
   llmOverride?: LlmOverridePayload | null;
 }
 
+export interface EnrichedAttachedSource {
+  kind: 'library' | 'upload' | 'paper';
+  title: string;
+  source_id: string | null;
+  source_type: 'upload' | 'file' | null;
+  item_id: string | null;
+  file_id: string | null;
+  has_pdf: boolean;
+  indexed: boolean;
+}
+
 export interface ResolvedPaperTarget {
+  itemId?: string | null;
+  fileId?: string | null;
   title: string;
   authors: string[];
   year?: number | string;
   doi?: string;
+  arxivId?: string;
+  venue?: string;
+  pageCount?: number;
+  citationCount?: number;
   abstract?: string;
   ragDocId: string | null;
   spaceId: string;

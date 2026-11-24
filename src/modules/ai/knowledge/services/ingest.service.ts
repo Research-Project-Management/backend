@@ -31,7 +31,10 @@ export class KnowledgeIngestService {
     private readonly libraryFacade?: ILibraryFacade,
   ) {}
 
-  async ingestStorageFile(data: KnowledgeFileJobData): Promise<void> {
+  async ingestStorageFile(
+    data: KnowledgeFileJobData,
+    options?: { rethrowOnFailure?: boolean },
+  ): Promise<void> {
     const file = await this.repo.findFileById(data.fileId);
     if (!file || file.deletedAt) {
       this.logger.warn(
@@ -126,6 +129,10 @@ export class KnowledgeIngestService {
         chunkCount,
         pageCount,
       });
+
+      if (!isIndexed && options?.rethrowOnFailure) {
+        throw new Error(ragError || 'AI engine unavailable');
+      }
 
       if (isIndexed && ragDocId) {
         await this.propagateToLibrary(

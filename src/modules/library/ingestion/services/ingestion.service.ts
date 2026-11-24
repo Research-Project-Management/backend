@@ -38,7 +38,7 @@ import {
   METADATA_PORT,
   MetadataPort,
 } from '@/modules/library/ingestion/types/metadata.types';
-import { RedisCacheService } from '@/core';
+import { DistributedLockService, RedisCacheService } from '@/core';
 import {
   MetadataResolverService,
   ReResolveMetadataOptions,
@@ -76,6 +76,8 @@ export class IngestionService {
     runReporter?: IngestionRunReporterService,
     @Optional()
     private readonly cache?: RedisCacheService,
+    @Optional()
+    private readonly lockService?: DistributedLockService,
   ) {
     this.metadataResolver =
       metadataResolver ??
@@ -177,8 +179,8 @@ export class IngestionService {
     if (idempotencyKey) {
       const lockKey = `flux:lock:ingest:${envelope.userId}:${envelope.projectId ?? 'personal'}:${idempotencyKey}`;
 
-      if (this.cache?.isReady()) {
-        const lockToken = await this.cache.acquireLock(lockKey, 30000);
+      if (this.lockService && this.cache?.isReady()) {
+        const lockToken = await this.lockService.acquireLock(lockKey, 30000);
         if (!lockToken) {
           // Lock held by concurrent pod/process: wait briefly for existing run to be committed
           await new Promise((resolve) => setTimeout(resolve, 300));
@@ -196,7 +198,7 @@ export class IngestionService {
           try {
             return await this.executeSubmit(envelope, idempotencyKey, options);
           } finally {
-            await this.cache.releaseLock(lockKey, lockToken);
+            await this.lockService.releaseLock(lockKey, lockToken);
           }
         }
       }

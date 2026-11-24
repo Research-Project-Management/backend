@@ -49,6 +49,7 @@ export class KnowledgeQueueProcessor
     if (job.name === AI_JOB_INGEST_FILE) {
       await this.ingestService.ingestStorageFile(
         job.data as KnowledgeFileJobData,
+        { rethrowOnFailure: true },
       );
     }
   }

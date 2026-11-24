@@ -14,20 +14,6 @@ import {
 } from 'class-validator';
 import { ReadingStatus } from '@/modules/library/catalog/types/catalog.types';
 
-class ReaderBookmarkItemDto {
-  @IsInt()
-  @Min(1)
-  page!: number;
-
-  @IsOptional()
-  @IsString()
-  label?: string;
-
-  @IsOptional()
-  @IsString()
-  createdAt?: string;
-}
-
 interface ReaderScrollPositionDto {
   attachmentId?: string;
   page?: number;
@@ -35,7 +21,6 @@ interface ReaderScrollPositionDto {
   fitMode?: string;
   rotation?: number;
   themeMode?: string;
-  bookmarks?: Array<number | ReaderBookmarkItemDto>;
   byAttachment?: Record<string, Record<string, unknown>>;
   [key: string]: unknown;
 }

@@ -1,4 +1,5 @@
 import {
+  Allow,
   IsEnum,
   IsInt,
   IsOptional,
@@ -57,6 +58,26 @@ export function normalizeAnnotationType(
   if (lower === 'freetext') return AnnotationType.text;
   if (lower === 'drawing' || lower === 'pen') return AnnotationType.ink;
   return lower as AnnotationType;
+}
+
+function resolveRawRectCoords(
+  obj?: Record<string, unknown>,
+): Record<string, unknown> | Array<unknown> | null | undefined {
+  if (!obj) return undefined;
+  if (obj.rectCoords !== undefined && obj.rectCoords !== null) {
+    return obj.rectCoords as Record<string, unknown> | Array<unknown>;
+  }
+  if (Array.isArray(obj.rects)) {
+    return obj.rects;
+  }
+  if (obj.boundingRect && typeof obj.boundingRect === 'object') {
+    return [obj.boundingRect];
+  }
+  return obj.rectCoords as null | undefined;
+}
+
+function resolveRawRects(obj?: Record<string, unknown>): Array<unknown> | undefined {
+  return Array.isArray(obj?.rects) ? obj.rects : undefined;
 }
 
 // Create
@@ -155,24 +176,22 @@ export class CreateAnnotationDto {
   @IsOptional()
   tags?: string[];
 
-  @Transform(
-    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-      if (value !== undefined) return value;
-      if (Array.isArray(obj?.rects)) return obj.rects;
-      if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
-        return [obj.boundingRect];
-      }
-      return value;
-    },
+  @Allow()
+  @Transform(({ obj }: { obj?: Record<string, unknown> }) =>
+    resolveRawRectCoords(obj),
   )
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
+  @Transform(({ obj }: { obj?: Record<string, unknown> }) =>
+    resolveRawRects(obj),
+  )
   @IsArray()
   @ArrayMaxSize(500)
   @IsOptional()
   rects?: Array<unknown>;
 
+  @Allow()
   @IsOptional()
   boundingRect?: Record<string, unknown>;
 }
@@ -261,24 +280,22 @@ export class UpdateAnnotationDto {
   @IsOptional()
   tags?: string[];
 
-  @Transform(
-    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-      if (value !== undefined) return value;
-      if (Array.isArray(obj?.rects)) return obj.rects;
-      if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
-        return [obj.boundingRect];
-      }
-      return value;
-    },
+  @Allow()
+  @Transform(({ obj }: { obj?: Record<string, unknown> }) =>
+    resolveRawRectCoords(obj),
   )
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
+  @Transform(({ obj }: { obj?: Record<string, unknown> }) =>
+    resolveRawRects(obj),
+  )
   @IsArray()
   @ArrayMaxSize(500)
   @IsOptional()
   rects?: Array<unknown>;
 
+  @Allow()
   @IsOptional()
   boundingRect?: Record<string, unknown>;
 
@@ -378,24 +395,22 @@ class UpsertAnnotationItemDto {
   @IsOptional()
   tags?: string[];
 
-  @Transform(
-    ({ value, obj }: { value: unknown; obj?: Record<string, unknown> }) => {
-      if (value !== undefined) return value;
-      if (Array.isArray(obj?.rects)) return obj.rects;
-      if (obj?.boundingRect && typeof obj.boundingRect === 'object') {
-        return [obj.boundingRect];
-      }
-      return value;
-    },
+  @Allow()
+  @Transform(({ obj }: { obj?: Record<string, unknown> }) =>
+    resolveRawRectCoords(obj),
   )
   @IsOptional()
   rectCoords?: Record<string, unknown> | Array<unknown> | null;
 
+  @Transform(({ obj }: { obj?: Record<string, unknown> }) =>
+    resolveRawRects(obj),
+  )
   @IsArray()
   @ArrayMaxSize(500)
   @IsOptional()
   rects?: Array<unknown>;
 
+  @Allow()
   @IsOptional()
   boundingRect?: Record<string, unknown>;
 

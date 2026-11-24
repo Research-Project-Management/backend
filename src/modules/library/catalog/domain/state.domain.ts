@@ -206,7 +206,6 @@ export function pickPreferredMergedState(
   let bestScrollReadTs = -1;
   let bestScrollOpenTs = -1;
   let bestScrollPage = -Infinity;
-  const bookmarkMap = new Map<number, unknown>();
   const mergedByAttachment: Record<string, Record<string, unknown>> = {};
   let hasByAttachment = false;
 
@@ -250,27 +249,6 @@ export function pickPreferredMergedState(
         !Array.isArray(s.scrollPosition)
       ) {
         const spObj = s.scrollPosition as Record<string, unknown>;
-        if (Array.isArray(spObj.bookmarks)) {
-          for (const bm of spObj.bookmarks) {
-            const pageNum =
-              typeof bm === 'number'
-                ? bm
-                : bm &&
-                    typeof bm === 'object' &&
-                    typeof (bm as { page?: unknown }).page === 'number'
-                  ? (bm as { page: number }).page
-                  : null;
-            if (pageNum !== null && Number.isFinite(pageNum) && pageNum >= 1) {
-              const existingBm = bookmarkMap.get(pageNum);
-              if (
-                existingBm === undefined ||
-                (typeof existingBm === 'number' && typeof bm === 'object')
-              ) {
-                bookmarkMap.set(pageNum, bm);
-              }
-            }
-          }
-        }
         if (
           spObj.byAttachment &&
           typeof spObj.byAttachment === 'object' &&
@@ -314,15 +292,11 @@ export function pickPreferredMergedState(
     latestScroll &&
     typeof latestScroll === 'object' &&
     !Array.isArray(latestScroll) &&
-    (bookmarkMap.size > 0 || hasByAttachment)
+    hasByAttachment
   ) {
-    const unionedBookmarks = Array.from(bookmarkMap.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([, val]) => val);
     latestScroll = {
       ...(latestScroll as Record<string, unknown>),
-      ...(bookmarkMap.size > 0 ? { bookmarks: unionedBookmarks } : {}),
-      ...(hasByAttachment ? { byAttachment: mergedByAttachment } : {}),
+      byAttachment: mergedByAttachment,
     };
   }
 

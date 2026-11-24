@@ -97,11 +97,11 @@ describe('AI Engine Transport, SSE Mapper & Cancellation Suite', () => {
       expect(translated.finished).toBe(true);
       expect(translated.route).toBe('rag_agent,web_search_agent');
       expect(translated.citations).toHaveLength(1);
-      expect(translated.clientFrames[0]).toContain('data: [META]');
+      expect(translated.clientFrames[0]).toContain('"type":"meta"');
       expect(translated.clientFrames[0]).toContain(
         'https://arxiv.org/abs/2205.14135',
       );
-      expect(translated.clientFrames[1]).toBe('data: [DONE]\n\n');
+      expect(translated.clientFrames[1]).toBe('data: {"type":"done"}\n\n');
     });
   });
 
@@ -254,7 +254,7 @@ describe('AI Engine Transport, SSE Mapper & Cancellation Suite', () => {
         },
         reply,
         {
-          initialFrames: ['data: [META]{"chatId":"chat-1"}\n\n'],
+          initialFrames: ['data: {"type":"meta","chatId":"chat-1"}\n\n'],
           onComplete: (res) => {
             completedResult = res;
           },

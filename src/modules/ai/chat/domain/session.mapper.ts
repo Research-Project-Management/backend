@@ -1,5 +1,7 @@
+import type { AiMessage } from '@prisma/client';
 import type {
   ChatWithMessages,
+  FormattedChatMessage,
   FormattedChatSession,
 } from '../types/chat.type';
 
@@ -19,11 +21,33 @@ export function sanitizeMessageRole(role?: string): 'user' | 'assistant' {
   return role === 'assistant' ? 'assistant' : 'user';
 }
 
+export function formatChatMessage(m: AiMessage): FormattedChatMessage {
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    sources: m.role === 'assistant' ? m.sources : undefined,
+    attachments:
+      m.role === 'user' && Array.isArray(m.sources) && m.sources.length > 0
+        ? m.sources
+        : undefined,
+    widgets: m.widgets,
+    createdAt:
+      m.createdAt instanceof Date
+        ? m.createdAt.toISOString()
+        : String(m.createdAt),
+  };
+}
+
 export function formatChatSession(
   chat: ChatWithMessages,
 ): FormattedChatSession {
   const msgs = Array.isArray(chat.messages) ? chat.messages : [];
-  const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].content || '' : '';
+  const isSummary = chat._count !== undefined;
+  const lastMsg =
+    msgs.length > 0
+      ? (isSummary ? msgs[0].content : msgs[msgs.length - 1].content) || ''
+      : '';
   const projectId = chat.space?.projectId ?? null;
 
   return {
@@ -32,7 +56,7 @@ export function formatChatSession(
     spaceId: chat.spaceId,
     projectId,
     pageId: chat.pageId ?? null,
-    messageCount: msgs.length,
+    messageCount: chat._count?.messages ?? msgs.length,
     lastMessage: lastMsg,
     documentIds: chat.documentIds || [],
     createdAt:
@@ -43,20 +67,6 @@ export function formatChatSession(
       chat.updatedAt instanceof Date
         ? chat.updatedAt.toISOString()
         : String(chat.updatedAt),
-    messages: msgs.map((m) => ({
-      id: m.id,
-      role: m.role,
-      content: m.content,
-      sources: m.role === 'assistant' ? m.sources : undefined,
-      attachments:
-        m.role === 'user' && Array.isArray(m.sources) && m.sources.length > 0
-          ? m.sources
-          : undefined,
-      widgets: m.widgets,
-      createdAt:
-        m.createdAt instanceof Date
-          ? m.createdAt.toISOString()
-          : String(m.createdAt),
-    })),
+    messages: msgs.map(formatChatMessage),
   };
 }

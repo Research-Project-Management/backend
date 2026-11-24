@@ -1,6 +1,8 @@
 import {
   EngineCitation,
+  FluxClientSseEvent,
   FrontendEditorPatchItem,
+  FrontendHitlInterrupt,
   FrontendProvenanceItem,
   FrontendResponseWidget,
   FrontendSourceItem,
@@ -10,6 +12,10 @@ import {
 export interface RawSseEvent {
   event: string;
   data: string;
+}
+
+export function encodeSseEvent(event: FluxClientSseEvent): string {
+  return `data: ${JSON.stringify(event)}\n\n`;
 }
 
 export function mapCitationToSourceItem(
@@ -333,12 +339,75 @@ function asStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function normalizeHitlInterrupts(
+  rawInterrupts: unknown[],
+): FrontendHitlInterrupt[] {
+  return rawInterrupts.map((entry, idx) => {
+    const rec = asRecord(entry) ?? {};
+    const nestedRequests = Array.isArray(rec.action_requests)
+      ? rec.action_requests
+      : null;
+    const firstReq = nestedRequests ? asRecord(nestedRequests[0]) : null;
+
+    const tool =
+      (typeof rec.tool === 'string' && rec.tool) ||
+      (typeof rec.name === 'string' && rec.name) ||
+      (typeof firstReq?.name === 'string' && firstReq.name) ||
+      undefined;
+
+    const args =
+      asRecord(rec.args) ||
+      asRecord(rec.arguments) ||
+      asRecord(firstReq?.args) ||
+      asRecord(firstReq?.arguments) ||
+      undefined;
+
+    const description =
+      (typeof rec.description === 'string' && rec.description) ||
+      (typeof firstReq?.description === 'string' && firstReq.description) ||
+      undefined;
+
+    const rawAllowed = Array.isArray(rec.allowedDecisions)
+      ? rec.allowedDecisions
+      : Array.isArray(rec.allowed_decisions)
+        ? rec.allowed_decisions
+        : ['approve', 'reject'];
+
+    const allowedDecisions = rawAllowed.filter(
+      (d): d is 'approve' | 'reject' | 'edit' =>
+        d === 'approve' || d === 'reject' || d === 'edit',
+    );
+
+    const id =
+      (typeof rec.id === 'string' && rec.id) ||
+      (typeof rec.interrupt_id === 'string' && rec.interrupt_id) ||
+      `hitl-${idx}-${tool ?? 'action'}`;
+
+    return {
+      id,
+      ...(tool ? { tool } : {}),
+      ...(description ? { description } : {}),
+      ...(args ? { args } : {}),
+      allowedDecisions:
+        allowedDecisions.length > 0 ? allowedDecisions : ['approve', 'reject'],
+      raw: entry,
+    };
+  });
+}
+
 export function translateEngineSseFrame(
   eventName: string,
   rawData: string,
 ): TranslatedSseFrame {
   if (rawData === '[DONE]') {
-    return { clientFrames: ['data: [DONE]\n\n'], finished: true };
+    return { clientFrames: [encodeSseEvent({ type: 'done' })], finished: true };
   }
 
   const payload = parseJsonObject(rawData);
@@ -352,16 +421,19 @@ export function translateEngineSseFrame(
       const mode = typeof payload?.mode === 'string' ? payload.mode : 'direct';
       const routeLabel = targets.join(',');
       const frames = [
-        `data: [META]${JSON.stringify({ agent: routeLabel || mode, intent: mode })}\n\n`,
+        encodeSseEvent({
+          type: 'meta',
+          agent: routeLabel || mode,
+          intent: mode,
+        }),
       ];
       if (targets.length > 0) {
         frames.push(
-          `data: [ACTION]${JSON.stringify({
-            type: 'agent_handoff',
+          encodeSseEvent({
+            type: 'agent-handoff',
             to: routeLabel,
             parallel: targets.length > 1,
-            status: 'calling',
-          })}\n\n`,
+          }),
         );
       }
       return { clientFrames: frames, route: routeLabel || mode };
@@ -372,11 +444,10 @@ export function translateEngineSseFrame(
         typeof payload?.agent === 'string' ? payload.agent : undefined;
       return {
         clientFrames: [
-          `data: [ACTION]${JSON.stringify({
+          encodeSseEvent({
             type: 'thinking',
-            agent,
-            status: 'calling',
-          })}\n\n`,
+            ...(agent ? { agent } : {}),
+          }),
         ],
       };
     }
@@ -386,40 +457,35 @@ export function translateEngineSseFrame(
         typeof payload?.agent === 'string' ? payload.agent : undefined;
       return {
         clientFrames: [
-          `data: [ACTION]${JSON.stringify({
-            type: 'agent_done',
-            agent,
+          encodeSseEvent({
+            type: 'agent-done',
+            ...(agent ? { agent } : {}),
             status: 'done',
             success: true,
-          })}\n\n`,
+          }),
         ],
       };
     }
 
     case 'tool.called': {
-      const tool = typeof payload?.tool === 'string' ? payload.tool : undefined;
+      const tool = typeof payload?.tool === 'string' ? payload.tool : 'tool';
       const agent =
         typeof payload?.agent === 'string' ? payload.agent : undefined;
-      const rawInput = payload?.input;
-      const input =
-        rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
-          ? (rawInput as Record<string, unknown>)
-          : undefined;
+      const input = asRecord(payload?.input) ?? undefined;
       return {
         clientFrames: [
-          `data: [ACTION]${JSON.stringify({
-            type: 'tool_start',
+          encodeSseEvent({
+            type: 'tool-start',
             tool,
-            agent,
+            ...(agent ? { agent } : {}),
             ...(input ? { input } : {}),
-            status: 'calling',
-          })}\n\n`,
+          }),
         ],
       };
     }
 
     case 'tool.completed': {
-      const tool = typeof payload?.tool === 'string' ? payload.tool : undefined;
+      const tool = typeof payload?.tool === 'string' ? payload.tool : 'tool';
       const agent =
         typeof payload?.agent === 'string' ? payload.agent : undefined;
       const isError = payload?.status === 'error';
@@ -429,14 +495,14 @@ export function translateEngineSseFrame(
           : undefined;
       return {
         clientFrames: [
-          `data: [ACTION]${JSON.stringify({
-            type: 'tool_end',
+          encodeSseEvent({
+            type: 'tool-end',
             tool,
-            agent,
+            ...(agent ? { agent } : {}),
             status: isError ? 'error' : 'done',
             success: !isError,
             ...(error ? { error } : {}),
-          })}\n\n`,
+          }),
         ],
       };
     }
@@ -448,14 +514,14 @@ export function translateEngineSseFrame(
         typeof payload?.agent === 'string' ? payload.agent : 'editor_agent';
       return {
         clientFrames: [
-          `data: [ACTION]${JSON.stringify({
-            type: 'editor_patch_preview',
+          encodeSseEvent({
+            type: 'editor-patch-preview',
             agent,
             patch,
             ...(typeof payload?.total_patches === 'number'
               ? { totalPatches: payload.total_patches }
               : {}),
-          })}\n\n`,
+          }),
         ],
       };
     }
@@ -464,7 +530,7 @@ export function translateEngineSseFrame(
       const delta = typeof payload?.delta === 'string' ? payload.delta : '';
       if (!delta) return { clientFrames: [] };
       return {
-        clientFrames: [`data: ${JSON.stringify({ type: 'reasoning', delta })}\n\n`],
+        clientFrames: [encodeSseEvent({ type: 'reasoning-delta', delta })],
       };
     }
 
@@ -472,25 +538,27 @@ export function translateEngineSseFrame(
       const delta = typeof payload?.delta === 'string' ? payload.delta : '';
       if (!delta) return { clientFrames: [] };
       return {
-        clientFrames: [`data: ${JSON.stringify({ delta })}\n\n`],
+        clientFrames: [encodeSseEvent({ type: 'text-delta', delta })],
         deltaText: delta,
       };
     }
 
     case 'hitl.interrupted': {
-      const interrupts = Array.isArray(payload?.interrupts)
+      const rawInterrupts = Array.isArray(payload?.interrupts)
         ? payload.interrupts
         : [];
+      const interrupts = normalizeHitlInterrupts(rawInterrupts);
+      const interruptId = interrupts[0]?.id ?? `hitl-${Date.now()}`;
       return {
         clientFrames: [
-          `data: [ACTION]${JSON.stringify({
-            type: 'tool_call',
-            needs_confirm: true,
-            input: { interrupts },
-          })}\n\n`,
-          'data: [DONE]\n\n',
+          encodeSseEvent({
+            type: 'hitl-interrupt',
+            interruptId,
+            interrupts,
+          }),
+          encodeSseEvent({ type: 'done' }),
         ],
-        interrupts,
+        interrupts: rawInterrupts,
         finished: true,
       };
     }
@@ -500,21 +568,17 @@ export function translateEngineSseFrame(
         typeof payload?.route === 'string' ? payload.route : 'direct';
       const citations = normalizeRawCitations(payload?.citations);
       const sources = citations.map(mapCitationToSourceItem);
-      const rawArtifacts =
-        payload?.artifacts &&
-        typeof payload.artifacts === 'object' &&
-        !Array.isArray(payload.artifacts)
-          ? (payload.artifacts as Record<string, unknown>)
-          : undefined;
+      const rawArtifacts = asRecord(payload?.artifacts) ?? undefined;
       const widgets = mapArtifactsToWidgets(rawArtifacts);
       return {
         clientFrames: [
-          `data: [META]${JSON.stringify({
+          encodeSseEvent({
+            type: 'meta',
             agent: route,
             sources,
             ...(widgets.length > 0 ? { widgets } : {}),
-          })}\n\n`,
-          'data: [DONE]\n\n',
+          }),
+          encodeSseEvent({ type: 'done' }),
         ],
         route,
         citations,
@@ -525,19 +589,14 @@ export function translateEngineSseFrame(
     }
 
     case 'run.cancelled': {
-      const rawArtifacts =
-        payload?.artifacts &&
-        typeof payload.artifacts === 'object' &&
-        !Array.isArray(payload.artifacts)
-          ? (payload.artifacts as Record<string, unknown>)
-          : undefined;
+      const rawArtifacts = asRecord(payload?.artifacts) ?? undefined;
       const widgets = mapArtifactsToWidgets(rawArtifacts);
       return {
         clientFrames: [
           ...(widgets.length > 0
-            ? [`data: [META]${JSON.stringify({ widgets })}\n\n`]
+            ? [encodeSseEvent({ type: 'meta', widgets })]
             : []),
-          'data: [DONE]\n\n',
+          encodeSseEvent({ type: 'done' }),
         ],
         ...(rawArtifacts ? { artifacts: rawArtifacts } : {}),
         ...(widgets.length > 0 ? { widgets } : {}),
@@ -555,14 +614,14 @@ export function translateEngineSseFrame(
             : 'AI runtime stream error';
       return {
         clientFrames: [
-          `data: [ACTION]${JSON.stringify({
-            type: 'agent_done',
+          encodeSseEvent({
+            type: 'agent-done',
             status: 'error',
             error: errorMessage,
             success: false,
-          })}\n\n`,
-          `event: error\ndata: ${JSON.stringify({ error: errorMessage })}\n\n`,
-          'data: [DONE]\n\n',
+          }),
+          encodeSseEvent({ type: 'error', message: errorMessage }),
+          encodeSseEvent({ type: 'done' }),
         ],
         errorMessage,
         finished: true,
@@ -573,7 +632,7 @@ export function translateEngineSseFrame(
       if (payload && typeof payload.delta === 'string') {
         return {
           clientFrames: [
-            `data: ${JSON.stringify({ delta: payload.delta })}\n\n`,
+            encodeSseEvent({ type: 'text-delta', delta: payload.delta }),
           ],
           deltaText: payload.delta,
         };

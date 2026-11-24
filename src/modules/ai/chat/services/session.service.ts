@@ -11,9 +11,11 @@ import type { Prisma } from '@prisma/client';
 import { getErrorMessage, RedisCacheService } from '@/core';
 import { AI_ENGINE_PORT, AI_REDIS_KEYS } from '../../ai.constant';
 import { SpaceAccessService } from '../../access/services/space.service';
+import type { ResolvedSpaceScope } from '../../access/types/access.type';
 import type { IAiEnginePort } from '../../engine/engine.port';
 import { ChatRepository } from '../chat.repository';
 import {
+  formatChatMessage,
   formatChatSession,
   sanitizeMessageContent,
   sanitizeMessageRole,
@@ -24,7 +26,10 @@ import type {
   CreateSessionDto,
   RenameSessionDto,
 } from '../dto/session.dto';
-import type { FormattedChatSession } from '../types/chat.type';
+import type {
+  FormattedChatMessage,
+  FormattedChatSession,
+} from '../types/chat.type';
 
 @Injectable()
 export class SessionService {
@@ -102,11 +107,40 @@ export class SessionService {
     return formatted;
   }
 
+  async getChatMessages(
+    chatId: string,
+    userId: string,
+    options?: { limit?: number; skip?: number },
+  ): Promise<{ messages: FormattedChatMessage[]; total: number }> {
+    const exists = await this.chatRepo.existsChatForUser(chatId, userId);
+    if (!exists) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    const rawSkip = Number(options?.skip);
+    const skip = Number.isFinite(rawSkip) ? Math.max(0, Math.trunc(rawSkip)) : 0;
+    const rawLimit = Number(options?.limit);
+    const take =
+      Number.isFinite(rawLimit) && rawLimit !== 0
+        ? Math.min(200, Math.max(1, Math.trunc(rawLimit)))
+        : 50;
+
+    const { messages, total } = await this.chatRepo.findChatMessagesPage(
+      chatId,
+      skip,
+      take,
+    );
+    return {
+      messages: messages.map(formatChatMessage),
+      total,
+    };
+  }
+
   async createChat(
     userId: string,
     dto: CreateSessionDto,
   ): Promise<FormattedChatSession> {
-    let scope = await this.spaceAccess.resolveSpace(userId, dto.spaceId);
+    let scope: ResolvedSpaceScope;
     let canonicalPageId = dto.pageId;
 
     if (dto.pageId) {
@@ -120,6 +154,8 @@ export class SessionService {
         spaceId: pageMeta.spaceId,
         projectId: pageMeta.projectId,
       };
+    } else {
+      scope = await this.spaceAccess.resolveSpace(userId, dto.spaceId);
     }
 
     const created = await this.chatRepo.createChat({
@@ -170,42 +206,6 @@ export class SessionService {
       chat: formatted,
       messages: formatted?.messages || [],
     };
-  }
-
-  async getOrCreatePageChat(
-    pageId: string,
-    userId: string,
-    rawSpaceId?: string | null,
-  ): Promise<FormattedChatSession> {
-    if (!pageId) {
-      throw new BadRequestException('pageId is required');
-    }
-    const pageMeta = await this.spaceAccess.resolvePageScope(
-      userId,
-      pageId,
-      rawSpaceId,
-    );
-    const existing = await this.chatRepo.findPageChat(
-      pageMeta.canonicalPageId,
-      userId,
-    );
-    if (existing) {
-      return formatChatSession(existing);
-    }
-
-    const title = pageMeta.titleHint
-      ? `${sanitizeChatTitle(pageMeta.titleHint)} Discussion`
-      : 'Manuscript Chat';
-
-    const created = await this.chatRepo.createChat({
-      createdById: userId,
-      spaceId: pageMeta.spaceId,
-      pageId: pageMeta.canonicalPageId,
-      title,
-    });
-
-    await this.invalidateCache(userId, created.id, pageMeta.spaceId);
-    return formatChatSession(created);
   }
 
   async clearPageChat(pageId: string, userId: string) {
@@ -273,6 +273,39 @@ export class SessionService {
 
     await this.invalidateCache(chat.createdById, chatId, chat.spaceId);
     return formatChatSession(updated);
+  }
+
+  /**
+   * Lightweight message append for internal `ChatService` turns whose chat
+   * ownership was already verified by `authorizeChatTurn` and whose caller
+   * does not need the full chat history reloaded.
+   */
+  async appendMessagesFast(
+    chatId: string,
+    userId: string,
+    spaceId: string,
+    dto: AppendMessagesDto,
+  ): Promise<void> {
+    if (!dto.messages || dto.messages.length === 0) {
+      return;
+    }
+
+    const formatted = dto.messages.map((m) => ({
+      role: sanitizeMessageRole(m.role),
+      content: sanitizeMessageContent(m.content),
+      sources: (m.attachments || m.sources) as
+        | Prisma.InputJsonValue
+        | undefined,
+      widgets: m.widgets as Prisma.InputJsonValue | undefined,
+      selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
+    }));
+
+    if (formatted.some((m) => !m.content || !m.content.trim())) {
+      return;
+    }
+
+    await this.chatRepo.insertMessagesFast(chatId, formatted, dto.documentIds);
+    await this.invalidateCache(userId, chatId, spaceId);
   }
 
   async renameChat(

@@ -8,6 +8,7 @@ import type {
 export type ChatWithMessages = AiChat & {
   messages: AiMessage[];
   space?: { projectId: string | null } | null;
+  _count?: { messages: number };
 };
 
 export interface FormattedChatMessage {

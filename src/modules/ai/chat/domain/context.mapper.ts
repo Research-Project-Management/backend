@@ -2,6 +2,7 @@ import type {
   EngineChatRequest,
   EngineMessage,
 } from '../../engine/types/engine.type';
+import { AI_CONTEXT_CHAR_LIMITS } from '../../ai.constant';
 import type { LlmOverridePayload } from '../../access/types/access.type';
 import type { QueryDto } from '../dto/query.dto';
 import { sanitizeMessageContent, sanitizeMessageRole } from './session.mapper';
@@ -114,18 +115,39 @@ export function buildEngineChatRequest(params: {
           (rawDocStructure && typeof rawDocStructure === 'object')
         ? JSON.stringify(rawDocStructure)
         : ''
-  ).slice(0, 10000);
+  ).slice(0, AI_CONTEXT_CHAR_LIMITS.DOCUMENT_STRUCTURE);
 
-  const fileContent = (dto.fileContent || '').slice(0, 100000);
-  const selection = (dto.selection || '').slice(0, 20000);
-  const cursorContext = (dto.cursorContext || '').slice(0, 10000);
-  const contextBefore = (dto.contextBefore || '').slice(0, 15000);
-  const contextAfter = (dto.contextAfter || '').slice(0, 15000);
-  const currentSection = (dto.currentSection || '').slice(0, 1000);
-  const currentEnvironment = (dto.currentEnvironment || '').slice(0, 500);
+  const fileContent = (dto.fileContent || '').slice(
+    0,
+    AI_CONTEXT_CHAR_LIMITS.FILE_CONTENT,
+  );
+  const selection = (dto.selection || '').slice(
+    0,
+    AI_CONTEXT_CHAR_LIMITS.SELECTION,
+  );
+  const cursorContext = (dto.cursorContext || '').slice(
+    0,
+    AI_CONTEXT_CHAR_LIMITS.CURSOR_CONTEXT,
+  );
+  const contextBefore = (dto.contextBefore || '').slice(
+    0,
+    AI_CONTEXT_CHAR_LIMITS.CONTEXT_BEFORE,
+  );
+  const contextAfter = (dto.contextAfter || '').slice(
+    0,
+    AI_CONTEXT_CHAR_LIMITS.CONTEXT_AFTER,
+  );
+  const currentSection = (dto.currentSection || '').slice(
+    0,
+    AI_CONTEXT_CHAR_LIMITS.CURRENT_SECTION,
+  );
+  const currentEnvironment = (dto.currentEnvironment || '').slice(
+    0,
+    AI_CONTEXT_CHAR_LIMITS.CURRENT_ENVIRONMENT,
+  );
   const documentStructureSummary = (dto.documentStructureSummary || '').slice(
     0,
-    10000,
+    AI_CONTEXT_CHAR_LIMITS.DOCUMENT_STRUCTURE_SUMMARY,
   );
 
   const context: Record<string, unknown> = {
@@ -206,10 +228,28 @@ export function formatPaperGroundingPrompt(paper: {
   authors?: string[] | string;
   year?: number | string;
   doi?: string;
+  arxivId?: string;
+  venue?: string;
+  pageCount?: number;
+  citationCount?: number;
   abstract?: string;
 }): string {
   const authorsStr = Array.isArray(paper.authors)
     ? paper.authors.join(', ')
     : paper.authors || '';
-  return `Paper Context: Title: "${paper.title || 'Untitled'}", Authors: "${authorsStr}", Year: ${paper.year || 'N/A'}, DOI: ${paper.doi || 'N/A'}.\nAbstract: ${paper.abstract || 'N/A'}`;
+  const fields: string[] = [
+    `Title: "${paper.title || 'Untitled'}"`,
+    `Authors: "${authorsStr}"`,
+    `Year: ${paper.year || 'N/A'}`,
+    `DOI: ${paper.doi || 'N/A'}`,
+  ];
+  if (paper.arxivId) fields.push(`arXiv: ${paper.arxivId}`);
+  if (paper.venue) fields.push(`Venue: "${paper.venue}"`);
+  if (typeof paper.pageCount === 'number' && paper.pageCount > 0) {
+    fields.push(`Total Pages: ${paper.pageCount}`);
+  }
+  if (typeof paper.citationCount === 'number' && paper.citationCount >= 0) {
+    fields.push(`Recorded Citation Count: ${paper.citationCount}`);
+  }
+  return `Paper Context: ${fields.join(', ')}.\nAbstract: ${paper.abstract || 'N/A'}`;
 }

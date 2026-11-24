@@ -7,6 +7,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Optional,
   Param,
   Post,
   Query,
@@ -14,6 +15,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { CurrentUser } from '@/modules/identity/auth/decorators/user.decorator';
@@ -54,7 +56,25 @@ function escapeHtml(str: string): string {
 @Controller('api/v1/integrations')
 @UseGuards(JwtAuthGuard)
 export class IntegrationsController {
-  constructor(private readonly service: IntegrationsService) {}
+  constructor(
+    private readonly service: IntegrationsService,
+    @Optional() private readonly config?: ConfigService,
+  ) {}
+
+  private resolveCallbackBaseUrl(req: FastifyRequest): string {
+    const configured = (
+      this.config?.get<string>('API_URL') ||
+      process.env.API_URL ||
+      ''
+    ).trim();
+    if (configured) {
+      return configured.replace(/\/$/, '');
+    }
+    const host = (req.headers.host as string) || req.hostname;
+    const proto =
+      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    return `${proto}://${host}`.replace(/\/$/, '');
+  }
 
   @Get('status')
   @ApiOperation({
@@ -166,11 +186,8 @@ export class IntegrationsController {
       );
     }
 
-    const host = (req.headers.host as string) || req.hostname;
-    const proto =
-      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
-    const baseUrl = process.env.API_URL || `${proto}://${host}`;
-    const defaultCallback = `${baseUrl.replace(/\/$/, '')}/api/v1/integrations/${provider}/callback`;
+    const baseUrl = this.resolveCallbackBaseUrl(req);
+    const defaultCallback = `${baseUrl}/api/v1/integrations/${provider}/callback`;
     const redirectUri = query.redirectUri || defaultCallback;
 
     return await this.service.initiateOAuth(userId, provider, redirectUri);
@@ -200,11 +217,8 @@ export class IntegrationsController {
       const verifier = query.oauth_verifier || '';
       const state = query.state || '';
 
-      const host = (req.headers.host as string) || req.hostname;
-      const proto =
-        (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
-      const baseUrl = process.env.API_URL || `${proto}://${host}`;
-      const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/v1/integrations/${provider}/callback`;
+      const baseUrl = this.resolveCallbackBaseUrl(req);
+      const redirectUri = `${baseUrl}/api/v1/integrations/${provider}/callback`;
 
       await this.service.handleCallback({
         provider,
@@ -214,7 +228,10 @@ export class IntegrationsController {
         redirectUri,
       });
 
-      const clientUrl = resolvePublicUrl('CLIENT_URL', process.env.CLIENT_URL);
+      const clientUrl = resolvePublicUrl(
+        'CLIENT_URL',
+        this.config?.get<string>('CLIENT_URL') ?? process.env.CLIENT_URL,
+      );
 
       const safeClientUrl = JSON.stringify(clientUrl || '');
 

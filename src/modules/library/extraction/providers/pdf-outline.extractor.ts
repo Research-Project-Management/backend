@@ -19,13 +19,71 @@ export type ExtractedPdfBibliographyReference = BibliographicReference & {
   rawText: string;
 };
 
+const NON_TERMINATING_BIBLIO_ABBREV_RE =
+  /\b(?:Jr|Sr|Dr|Prof|No|Vol|pp|ed|eds|proc|conf|int|natl|acad|sci|univ|trans|fig|eq|st)$/i;
+
+function isNonBreakingCitationPeriod(prefixEndingWithDot: string): boolean {
+  // Single-letter or hyphenated initial such as "I.", "J.", "C.-Y."
+  if (/(?:^|[\s,.\-(])\p{Lu}\.$/u.test(prefixEndingWithDot)) {
+    return true;
+  }
+  // Two-letter Latin abbreviations such as "e.g.", "i.e."
+  if (/(?:^|[\s,(])[a-z]\.[a-z]\.$/i.test(prefixEndingWithDot)) {
+    return true;
+  }
+  return NON_TERMINATING_BIBLIO_ABBREV_RE.test(
+    prefixEndingWithDot.slice(0, -1),
+  );
+}
+
+/**
+ * Splits a bibliographic citation string on sentence boundaries (`. `)
+ * without breaking on author initials ("C.-Y.", "I. J.") or common abbreviations.
+ */
+export function splitCitationSentences(text: string): string[] {
+  const sentences: string[] = [];
+  const dotSpaceRe = /\.\s+/g;
+  let lastStart = 0;
+
+  for (const match of text.matchAll(dotSpaceRe)) {
+    const dotIdx = match.index;
+    if (dotIdx === undefined) continue;
+    const prefix = text.slice(0, dotIdx + 1);
+    if (isNonBreakingCitationPeriod(prefix)) continue;
+
+    const segment = text.slice(lastStart, dotIdx).trim();
+    if (segment) sentences.push(segment);
+    lastStart = dotIdx + match[0].length;
+  }
+
+  const tail = text.slice(lastStart).trim();
+  if (tail) sentences.push(tail);
+  return sentences;
+}
+
+/**
+ * Finds the index where the leading author segment ends in an unstructured citation.
+ */
+export function findAuthorSegmentEnd(text: string): number {
+  const dotSpaceRe = /\.\s+/g;
+  for (const match of text.matchAll(dotSpaceRe)) {
+    const dotIdx = match.index;
+    if (dotIdx === undefined || dotIdx <= 3) continue;
+    const prefix = text.slice(0, dotIdx + 1);
+    if (!isNonBreakingCitationPeriod(prefix)) {
+      return dotIdx;
+    }
+  }
+  return -1;
+}
+
 export function extractPdfBibliographyReferences(
   fullText: string,
 ): ExtractedPdfBibliographyReference[] {
   if (!fullText || fullText.trim().length < 20) return [];
   const normalizedText = fullText.normalize('NFKC');
   const headingPattern =
-    /(?:^|\n)[^\S\r\n]*(?:(?:\d+(?:\.\d+)*\.?|[IVX]+\.?)\s+)?(?:references|bibliography|literature\s+cited|works\s+cited|tài\s+liệu\s+tham\s+khảo)\b([^\r\n]*)/gi;
+    /(?:^|\n)[^\S\r\n]*(?:(?:\d+(?:\.\d+)*\.?|[IVX]+\.?)\s+)?(?:r\s*eferences|b\s*ibliography|literature\s+cited|works\s+cited|tài\s+liệu\s+tham\s+khảo)\b([^\r\n]*)/gi;
   let refBodyStart = -1;
   for (const match of normalizedText.matchAll(headingPattern)) {
     const idx = match.index ?? -1;
@@ -62,8 +120,9 @@ export function extractPdfBibliographyReferences(
   const rawEntries: string[] = [];
   const numberedStartRe = /^(?:\[\d{1,4}\]|\d{1,4}\.(?=\s+[A-Z"\u201C]))\s*/;
   const authorYearStartRe =
-    /^[A-ZÀ-Ỹ][A-Za-zÀ-ỹ'-]+,\s*(?:[A-Z]\.|[A-ZÀ-Ỹ][A-Za-zÀ-ỹ'-]+)\b.*?\b(?:19\d{2}|20\d{2})[a-z]?\b/;
-  const hasNumberedEntries = lines.some((l) => numberedStartRe.test(l));
+    /^[A-ZÀ-Ỹ][A-Za-zÀ-ỹ'\-]{1,24},\s+(?:[A-ZÀ-Ỹ]\.(?:\s*[A-ZÀ-Ỹ]\.)*|[A-ZÀ-Ỹ][A-Za-zÀ-ỹ'\-]{1,24}\b)/;
+  const hasNumberedEntries =
+    lines.filter((l) => numberedStartRe.test(l)).length >= 2;
   let currentEntry = '';
 
   for (const line of lines) {
@@ -86,7 +145,9 @@ export function extractPdfBibliographyReferences(
       }
     } else if (
       authorYearStartRe.test(line) &&
-      currentEntry.trim().length > 25
+      currentEntry.trim().length > 25 &&
+      (/\b(?:19\d{2}|20[0-2]\d)[a-z]?\b/.test(currentEntry) ||
+        /[.!?)]\s*$/.test(currentEntry.trim()))
     ) {
       rawEntries.push(currentEntry.trim());
       currentEntry = line;
@@ -138,10 +199,7 @@ export function extractPdfBibliographyReferences(
       if (afterYearDot?.[1]) {
         title = afterYearDot[1].trim();
       } else {
-        const sentences = bodyWithoutMarker
-          .split(/\.\s+/)
-          .map((s) => s.trim())
-          .filter(Boolean);
+        const sentences = splitCitationSentences(bodyWithoutMarker);
         if (sentences.length >= 2) {
           const candidate = sentences[1].replace(/[.,;]+$/, '').trim();
           if (
@@ -158,13 +216,15 @@ export function extractPdfBibliographyReferences(
     }
 
     const authors: string[] = [];
+    const authorYearParenIdx = bodyWithoutMarker.search(
+      /\(\s*(?:19\d{2}|20[0-2]\d)/,
+    );
+    const firstSentenceEndIdx = findAuthorSegmentEnd(bodyWithoutMarker);
     const authorPrefixEnd = quotedTitleMatch?.index
       ? quotedTitleMatch.index
-      : bodyWithoutMarker.search(/\(\s*(?:19\d{2}|20[0-2]\d)/) > 3
-        ? bodyWithoutMarker.search(/\(\s*(?:19\d{2}|20[0-2]\d)/)
-        : bodyWithoutMarker.indexOf('. ') > 3
-          ? bodyWithoutMarker.indexOf('. ')
-          : -1;
+      : authorYearParenIdx > 3
+        ? authorYearParenIdx
+        : firstSentenceEndIdx;
 
     if (authorPrefixEnd > 3) {
       const rawAuthorSegment = bodyWithoutMarker

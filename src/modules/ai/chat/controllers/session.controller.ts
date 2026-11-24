@@ -82,17 +82,7 @@ export class SessionController {
     @Query('limit') limit?: number,
     @Query('skip') skip?: number,
   ) {
-    const chat = await this.sessionService.getChat(chatId, userId);
-    const messages = chat.messages || [];
-    const offset = Math.max(0, Number(skip) || 0);
-    const count = Math.min(
-      200,
-      Math.max(1, Number(limit) || messages.length || 50),
-    );
-    return {
-      messages: messages.slice(offset, offset + count),
-      total: messages.length,
-    };
+    return this.sessionService.getChatMessages(chatId, userId, { limit, skip });
   }
 
   @Post(':chatId/messages')

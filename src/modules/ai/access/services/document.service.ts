@@ -8,8 +8,45 @@ import {
   extractRagDocIdFromMetadata,
   hasDirectFileOwnership,
 } from '../domain/access.policy';
-import type { ResolvedPaperTarget } from '../types/access.type';
+import type {
+  EnrichedAttachedSource,
+  ResolvedChatDocuments,
+  ResolvedPaperTarget,
+} from '../types/access.type';
 import { SpaceAccessService } from './space.service';
+
+interface ResolvedLibrarySourceInfo {
+  itemId: string;
+  title: string;
+  fileId: string | null;
+  ragDocId: string | null;
+  hasPdf: boolean;
+}
+
+function readTrimmedString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readPositiveInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return parsed > 0 ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    return Number.parseInt(value.trim(), 10);
+  }
+  return undefined;
+}
 
 @Injectable()
 export class DocumentAccessService {
@@ -18,50 +55,148 @@ export class DocumentAccessService {
     private readonly spaceAccess: SpaceAccessService,
   ) {}
 
-  async resolveVectorDocumentIds(documentIds: string[]): Promise<string[]> {
-    if (!documentIds.length) return [];
+  private async resolveLibraryItemsMap(
+    ids: string[],
+    knownFileRagIds?: ReadonlyMap<string, string | null>,
+  ): Promise<Map<string, ResolvedLibrarySourceInfo>> {
+    const itemInfoMap = new Map<string, ResolvedLibrarySourceInfo>();
+    if (ids.length === 0) return itemInfoMap;
 
-    const docMap = new Map<string, string>();
-    const files = await this.repo.findStorageFilesMetadata(documentIds);
-    for (const file of files) {
-      const ragDocId = extractRagDocIdFromMetadata(file.metadata);
-      if (ragDocId) {
-        docMap.set(file.id, ragDocId);
-      }
-    }
+    const items = await this.repo.findLibraryItemsWithAttachments(ids);
+    const pendingFileIds: string[] = [];
+    const primaryAttByItem = new Map<
+      string,
+      { fileId: string | null; ragDocId: string | null }
+    >();
 
-    const unresolvedIds = documentIds.filter((id) => !docMap.has(id));
-    if (unresolvedIds.length > 0) {
-      const items =
-        await this.repo.findLibraryItemsWithAttachments(unresolvedIds);
-      for (const item of items) {
-        const itemRagId = extractRagDocIdFromMetadata(item.metadata);
-        if (itemRagId) {
-          docMap.set(item.id, itemRagId);
-          continue;
-        }
-        const attachments = item.attachments || [];
-        if (attachments.length === 0) continue;
+    for (const item of items) {
+      const attachments = item.attachments || [];
+      const primaryAtt =
+        attachments.find((att) => att.attachmentType === 'primary_pdf') ||
+        attachments[0];
+      const fileId = primaryAtt?.fileId ?? null;
 
-        const primary =
-          attachments.find((att) => att.attachmentType === 'primary_pdf') ||
-          attachments[0];
-        const attRagId = extractRagDocIdFromMetadata(primary.metadata);
-        if (attRagId) {
-          docMap.set(item.id, attRagId);
-        } else if (primary.fileId) {
-          const fileMeta = await this.repo.findStorageFileMetadata(
-            primary.fileId,
-          );
-          const fileRagId = extractRagDocIdFromMetadata(fileMeta);
-          if (fileRagId) {
-            docMap.set(item.id, fileRagId);
+      let ragDocId = extractRagDocIdFromMetadata(item.metadata);
+      if (!ragDocId && primaryAtt) {
+        ragDocId = extractRagDocIdFromMetadata(primaryAtt.metadata);
+        if (!ragDocId && fileId) {
+          if (knownFileRagIds?.has(fileId)) {
+            ragDocId = knownFileRagIds.get(fileId) ?? null;
+          } else {
+            pendingFileIds.push(fileId);
           }
         }
       }
+      primaryAttByItem.set(item.id, { fileId, ragDocId });
     }
 
-    return documentIds.map((id) => docMap.get(id) || id);
+    const fileMetaById = new Map<string, string>();
+    if (pendingFileIds.length > 0) {
+      const uniqueFileIds = Array.from(new Set(pendingFileIds));
+      const storageFiles =
+        await this.repo.findStorageFilesMetadata(uniqueFileIds);
+      for (const file of storageFiles) {
+        const extracted = extractRagDocIdFromMetadata(file.metadata);
+        if (extracted) {
+          fileMetaById.set(file.id, extracted);
+        }
+      }
+    }
+
+    for (const item of items) {
+      const resolved = primaryAttByItem.get(item.id);
+      const fileId = resolved?.fileId ?? null;
+      const ragDocId =
+        resolved?.ragDocId ?? (fileId ? (fileMetaById.get(fileId) ?? null) : null);
+
+      const itemTitle =
+        typeof (item as { title?: unknown }).title === 'string'
+          ? ((item as { title?: string }).title ?? '')
+          : '';
+
+      itemInfoMap.set(item.id, {
+        itemId: item.id,
+        title: itemTitle,
+        fileId,
+        ragDocId,
+        hasPdf: Boolean(fileId),
+      });
+    }
+
+    return itemInfoMap;
+  }
+
+  async resolveChatDocuments(
+    documentIds: string[],
+    rawSources?: unknown,
+  ): Promise<ResolvedChatDocuments> {
+    const rawList: unknown[] = Array.isArray(rawSources) ? rawSources : [];
+    if (documentIds.length === 0 && rawList.length === 0) {
+      return { resolvedDocumentIds: [], enrichedSources: [] };
+    }
+
+    const docMap = new Map<string, string>();
+    const foundFileIds = new Set<string>();
+    const knownFileRagIds = new Map<string, string | null>();
+
+    if (documentIds.length > 0) {
+      const files = await this.repo.findStorageFilesMetadata(documentIds);
+      for (const file of files) {
+        foundFileIds.add(file.id);
+        const ragDocId = extractRagDocIdFromMetadata(file.metadata);
+        knownFileRagIds.set(file.id, ragDocId);
+        if (ragDocId) {
+          docMap.set(file.id, ragDocId);
+        }
+      }
+    }
+
+    const candidateIdSet = new Set<string>();
+    for (const rawId of documentIds) {
+      const cleanId = readTrimmedString(rawId);
+      if (cleanId && !foundFileIds.has(cleanId)) {
+        candidateIdSet.add(cleanId);
+      }
+    }
+
+    for (const entry of rawList) {
+      if (!entry || typeof entry !== 'object') continue;
+      const rec = entry as Record<string, unknown>;
+      const kind = readTrimmedString(rec.kind);
+      if (kind && kind !== 'paper' && kind !== 'library') continue;
+      for (const field of ['item_id', 'itemId', 'source_id', 'sourceId', 'id']) {
+        const candidate = readTrimmedString(rec[field]);
+        if (candidate && !foundFileIds.has(candidate)) {
+          candidateIdSet.add(candidate);
+        }
+      }
+    }
+
+    const itemInfoMap = await this.resolveLibraryItemsMap(
+      Array.from(candidateIdSet),
+      knownFileRagIds,
+    );
+
+    const resolvedDocumentIds = documentIds.map((id) => {
+      const trimmed = readTrimmedString(id);
+      const itemInfo =
+        itemInfoMap.get(id) ?? (trimmed ? itemInfoMap.get(trimmed) : undefined);
+      return (
+        docMap.get(id) ??
+        (trimmed ? docMap.get(trimmed) : undefined) ??
+        itemInfo?.ragDocId ??
+        itemInfo?.fileId ??
+        id
+      );
+    });
+
+    const enrichedSources = this.buildEnrichedSources(
+      rawList,
+      documentIds,
+      itemInfoMap,
+    );
+
+    return { resolvedDocumentIds, enrichedSources };
   }
 
   async resolvePaperTarget(
@@ -78,13 +213,17 @@ export class DocumentAccessService {
         throw new ForbiddenException('You do not have access to this paper');
       }
 
+      const primaryAtt =
+        item.attachments && item.attachments.length > 0
+          ? item.attachments.find(
+              (att) => att.attachmentType === 'primary_pdf',
+            ) || item.attachments[0]
+          : undefined;
+      const primaryFileId = primaryAtt?.fileId ?? null;
+
       let ragDocId = extractRagDocIdFromMetadata(item.metadata);
 
-      if (!ragDocId && item.attachments && item.attachments.length > 0) {
-        const primaryAtt =
-          item.attachments.find(
-            (att) => att.attachmentType === 'primary_pdf',
-          ) || item.attachments[0];
+      if (!ragDocId && primaryAtt) {
         ragDocId = extractRagDocIdFromMetadata(primaryAtt.metadata);
         if (!ragDocId && primaryAtt.fileId) {
           const fileMeta = await this.repo.findStorageFileMetadata(
@@ -94,11 +233,31 @@ export class DocumentAccessService {
         }
       }
 
+      const itemMeta =
+        item.metadata && typeof item.metadata === 'object'
+          ? (item.metadata as Record<string, unknown>)
+          : {};
+      const pageCount =
+        readPositiveInt(primaryAtt?.pageCount) ??
+        readPositiveInt(itemMeta.pageCount) ??
+        readPositiveInt(itemMeta.totalPages) ??
+        readPositiveInt(itemMeta.total_pages);
+      const citationCount =
+        readNonNegativeInt(itemMeta.citationCount) ??
+        readNonNegativeInt(itemMeta.citedByCount) ??
+        readNonNegativeInt(itemMeta.cited_by_count);
+
       return {
+        itemId: item.id,
+        fileId: primaryFileId,
         title: item.title,
         authors: item.contributors?.map((c) => c.fullName) || [],
         year: item.year ?? undefined,
         doi: item.doi ?? undefined,
+        arxivId: item.arxivId ?? undefined,
+        venue: item.publicationTitle ?? undefined,
+        pageCount,
+        citationCount,
         abstract: item.abstract ?? undefined,
         ragDocId,
         spaceId: item.spaceId || userId,
@@ -154,6 +313,8 @@ export class DocumentAccessService {
           : [];
 
       return {
+        itemId: null,
+        fileId: file.id,
         title: typeof meta.title === 'string' ? meta.title : file.filename,
         authors,
         year:
@@ -176,5 +337,122 @@ export class DocumentAccessService {
     throw new NotFoundException(
       `Paper or scientific file with ID ${paperOrFileId} not found`,
     );
+  }
+
+  private buildEnrichedSources(
+    rawList: unknown[],
+    documentIds: string[],
+    itemInfoMap: ReadonlyMap<string, ResolvedLibrarySourceInfo>,
+  ): EnrichedAttachedSource[] {
+    const enriched: EnrichedAttachedSource[] = [];
+    for (const entry of rawList) {
+      if (!entry || typeof entry !== 'object') continue;
+      const rec = entry as Record<string, unknown>;
+      const rawKind = readTrimmedString(rec.kind);
+      const kind: 'library' | 'upload' | 'paper' =
+        rawKind === 'library'
+          ? 'library'
+          : rawKind === 'paper'
+            ? 'paper'
+            : 'upload';
+
+      let matched: ResolvedLibrarySourceInfo | undefined;
+      if (kind !== 'upload') {
+        for (const field of ['item_id', 'itemId', 'source_id', 'sourceId', 'id']) {
+          const candidate = readTrimmedString(rec[field]);
+          if (candidate && itemInfoMap.has(candidate)) {
+            matched = itemInfoMap.get(candidate);
+            break;
+          }
+        }
+      }
+
+      if (matched) {
+        enriched.push({
+          kind: rawKind === 'library' ? 'library' : 'paper',
+          title: readTrimmedString(rec.title) || matched.title,
+          source_id: matched.ragDocId || matched.fileId,
+          source_type: 'file',
+          item_id: matched.itemId,
+          file_id: matched.fileId,
+          has_pdf: matched.hasPdf,
+          indexed: Boolean(matched.ragDocId),
+        });
+        continue;
+      }
+
+      const sourceId =
+        readTrimmedString(rec.source_id) ?? readTrimmedString(rec.sourceId);
+      const itemId =
+        readTrimmedString(rec.item_id) ?? readTrimmedString(rec.itemId);
+      const fileId =
+        readTrimmedString(rec.file_id) ?? readTrimmedString(rec.fileId);
+      const title = readTrimmedString(rec.title) ?? '';
+      if (!sourceId && !itemId && !fileId && !title) continue;
+
+      const rawSourceType =
+        readTrimmedString(rec.source_type) ??
+        readTrimmedString(rec.sourceType);
+      const sourceType: 'upload' | 'file' | null =
+        rawSourceType === 'upload'
+          ? 'upload'
+          : rawSourceType === 'file'
+            ? 'file'
+            : null;
+      const hasPdf =
+        typeof rec.has_pdf === 'boolean'
+          ? rec.has_pdf
+          : typeof rec.hasPdf === 'boolean'
+            ? rec.hasPdf
+            : Boolean(fileId);
+      const indexed =
+        typeof rec.indexed === 'boolean' ? rec.indexed : false;
+
+      enriched.push({
+        kind,
+        title,
+        source_id: sourceId,
+        source_type: sourceType,
+        item_id: itemId,
+        file_id: fileId,
+        has_pdf: hasPdf,
+        indexed,
+      });
+    }
+
+    for (const rawDocId of documentIds) {
+      const docId = readTrimmedString(rawDocId);
+      if (!docId) continue;
+      const info = itemInfoMap.get(docId);
+      if (!info) continue;
+      const alreadyIncluded = enriched.some(
+        (s) =>
+          s.item_id === info.itemId ||
+          (info.ragDocId && s.source_id === info.ragDocId) ||
+          (info.fileId && s.file_id === info.fileId),
+      );
+      if (!alreadyIncluded) {
+        enriched.push({
+          kind: 'paper',
+          title: info.title,
+          source_id: info.ragDocId || info.fileId,
+          source_type: 'file',
+          item_id: info.itemId,
+          file_id: info.fileId,
+          has_pdf: info.hasPdf,
+          indexed: Boolean(info.ragDocId),
+        });
+      }
+    }
+
+    const deduped: EnrichedAttachedSource[] = [];
+    const seenKeys = new Set<string>();
+    for (const item of enriched) {
+      const key = `${item.kind}:${item.item_id ?? ''}:${item.file_id ?? ''}:${item.source_id ?? ''}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      deduped.push(item);
+    }
+    return deduped;
   }
 }

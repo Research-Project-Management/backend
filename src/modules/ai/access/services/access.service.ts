@@ -3,6 +3,7 @@ import { AccessRepository } from '../access.repository';
 import type {
   ChatOwnershipRecord,
   ChatTurnAccess,
+  ResolvedChatDocuments,
   ResolvedPageScope,
   ResolvedPaperTarget,
   ResolvedSpaceScope,
@@ -53,13 +54,24 @@ export class AccessService {
     chatId?: string;
     pageId?: string;
     documentIds?: string[];
+    attachedSources?: unknown;
   }): Promise<ChatTurnAccess> {
-    const [existingChat, resolvedDocIds, scope, llmOverride] =
+    const hasScopedDocs =
+      (params.documentIds && params.documentIds.length > 0) ||
+      Array.isArray(params.attachedSources);
+
+    const [existingChat, resolvedDocs, scope, llmOverride] =
       await Promise.all([
         this.spaceAccess.verifyChatOwnership(params.userId, params.chatId),
-        params.documentIds && params.documentIds.length > 0
-          ? this.documentAccess.resolveVectorDocumentIds(params.documentIds)
-          : Promise.resolve<string[]>([]),
+        hasScopedDocs
+          ? this.documentAccess.resolveChatDocuments(
+              params.documentIds ?? [],
+              params.attachedSources,
+            )
+          : Promise.resolve<ResolvedChatDocuments>({
+              resolvedDocumentIds: [],
+              enrichedSources: [],
+            }),
         params.pageId
           ? this.spaceAccess.resolvePageScope(
               params.userId,
@@ -83,7 +95,8 @@ export class AccessService {
       projectId: scope.projectId,
       canonicalPageId: pageScope?.canonicalPageId,
       titleHint: pageScope?.titleHint,
-      resolvedDocumentIds: resolvedDocIds,
+      resolvedDocumentIds: resolvedDocs.resolvedDocumentIds,
+      enrichedSources: resolvedDocs.enrichedSources,
       existingChat,
       ...(llmOverride ? { llmOverride } : {}),
     };

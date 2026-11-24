@@ -8,7 +8,11 @@ import {
   StorageObjectMetadata,
   CompletedPart,
 } from '../types/adapter.type';
-import { inferMimeType, streamToBuffer } from '../domain/files.policy';
+import {
+  inferMimeType,
+  resolveFilesSigningSecret,
+  streamToBuffer,
+} from '../domain/files.policy';
 
 @Injectable()
 export class LocalStorageAdapter implements IStorageAdapter {
@@ -28,11 +32,7 @@ export class LocalStorageAdapter implements IStorageAdapter {
   }
 
   private getSigningSecret(): string {
-    return (
-      process.env.STORAGE_HMAC_SECRET ||
-      process.env.JWT_SECRET ||
-      'flux-local-storage-hmac-secret'
-    );
+    return resolveFilesSigningSecret();
   }
 
   public signToken(

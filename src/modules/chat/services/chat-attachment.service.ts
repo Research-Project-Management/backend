@@ -51,8 +51,6 @@ export class ChatAttachmentService {
       this.config.get<string>('R2_PUBLIC_URL') ||
       this.config.get<string>('CLOUDFLARE_R2_PUBLIC_URL') ||
       this.config.get<string>('S3_PUBLIC_URL') ||
-      process.env.R2_PUBLIC_URL ||
-      process.env.CLOUDFLARE_R2_PUBLIC_URL ||
       '';
     this.publicBaseUrl = pubUrl ? pubUrl.replace(/\/+$/, '') : null;
   }

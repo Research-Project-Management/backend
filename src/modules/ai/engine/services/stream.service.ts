@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { getErrorMessage, isOriginAllowed } from '@/core';
 import {
+  encodeSseEvent,
   mapCitationToSourceItem,
   SseFrameParser,
   translateEngineSseFrame,
@@ -96,10 +97,8 @@ export class EngineStreamService {
       if (!clientDisconnected && !rawRes.writableEnded) {
         const message = getErrorMessage(err);
         this.logger.warn(`SSE upstream connection error: ${message}`);
-        rawRes.write(
-          `event: error\ndata: ${JSON.stringify({ error: message })}\n\n`,
-        );
-        rawRes.write('data: [DONE]\n\n');
+        rawRes.write(encodeSseEvent({ type: 'error', message }));
+        rawRes.write(encodeSseEvent({ type: 'done' }));
         rawRes.end();
       }
       return;
@@ -118,7 +117,7 @@ export class EngineStreamService {
         cancelled: false,
       });
       if (!rawRes.writableEnded) {
-        rawRes.write('data: [DONE]\n\n');
+        rawRes.write(encodeSseEvent({ type: 'done' }));
         rawRes.end();
       }
       return;
@@ -184,7 +183,7 @@ export class EngineStreamService {
         }
 
         if (!sawTerminalFrame && !clientDisconnected && !rawRes.writableEnded) {
-          rawRes.write('data: [DONE]\n\n');
+          rawRes.write(encodeSseEvent({ type: 'done' }));
         }
 
         const sources = finalCitations.map(mapCitationToSourceItem);
@@ -227,9 +226,7 @@ export class EngineStreamService {
         if (!clientDisconnected) {
           this.logger.warn(`Upstream SSE read error: ${err.message}`);
           if (!rawRes.writableEnded) {
-            rawRes.write(
-              `event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`,
-            );
+            rawRes.write(encodeSseEvent({ type: 'error', message: err.message }));
           }
         }
         void finishStream();

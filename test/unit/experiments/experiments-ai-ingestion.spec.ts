@@ -1,4 +1,5 @@
 import { fromPartial } from '@total-typescript/shoehorn';
+import type { ConfigService } from '@nestjs/config';
 import type { Queue } from 'bullmq';
 import type { PrismaService } from '@/core';
 import {
@@ -105,7 +106,6 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
         space_id: 'project-physics',
         deleted: true,
       }),
-      deleteSpaceKnowledge: jest.fn(),
     };
 
     const prismaService = fromPartial<PrismaService>(mockPrisma);
@@ -122,7 +122,15 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       mockStoragePort,
       fromPartial<ILibraryFacade>(mockLibraryFacade),
     );
-    listener = new KnowledgeEventListener(ingestService);
+  const eagerConfig = fromPartial<ConfigService>({
+    get: jest.fn((key: string) =>
+      key === 'FLUX_AI_EAGER_INGEST_ON_UPLOAD' || key === 'FLUX_AI_ENABLED'
+        ? 'true'
+        : undefined,
+    ),
+  });
+
+  listener = new KnowledgeEventListener(ingestService, undefined, eagerConfig);
   });
 
   it('ignores non-textual files such as images and archives', async () => {
@@ -230,7 +238,17 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       on: jest.fn(),
     });
     const producer = new KnowledgeQueueProducer(mockQueue);
-    const queuedListener = new KnowledgeEventListener(ingestService, producer);
+    const queuedListener = new KnowledgeEventListener(
+      ingestService,
+      producer,
+      fromPartial<ConfigService>({
+        get: jest.fn((key: string) =>
+          key === 'FLUX_AI_EAGER_INGEST_ON_UPLOAD' || key === 'FLUX_AI_ENABLED'
+            ? 'true'
+            : undefined,
+        ),
+      }),
+    );
 
     const event = new FileUploadedEvent(
       'file-queued-1',
@@ -356,5 +374,24 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
         title: 'Offline Scientific Paper',
       }),
     );
+  });
+
+  it('skips eager upload ingestion by default in pure on-demand mode', async () => {
+    const defaultListener = new KnowledgeEventListener(ingestService);
+    const event = new FileUploadedEvent(
+      'file-ondemand-1',
+      'blob-od',
+      'user-1',
+      'paper.pdf',
+      'application/pdf',
+      BigInt(1024),
+      'blobs/paper.pdf',
+      'space-1',
+    );
+
+    await defaultListener.handleFileUploaded(event);
+
+    expect(mockStoragePort.readOwnedFile).not.toHaveBeenCalled();
+    expect(mockEngine.ingestDocument).not.toHaveBeenCalled();
   });
 });

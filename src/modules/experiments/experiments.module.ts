@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import {
-  CacheModule,
+  RedisModule,
   shouldMountExperimentsControllers,
   shouldMountTransferControllers,
   shouldRunWorkerConsumers,
@@ -45,7 +45,7 @@ const workerProviders = shouldRunWorkerConsumers()
 
 @Module({
   imports: [
-    CacheModule,
+    RedisModule,
     FilesModule,
     BullModule.registerQueue({
       name: EXPERIMENTS_PROCESSING_QUEUE,

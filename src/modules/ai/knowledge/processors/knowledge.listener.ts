@@ -34,6 +34,12 @@ export class KnowledgeEventListener {
 
   @OnEvent('file.uploaded', { async: true })
   async handleFileUploaded(event: FileUploadedEvent): Promise<void> {
+    if (
+      this.configService?.get<string>('FLUX_AI_EAGER_INGEST_ON_UPLOAD') !==
+      'true'
+    ) {
+      return;
+    }
     if (!isIngestibleDocument(event.filename, event.mimeType)) {
       return;
     }

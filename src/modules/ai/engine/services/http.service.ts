@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
 import { CircuitBreaker, getErrorMessage, tryCatch } from '@/core';
 import { resolveServiceUrl } from '@/core/utils/public-urls';
+import { AI_ENGINE_TIMEOUTS_MS } from '../../ai.constant';
 
 @Injectable()
 export class EngineHttpService {
@@ -74,7 +75,7 @@ export class EngineHttpService {
     } = {},
   ): Promise<T> {
     const method = options.method ?? 'GET';
-    const timeoutMs = options.timeoutMs ?? 60000;
+    const timeoutMs = options.timeoutMs ?? AI_ENGINE_TIMEOUTS_MS.DEFAULT;
 
     if (!options.skipCircuitBreaker && this.circuitBreaker.isOpen()) {
       throw new ServiceUnavailableException(

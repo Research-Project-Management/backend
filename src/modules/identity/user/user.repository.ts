@@ -630,9 +630,12 @@ export class UserRepository implements IUserRepository {
 
   // ─── 4. Resource Statistics & Dashboard Metrics ─────────────────────────────
 
+  private static readonly DEFAULT_FREE_STORAGE_QUOTA_BYTES =
+    5 * 1024 * 1024 * 1024;
+
   getUserStats(_userId: string): Promise<UserStatsResult> {
     const plan = 'free';
-    const storageQuotaBytes = 5 * 1024 * 1024 * 1024;
+    const storageQuotaBytes = UserRepository.DEFAULT_FREE_STORAGE_QUOTA_BYTES;
 
     return Promise.resolve({
       projectsCount: 0,

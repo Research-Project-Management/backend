@@ -129,9 +129,6 @@ export class StateRepository {
           : typeof scrollObj?.fitMode === 'string'
             ? scrollObj.fitMode
             : undefined;
-      const bookmarks = Array.isArray(scrollObj?.bookmarks)
-        ? (scrollObj.bookmarks as Prisma.InputJsonValue)
-        : undefined;
 
       const [upsertedState] = await Promise.all([
         client.libraryItemState.upsert({
@@ -185,7 +182,6 @@ export class StateRepository {
             ...(zoomScale !== undefined ? { zoomScale } : {}),
             ...(rotation !== undefined ? { rotation } : {}),
             ...(viewMode !== undefined ? { viewMode } : {}),
-            ...(bookmarks !== undefined ? { bookmarks } : {}),
           },
           update: {
             ...(currentPage !== undefined ? { currentPage } : {}),
@@ -194,7 +190,6 @@ export class StateRepository {
             ...(zoomScale !== undefined ? { zoomScale } : {}),
             ...(rotation !== undefined ? { rotation } : {}),
             ...(viewMode !== undefined ? { viewMode } : {}),
-            ...(bookmarks !== undefined ? { bookmarks } : {}),
             version: { increment: 1 },
           },
         }),

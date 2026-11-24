@@ -53,7 +53,6 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
       getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn(),
-      deleteSpaceKnowledge: jest.fn(),
     };
 
     mockPrisma = {

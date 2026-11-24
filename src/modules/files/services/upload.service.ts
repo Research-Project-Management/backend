@@ -12,7 +12,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
 import * as path from 'path';
-import { RedisCacheService } from '@/core';
+import { DistributedLockService, RedisCacheService } from '@/core';
 import {
   DEFAULT_MULTIPART_TTL_HOURS,
   DEFAULT_PRESIGN_SIZE_BYTES,
@@ -98,6 +98,8 @@ export class FilesUploadService {
     private readonly finalizeCasQueue?: Queue,
     @Optional()
     private readonly redis?: RedisCacheService,
+    @Optional()
+    private readonly lockService?: DistributedLockService,
   ) {
     this.multipart = new MultipartUploadFlow({
       driver: this.driver,
@@ -550,8 +552,8 @@ export class FilesUploadService {
     }
 
     let lockToken: string | null = null;
-    if (this.redis) {
-      lockToken = await this.redis.acquireLock(lockResource, 30_000);
+    if (this.lockService) {
+      lockToken = await this.lockService.acquireLock(lockResource, 30_000);
       if (!lockToken) {
         const concurrentReplay = await this.tryReplayPresignComplete(
           idemKey,
@@ -676,8 +678,10 @@ export class FilesUploadService {
         isDeduplicated: registered.isDeduplicated,
       });
     } finally {
-      if (lockToken && this.redis) {
-        await this.redis.releaseLock(lockResource, lockToken).catch(() => {});
+      if (lockToken && this.lockService) {
+        await this.lockService
+          .releaseLock(lockResource, lockToken)
+          .catch(() => {});
       }
     }
   }

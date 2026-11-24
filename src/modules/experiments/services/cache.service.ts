@@ -29,35 +29,14 @@ export class ExperimentsCacheService {
     await this.redis.set(key, data, ttlSeconds);
   }
 
-  private readonly inFlight = new Map<string, Promise<unknown>>();
-
   async wrapFolderListing<T>(
     scopeKey: string,
     parentId: string | null | undefined,
     factory: () => Promise<T>,
     ttlSeconds = 120,
   ): Promise<T> {
-    const cached = await this.getFolderListing<T>(scopeKey, parentId);
-    if (cached !== null && cached !== undefined) return cached;
-
     const key = this.getTreeKey(scopeKey, parentId);
-    const existing = this.inFlight.get(key);
-    if (existing) {
-      return existing as Promise<T>;
-    }
-
-    const promise = (async () => {
-      try {
-        const fresh = await factory();
-        await this.setFolderListing(scopeKey, parentId, fresh, ttlSeconds);
-        return fresh;
-      } finally {
-        this.inFlight.delete(key);
-      }
-    })();
-
-    this.inFlight.set(key, promise);
-    return promise;
+    return this.redis.wrap(key, factory, ttlSeconds);
   }
 
   async invalidateFolder(

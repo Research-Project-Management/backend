@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
-import { classifyObjectKey } from '../domain/files.policy';
+import {
+  classifyObjectKey,
+  resolveFilesSigningSecret,
+} from '../domain/files.policy';
 import { BlobRepository } from '../repositories/blob.repository';
 
 /**
@@ -99,13 +102,7 @@ export class FileAccessService {
   }
 
   private getSecret(): string {
-    return (
-      this.config?.get<string>('STORAGE_HMAC_SECRET') ||
-      this.config?.get<string>('JWT_SECRET') ||
-      process.env.STORAGE_HMAC_SECRET ||
-      process.env.JWT_SECRET ||
-      'flux-files-signing-dev-secret'
-    );
+    return resolveFilesSigningSecret(this.config);
   }
 
   private sign(resource: string, expiresAtSec: number): string {

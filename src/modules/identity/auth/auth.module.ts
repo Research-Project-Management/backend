@@ -11,13 +11,13 @@ import { AuthController } from './auth.controller';
 import { AuthRepository } from './auth.repository';
 import { AuthGuard, JwtAuthGuard } from './guards/auth.guard';
 import { VerifiedEmailGuard } from './guards/verified-email.guard';
-import { CacheModule } from '@/core';
+import { RedisModule } from '@/core';
 import { UserModule } from '../user/user.module';
 import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
-    CacheModule,
+    RedisModule,
     UserModule,
     AuditModule,
     JwtModule.registerAsync({

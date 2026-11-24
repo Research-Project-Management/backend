@@ -24,7 +24,7 @@ import {
   AttachmentStorageException,
   executeStandardLibraryCacheInvalidation,
 } from '@/modules/library/core';
-import { RedisCacheService } from '@/core';
+import { DistributedLockService, RedisCacheService } from '@/core';
 import { ReferenceMatcherService } from './reference-matcher.service';
 import { ExtractionMetadataSynchronizer } from './metadata-sync.service';
 import { isRejectedCitedIdentifier } from '@/modules/library/extraction/domain/metadata-merge.policy';
@@ -84,6 +84,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
     @Optional()
     private readonly cache?: RedisCacheService,
     @Optional()
+    private readonly lockService?: DistributedLockService,
+    @Optional()
     private readonly referenceMatcher?: ReferenceMatcherService,
     @Optional()
     private readonly eventEmitter?: EventEmitter2,
@@ -139,8 +141,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
     const lockKey = `flux:lock:extraction:${attachmentId}`;
     let lockToken: string | null = null;
-    if (this.cache?.isReady()) {
-      lockToken = await this.cache.acquireLock(lockKey, 120000); // 2 min distributed lease
+    if (this.lockService && this.cache?.isReady()) {
+      lockToken = await this.lockService.acquireLock(lockKey, 120000); // 2 min distributed lease
       if (!lockToken) {
         this.logger.debug(
           `[AttachmentExtraction] Attachment ${attachmentId} is already locked by another worker. Skipping redundant extraction.`,
@@ -176,8 +178,8 @@ export class ExtractionHandler implements OutboxDispatchHandler {
 
       await this.processExtraction(event, attachmentId, payload, signal);
     } finally {
-      if (lockToken && this.cache) {
-        await this.cache.releaseLock(lockKey, lockToken);
+      if (lockToken && this.lockService) {
+        await this.lockService.releaseLock(lockKey, lockToken);
       }
     }
   }

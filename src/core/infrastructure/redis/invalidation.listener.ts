@@ -56,59 +56,26 @@ export class CacheInvalidationListener {
         `flux:wi:labels:proj:${event.projectId}*`,
       );
       await this.redisCache.del(`flux:proj:overview:${event.projectId}`);
-      await this.redisCache.delPattern(`work-items:${event.projectId}:*`);
       await this.redisCache.delPattern(
-        `analytics:project:${event.projectId}:*`,
+        `flux:analytics:proj:${event.projectId}:*`,
       );
     }
     if (event.entityId) {
       await this.redisCache.del(`flux:wi:work-item:${event.entityId}`);
-      await this.redisCache.del(`work_item:${event.entityId}`);
-      await this.redisCache.del(`WorkItem:${event.entityId}`);
     }
     if (event.spaceId) {
       await this.redisCache.delPattern(`flux:wi:labels:${event.spaceId}*`);
     }
   }
 
-  @OnEvent('paper.*', { async: true })
-  async handlePaperChanged(event: EntityChangeEvent) {
-    if (event.projectId) {
-      await this.redisCache.delPattern(`papers:${event.projectId}:*`);
-      await this.redisCache.delPattern(`library:${event.projectId}:*`);
-    }
-    if (event.userId) {
-      await this.redisCache.delPattern(`papers:${event.userId}:*`);
-      await this.redisCache.delPattern(`library:${event.userId}:*`);
-    }
-    if (event.entityId) {
-      await this.redisCache.del(`paper:${event.entityId}`);
-      await this.redisCache.del(`paper:bundle:${event.entityId}`);
-    }
-  }
-
-  @OnEvent('page.*', { async: true })
-  async handlePageChanged(event: EntityChangeEvent) {
-    if (event.projectId) {
-      await this.redisCache.delPattern(`pages:${event.projectId}:*`);
-    }
-    if (event.entityId) {
-      await this.redisCache.del(`page:${event.entityId}`);
-    }
-  }
-
   @OnEvent('file.*', { async: true })
   async handleFileChanged(event: EntityChangeEvent) {
     if (event.userId) {
-      await this.redisCache.delPattern(`files:${event.userId}:*`);
-      await this.redisCache.delPattern(`experiments:${event.userId}:*`);
       await this.redisCache.delPattern(
         `flux:experiments:tree:user:${event.userId}:*`,
       );
     }
     if (event.projectId) {
-      await this.redisCache.delPattern(`files:${event.projectId}:*`);
-      await this.redisCache.delPattern(`experiments:${event.projectId}:*`);
       await this.redisCache.delPattern(
         `flux:experiments:tree:project:${event.projectId}:*`,
       );
@@ -118,7 +85,6 @@ export class CacheInvalidationListener {
   @OnEvent('sticky.*', { async: true })
   async handleStickyChanged(event: EntityChangeEvent) {
     if (event.userId) {
-      await this.redisCache.delPattern(`stickies:${event.userId}:*`);
       await this.redisCache.del(`flux:sticky:user:${event.userId}`);
     }
   }
@@ -127,16 +93,15 @@ export class CacheInvalidationListener {
   async handleProjectChanged(event: EntityChangeEvent) {
     const pid = event.entityId || event.projectId;
     if (pid) {
-      await this.redisCache.del(`project:${pid}`);
+      await this.redisCache.del(`flux:proj:${pid}`);
       await this.redisCache.del(`flux:proj:overview:${pid}`);
       await this.redisCache.del(`flux:wi:work-items:${pid}`);
       await this.redisCache.delPattern(`flux:wi:work-items:${pid}*`);
-      await this.redisCache.delPattern(`work-items:${pid}:*`);
-      await this.redisCache.delPattern(`analytics:project:${pid}:*`);
+      await this.redisCache.delPattern(`flux:analytics:proj:${pid}:*`);
     }
     if (event.userId) {
-      await this.redisCache.delPattern(`projects:${event.userId}:*`);
-      await this.redisCache.delPattern(`analytics:user:${event.userId}:*`);
+      await this.redisCache.del(`flux:proj:user:${event.userId}`);
+      await this.redisCache.delPattern(`flux:analytics:user:${event.userId}:*`);
     }
 
     // Zero-Latency Stale Window Eviction: Immediately purge cached access contexts on membership changes
@@ -157,20 +122,6 @@ export class CacheInvalidationListener {
           this.redisCache.del(`project:access:perms:${pid}:${uid}`),
         ]);
       }
-    }
-  }
-
-  @OnEvent('cycle.*', { async: true })
-  async handleCycleChanged(event: EntityChangeEvent) {
-    if (event.projectId) {
-      await this.redisCache.delPattern(`cycles:${event.projectId}:*`);
-      await this.redisCache.delPattern(`work-items:${event.projectId}:*`);
-      await this.redisCache.delPattern(
-        `analytics:project:${event.projectId}:*`,
-      );
-    }
-    if (event.entityId) {
-      await this.redisCache.del(`cycle:${event.entityId}`);
     }
   }
 }

@@ -9,8 +9,18 @@ import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normaliz
 import { NotesRepository } from '@/modules/library/catalog/repositories/notes.repository';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AnnotationNormalizer } from '@/modules/library/extraction/domain/annotations.domain';
+import { ValidationPipe } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { ItemsMapper } from '@/modules/library/core';
+import {
+  CreateAnnotationDto,
+  UpdateAnnotationDto,
+  BatchAnnotationsDto,
+} from '@/modules/library/extraction/dto/annotations.dto';
+import {
+  extractPdfBibliographyReferences,
+  splitCitationSentences,
+} from '@/modules/library/extraction/providers/pdf-outline.extractor';
 
 describe('Library Notes, Annotations & Deep Search Parity', () => {
   describe('1. SearchRepository - Zotero Parity Deep Full-Text Query Builder', () => {
@@ -286,6 +296,140 @@ describe('Library Notes, Annotations & Deep Search Parity', () => {
 
       const normalizer = new AnnotationNormalizer();
       expect(normalizer.parseType('image')).toBe('image');
+    });
+  });
+
+  describe('6. Annotation DTO ValidationPipe Coordinate Preservation', () => {
+    const validationPipe = new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false,
+      stopAtFirstError: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    });
+
+    it('preserves rects, rectCoords, and boundingRect under NestJS whitelist + implicit conversion', async () => {
+      const box = {
+        x1: 0.12,
+        y1: 0.24,
+        x2: 0.68,
+        y2: 0.29,
+        width: 0.56,
+        height: 0.05,
+      };
+      const inkBox = {
+        ...box,
+        paths: [
+          [
+            [0.12, 0.24],
+            [0.4, 0.27],
+          ],
+        ],
+      };
+
+      const created = await validationPipe.transform(
+        {
+          type: 'highlight',
+          pageIndex: 0,
+          color: '#ffd400',
+          quoteText: 'residual learning framework',
+          rects: [box],
+          tags: [],
+        },
+        { type: 'body', metatype: CreateAnnotationDto },
+      );
+      expect(created.rects).toEqual([box]);
+
+      const withExplicitRectCoords = await validationPipe.transform(
+        {
+          type: 'highlight',
+          pageIndex: 0,
+          rectCoords: [box],
+        },
+        { type: 'body', metatype: CreateAnnotationDto },
+      );
+      expect(withExplicitRectCoords.rectCoords).toEqual([box]);
+
+      const updated = await validationPipe.transform(
+        {
+          rects: [box],
+          boundingRect: box,
+          expectedVersion: 1,
+        },
+        { type: 'body', metatype: UpdateAnnotationDto },
+      );
+      expect(updated.rects).toEqual([box]);
+      expect(updated.boundingRect).toEqual(box);
+
+      const batched = await validationPipe.transform(
+        {
+          upserts: [{ type: 'ink', pageIndex: 0, rects: [inkBox] }],
+          deletes: [],
+        },
+        { type: 'body', metatype: BatchAnnotationsDto },
+      );
+      expect(batched.upserts[0].rects).toEqual([inkBox]);
+    });
+  });
+
+  describe('7. PDF Reference Extraction with Hyphenated & Single-Letter Initials', () => {
+    it('does not split sentences prematurely on C.-Y. or I. J. author initials', () => {
+      const sample =
+        'C.-Y. Lee, S. Xie, P. Gallagher, Z. Zhang, and Z. Tu. Deeply-supervised nets. arXiv:1409.5185, 2014.';
+      expect(splitCitationSentences(sample)).toEqual([
+        'C.-Y. Lee, S. Xie, P. Gallagher, Z. Zhang, and Z. Tu',
+        'Deeply-supervised nets',
+        'arXiv:1409.5185, 2014.',
+      ]);
+
+      const refs = extractPdfBibliographyReferences(`
+References
+[9] I. J. Goodfellow, D. Warde-Farley, M. Mirza, A. Courville, and Y. Bengio. Maxout networks. arXiv:1302.4389, 2013.
+[24] C.-Y. Lee, S. Xie, P. Gallagher, Z. Zhang, and Z. Tu. Deeply-supervised nets. arXiv:1409.5185, 2014.
+      `);
+      expect(refs).toHaveLength(2);
+      expect(refs[0].title).toBe('Maxout networks');
+      expect(refs[0].authors).toEqual([
+        'I. J. Goodfellow',
+        'D. Warde-Farley',
+        'M. Mirza',
+        'A. Courville',
+        'Y. Bengio',
+      ]);
+      expect(refs[1].title).toBe('Deeply-supervised nets');
+      expect(refs[1].authors).toEqual([
+        'C.-Y. Lee',
+        'S. Xie',
+        'P. Gallagher',
+        'Z. Zhang',
+        'Z. Tu',
+      ]);
+      expect(refs[1].year).toBe(2014);
+      expect(refs[1].arxivId).toBe('1409.5185');
+    });
+
+    it('splits unnumbered multi-line APA/ICLR references under LaTeX small-caps R EFERENCES where year appears on the last line', () => {
+      const refs = extractPdfBibliographyReferences(`
+R EFERENCES
+Duchi, John, Hazan, Elad, and Singer, Yoram. Adaptive subgradient methods for online learning and
+stochastic optimization. The Journal of Machine Learning Research, 12:2121-2159, 2011.
+Graves, Alex. Generating sequences with recurrent neural networks. arXiv preprint arXiv:1308.0850,
+2013.
+Pascanu, Razvan and Bengio, Yoshua. Revisiting natural gradient for deep networks. arXiv preprint
+arXiv:1301.3584, 2013.
+Tieleman, T. and Hinton, G. Lecture 6.5 - RMSProp, COURSERA: Neural Networks for Machine
+Learning. Technical report, 2012.
+      `);
+      expect(refs).toHaveLength(4);
+      expect(refs[0].year).toBe(2011);
+      expect(refs[0].authors).toEqual(['Duchi, John', 'Hazan, Elad', 'Singer, Yoram']);
+      expect(refs[1].year).toBe(2013);
+      expect(refs[1].arxivId).toBe('1308.0850');
+      expect(refs[2].year).toBe(2013);
+      expect(refs[2].arxivId).toBe('1301.3584');
+      expect(refs[3].year).toBe(2012);
     });
   });
 });
