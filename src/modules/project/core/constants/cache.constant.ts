@@ -19,6 +19,16 @@ export const CACHE_KEYS = {
    * Project aggregated dashboard overview stats (TTL 15m)
    */
   overview: (projectId: string) => `flux:proj:overview:${projectId}`,
+
+  analyticsProjectInsights: (projectId: string) =>
+    `flux:analytics:proj:${projectId}:insights`,
+  analyticsProjectOverview: (projectId: string) =>
+    `flux:analytics:proj:${projectId}:overview`,
+  analyticsProjectPattern: (projectId: string) =>
+    `flux:analytics:proj:${projectId}:*`,
+  analyticsUserOverview: (userId: string) =>
+    `flux:analytics:user:${userId}:overview`,
+  analyticsUserPattern: (userId: string) => `flux:analytics:user:${userId}:*`,
 } as const;
 
 export const CACHE_TTL_SECONDS = {

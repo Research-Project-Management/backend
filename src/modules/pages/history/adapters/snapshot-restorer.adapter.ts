@@ -30,8 +30,8 @@ import { FileSnapshotVo } from '../domain/file-snapshot.domain';
 import { SnapshotFileNotFoundException } from '../domain/history.errors';
 
 @Injectable()
-export class PageSnapshotRestorerAdapter extends IProjectRestorerPort {
-  private readonly logger = new Logger(PageSnapshotRestorerAdapter.name);
+export class SnapshotRestorerAdapter extends IProjectRestorerPort {
+  private readonly logger = new Logger(SnapshotRestorerAdapter.name);
   private readonly liveCollab: LiveCollaborationPort;
 
   constructor(

@@ -10,31 +10,31 @@ import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 
 import { HistoryController } from './controllers/history.controller';
-import { PageVersionsController } from './controllers/versions.controller';
+import { VersionsController } from './controllers/versions.controller';
 import { HistoryService } from './services/history.service';
-import { PageVersionsService } from './services/versions.service';
+import { VersionsService } from './services/versions.service';
 import { HistoryRepository } from './repositories/history.repository';
-import { PageSnapshotCollectorAdapter } from './adapters/snapshot-collector.adapter';
-import { PageSnapshotRestorerAdapter } from './adapters/snapshot-restorer.adapter';
+import { SnapshotCollectorAdapter } from './adapters/snapshot-collector.adapter';
+import { SnapshotRestorerAdapter } from './adapters/snapshot-restorer.adapter';
 import { DiffEngine } from './domain/diff.domain';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
-  controllers: [HistoryController, PageVersionsController],
+  controllers: [HistoryController, VersionsController],
   providers: [
     HistoryService,
-    PageVersionsService,
+    VersionsService,
     HistoryRepository,
     DiffEngine,
-    PageSnapshotCollectorAdapter,
-    PageSnapshotRestorerAdapter,
+    SnapshotCollectorAdapter,
+    SnapshotRestorerAdapter,
   ],
   exports: [
     HistoryService,
-    PageVersionsService,
+    VersionsService,
     HistoryRepository,
-    PageSnapshotCollectorAdapter,
-    PageSnapshotRestorerAdapter,
+    SnapshotCollectorAdapter,
+    SnapshotRestorerAdapter,
   ],
 })
 export class HistoryModule {}

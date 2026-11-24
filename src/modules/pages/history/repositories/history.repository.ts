@@ -27,7 +27,7 @@ export type PrismaSnapshotWithLabels = PrismaSnapshot & {
   labels?: PrismaLabel[];
 };
 
-export class PageHistoryMapper {
+export class HistoryMapper {
   public static toDomainLabel(
     prisma: PrismaLabel & { projectId?: string },
   ): VersionLabel {
@@ -133,7 +133,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
   }
 
   public toDomain(record: PrismaSnapshotWithLabels): Snapshot {
-    return PageHistoryMapper.toDomain(record);
+    return HistoryMapper.toDomain(record);
   }
 
   private async resolveTargetPageId(
@@ -185,7 +185,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
             labels: true,
           },
         });
-        return PageHistoryMapper.toDomain(created);
+        return HistoryMapper.toDomain(created);
       } catch (err: unknown) {
         const code = (err as { code?: string })?.code;
         if (code === 'P2002' && attempt < maxAttempts - 1) {
@@ -223,7 +223,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     });
 
     if (!found) return null;
-    return PageHistoryMapper.toDomain(found);
+    return HistoryMapper.toDomain(found);
   }
 
   public async getLatestVersion(
@@ -271,7 +271,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
       },
     });
 
-    return records.reverse().map((r) => PageHistoryMapper.toDomainHeader(r));
+    return records.reverse().map((r) => HistoryMapper.toDomainHeader(r));
   }
 
   public async saveLabel(label: VersionLabel): Promise<VersionLabel> {
@@ -319,7 +319,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
           },
         });
 
-    return PageHistoryMapper.toDomainLabel(saved);
+    return HistoryMapper.toDomainLabel(saved);
   }
 
   public async deleteLabel(
@@ -354,7 +354,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     });
 
     if (!found) return null;
-    return PageHistoryMapper.toDomainLabel(found);
+    return HistoryMapper.toDomainLabel(found);
   }
 
   /**

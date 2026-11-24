@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
+import { INTEGRATIONS_CACHE_KEYS } from './integrations.cache-keys';
 import { UserIntegration } from '@prisma/client';
 import { IntegrationsRepository } from './integrations.repository';
 import {
@@ -218,7 +219,7 @@ export class IntegrationsService {
     if (result.state) {
       if (this.redis) {
         await this.redis.set(
-          `oauth:state:${result.state}`,
+          INTEGRATIONS_CACHE_KEYS.oauthState(result.state),
           JSON.stringify({ userId, provider }),
           900,
         );
@@ -246,13 +247,13 @@ export class IntegrationsService {
     if (params.state) {
       if (this.redis) {
         const storedJson = await this.redis.get<string | { userId: string; provider: string }>(
-          `oauth:state:${params.state}`,
+          INTEGRATIONS_CACHE_KEYS.oauthState(params.state),
         );
         if (storedJson) {
           const stored = typeof storedJson === 'string' ? JSON.parse(storedJson) : storedJson;
           if (stored.provider === params.provider) {
             stateUserId = stored.userId;
-            await this.redis.del(`oauth:state:${params.state}`);
+            await this.redis.del(INTEGRATIONS_CACHE_KEYS.oauthState(params.state));
           } else {
             throw new BadRequestException('OAuth state provider mismatch');
           }

@@ -24,8 +24,8 @@ import { FileSnapshotVo } from '../domain/file-snapshot.domain';
 const COLLECT_CONCURRENCY = 6;
 
 @Injectable()
-export class PageSnapshotCollectorAdapter extends IProjectCollectorPort {
-  private readonly logger = new Logger(PageSnapshotCollectorAdapter.name);
+export class SnapshotCollectorAdapter extends IProjectCollectorPort {
+  private readonly logger = new Logger(SnapshotCollectorAdapter.name);
   private readonly liveCollab: LiveCollaborationPort;
 
   constructor(

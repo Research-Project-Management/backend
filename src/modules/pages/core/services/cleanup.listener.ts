@@ -5,6 +5,7 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { PAGES_CACHE_KEYS } from '../pages.cache-keys';
 import { ModuleRef } from '@nestjs/core';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService, RedisCacheService } from '@/core';
@@ -232,7 +233,7 @@ export class CleanupListener {
 
       if (this.redis) {
         await this.redis
-          .del(`manuscript:linked_files:${projectId}`)
+          .del(PAGES_CACHE_KEYS.linkedFiles(projectId))
           .catch(() => undefined);
       }
 

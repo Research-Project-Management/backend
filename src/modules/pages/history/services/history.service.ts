@@ -13,8 +13,8 @@ import {
 } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { HistoryRepository } from '../repositories/history.repository';
-import { PageSnapshotCollectorAdapter } from '../adapters/snapshot-collector.adapter';
-import { PageSnapshotRestorerAdapter } from '../adapters/snapshot-restorer.adapter';
+import { SnapshotCollectorAdapter } from '../adapters/snapshot-collector.adapter';
+import { SnapshotRestorerAdapter } from '../adapters/snapshot-restorer.adapter';
 import { Snapshot } from '../domain/snapshot.domain';
 import { VersionLabel } from '../domain/version-label.domain';
 import {
@@ -41,8 +41,8 @@ export class HistoryService {
 
   constructor(
     private readonly repository: HistoryRepository,
-    private readonly collector: PageSnapshotCollectorAdapter,
-    private readonly restorer: PageSnapshotRestorerAdapter,
+    private readonly collector: SnapshotCollectorAdapter,
+    private readonly restorer: SnapshotRestorerAdapter,
     @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() private readonly userResolver?: UserResolverService,
     @Optional() diffEngine?: DiffEngine,

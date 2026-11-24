@@ -25,12 +25,12 @@ import {
 import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.domain';
 import { DiffEngine } from '@/modules/pages/history/domain/diff.domain';
 import {
-  PageHistoryMapper,
+  HistoryMapper,
   HistoryRepository,
 } from '@/modules/pages/history/repositories/history.repository';
 import { HistoryService } from '@/modules/pages/history/services/history.service';
-import type { PageSnapshotCollectorAdapter } from '@/modules/pages/history/adapters/snapshot-collector.adapter';
-import type { PageSnapshotRestorerAdapter } from '@/modules/pages/history/adapters/snapshot-restorer.adapter';
+import type { SnapshotCollectorAdapter } from '@/modules/pages/history/adapters/snapshot-collector.adapter';
+import type { SnapshotRestorerAdapter } from '@/modules/pages/history/adapters/snapshot-restorer.adapter';
 import { TrackChange } from '@/modules/pages/review/domain/change.domain';
 import { LinePatcher } from '@/modules/pages/review/domain/patcher.domain';
 import {
@@ -183,9 +183,9 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
   });
 
   describe('3. Project History Multi-Page Isolation & Non-Destructive Restore', () => {
-    it('preserves canonical spaceId and pageId across PageHistoryMapper and Snapshot/VersionLabel entities', () => {
+    it('preserves canonical spaceId and pageId across HistoryMapper and Snapshot/VersionLabel entities', () => {
       const now = new Date('2026-10-01T12:00:00Z');
-      const snap = PageHistoryMapper.toDomainHeader({
+      const snap = HistoryMapper.toDomainHeader({
         id: 'snap-1',
         spaceId: SPACE_ID,
         pageId: PAGE_A_ID,
@@ -258,7 +258,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
               ],
             ]),
           ),
-      } as unknown as PageSnapshotCollectorAdapter;
+      } as unknown as SnapshotCollectorAdapter;
 
       const mockRestorer = {
         restoreSingleFileToState: jest.fn().mockResolvedValue({
@@ -268,7 +268,7 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
           content: 'Restored line',
           rev: 12,
         }),
-      } as unknown as PageSnapshotRestorerAdapter;
+      } as unknown as SnapshotRestorerAdapter;
 
       const service = new HistoryService(
         mockRepo,

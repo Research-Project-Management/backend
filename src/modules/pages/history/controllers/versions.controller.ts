@@ -24,15 +24,15 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
-import { PageVersionsService } from '../services/versions.service';
+import { VersionsService } from '../services/versions.service';
 
 @ApiTags('Manuscripts - Pages History & Export')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
-export class PageVersionsController {
-  constructor(private readonly pageVersionsService: PageVersionsService) {}
+export class VersionsController {
+  constructor(private readonly pageVersionsService: VersionsService) {}
 
   @Get(['pages/:pageId/versions', 'docs/:pageId/versions'])
   async getVersions(

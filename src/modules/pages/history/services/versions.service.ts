@@ -37,8 +37,8 @@ import { FileSnapshotVo } from '../domain/file-snapshot.domain';
 import { SnapshotNormalizer } from '../domain/snapshot.mapper';
 
 @Injectable()
-export class PageVersionsService {
-  private readonly logger = new Logger(PageVersionsService.name);
+export class VersionsService {
+  private readonly logger = new Logger(VersionsService.name);
   private readonly liveCollab: LiveCollaborationPort;
 
   constructor(

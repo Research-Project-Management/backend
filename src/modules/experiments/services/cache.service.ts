@@ -1,6 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisCacheService } from '@/core';
 
+export const EXPERIMENTS_CACHE_KEYS = {
+  tree: (scopeKey: string, parentId?: string | null) =>
+    `flux:experiments:tree:${scopeKey}:${parentId ?? 'root'}`,
+  treePattern: (scopeKey: string) => `flux:experiments:tree:${scopeKey}:*`,
+  presignedUrl: (blobId: string) => `flux:experiments:url:${blobId}`,
+  nodeMeta: (nodeId: string) => `flux:experiments:node-meta:${nodeId}`,
+} as const;
+
 @Injectable()
 export class ExperimentsCacheService {
   private readonly logger = new Logger(ExperimentsCacheService.name);
@@ -8,7 +16,7 @@ export class ExperimentsCacheService {
   constructor(private readonly redis: RedisCacheService) {}
 
   private getTreeKey(scopeKey: string, parentId?: string | null): string {
-    return `flux:experiments:tree:${scopeKey}:${parentId ?? 'root'}`;
+    return EXPERIMENTS_CACHE_KEYS.tree(scopeKey, parentId);
   }
 
   async getFolderListing<T>(
@@ -48,11 +56,11 @@ export class ExperimentsCacheService {
   }
 
   async invalidateScopeTree(scopeKey: string): Promise<void> {
-    await this.redis.delPattern(`flux:experiments:tree:${scopeKey}:*`);
+    await this.redis.delPattern(EXPERIMENTS_CACHE_KEYS.treePattern(scopeKey));
   }
 
   async getPresignedUrl(blobId: string): Promise<string | null> {
-    return this.redis.get<string>(`flux:experiments:url:${blobId}`);
+    return this.redis.get<string>(EXPERIMENTS_CACHE_KEYS.presignedUrl(blobId));
   }
 
   async setPresignedUrl(
@@ -60,11 +68,15 @@ export class ExperimentsCacheService {
     url: string,
     ttlSeconds = 3300,
   ): Promise<void> {
-    await this.redis.set(`flux:experiments:url:${blobId}`, url, ttlSeconds);
+    await this.redis.set(
+      EXPERIMENTS_CACHE_KEYS.presignedUrl(blobId),
+      url,
+      ttlSeconds,
+    );
   }
 
   async getStreamNodeMeta<T>(nodeId: string): Promise<T | null> {
-    return this.redis.get<T>(`flux:experiments:node-meta:${nodeId}`);
+    return this.redis.get<T>(EXPERIMENTS_CACHE_KEYS.nodeMeta(nodeId));
   }
 
   async setStreamNodeMeta(
@@ -73,7 +85,7 @@ export class ExperimentsCacheService {
     ttlSeconds = 60,
   ): Promise<void> {
     await this.redis.set(
-      `flux:experiments:node-meta:${nodeId}`,
+      EXPERIMENTS_CACHE_KEYS.nodeMeta(nodeId),
       meta,
       ttlSeconds,
     );

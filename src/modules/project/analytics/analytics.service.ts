@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PROJECT_REDIS_KEYS } from '../core/constants/cache.constant';
 import { AnalyticsRepository } from './analytics.repository';
 import { RedisCacheService } from '@/core';
 import {
@@ -26,7 +27,7 @@ export class AnalyticsService {
   async getProjectAnalytics(
     projectId: string,
   ): Promise<ProjectWorkItemDistributionDto> {
-    const cacheKey = `flux:analytics:proj:${projectId}:insights`;
+    const cacheKey = PROJECT_REDIS_KEYS.analyticsProjectInsights(projectId);
 
     return this.cache.wrap(
       cacheKey,
@@ -47,7 +48,7 @@ export class AnalyticsService {
   async getProjectOverview(
     projectId: string,
   ): Promise<{ stats: ProjectOverviewDto }> {
-    const cacheKey = `flux:analytics:proj:${projectId}:overview`;
+    const cacheKey = PROJECT_REDIS_KEYS.analyticsProjectOverview(projectId);
 
     return this.cache.wrap(
       cacheKey,
@@ -63,7 +64,7 @@ export class AnalyticsService {
    * User Personal Aggregation Overview
    */
   async getUserOverview(userId: string): Promise<{ stats: UserOverviewDto }> {
-    const cacheKey = `flux:analytics:user:${userId}:overview`;
+    const cacheKey = PROJECT_REDIS_KEYS.analyticsUserOverview(userId);
 
     return this.cache.wrap(
       cacheKey,

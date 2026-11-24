@@ -67,6 +67,7 @@ import {
   UploadSessionStatus,
 } from '../types/files.type';
 import { BlobService } from './blob.service';
+import { FILES_CACHE_KEYS } from '../files.cache-keys';
 import { MultipartUploadFlow } from './multipart-flow';
 
 interface PresignCompleteCache {
@@ -540,7 +541,7 @@ export class FilesUploadService {
       .update(`${spaceScope}:${input.storageKey}`)
       .digest('hex')
       .slice(0, 32);
-    const idemKey = `files:idem:complete:${keyDigest}`;
+    const idemKey = FILES_CACHE_KEYS.presignCompleteIdempotency(keyDigest);
     const lockResource = `files:complete:${keyDigest}`;
 
     const initialReplay = await this.tryReplayPresignComplete(

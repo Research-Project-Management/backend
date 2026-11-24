@@ -13,6 +13,7 @@ import {
   InMemoryDistributedLockAdapter,
 } from '../ports/distributed-lock.port';
 import { DistributedLockTimeoutError } from '../domain/pages-domain.error';
+import { PAGES_CACHE_KEYS } from '../pages.cache-keys';
 
 @Injectable()
 export class RedisLockAdapter extends IDistributedLockPort {
@@ -25,7 +26,7 @@ export class RedisLockAdapter extends IDistributedLockPort {
   }
 
   private lockKey(resource: string): string {
-    return `lock:manuscript:${resource}`;
+    return PAGES_CACHE_KEYS.lock(resource);
   }
 
   public async acquire(

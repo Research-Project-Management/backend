@@ -8,6 +8,7 @@ import {
   RemoteCollectionItem,
 } from './integration-provider.interface';
 import { RedisCacheService } from '@/core';
+import { INTEGRATIONS_CACHE_KEYS } from '../integrations.cache-keys';
 
 interface ZoteroCollectionPayload {
   key: string;
@@ -129,7 +130,7 @@ export class ZoteroProvider implements IIntegrationProvider {
 
       if (this.redis) {
         await this.redis.set(
-          `oauth:zotero:${requestToken}`,
+          INTEGRATIONS_CACHE_KEYS.zoteroRequestToken(requestToken),
           JSON.stringify({ secret: requestTokenSecret || '', userId }),
           900,
         );
@@ -172,7 +173,7 @@ export class ZoteroProvider implements IIntegrationProvider {
       if (this.redis) {
         const stored = await this.redis.get<
           string | { secret: string; userId: string }
-        >(`oauth:zotero:${params.codeOrToken}`);
+        >(INTEGRATIONS_CACHE_KEYS.zoteroRequestToken(params.codeOrToken));
         if (stored) {
           if (typeof stored === 'string') {
             try {
@@ -245,7 +246,7 @@ export class ZoteroProvider implements IIntegrationProvider {
 
       this.inMemoryStore.delete(params.codeOrToken);
       if (this.redis) {
-        await this.redis.del(`oauth:zotero:${params.codeOrToken}`);
+        await this.redis.del(INTEGRATIONS_CACHE_KEYS.zoteroRequestToken(params.codeOrToken));
       }
 
       return {

@@ -21,6 +21,7 @@ import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import { PrismaService, RedisCacheService } from '@/core';
 import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PAGES_CACHE_KEYS } from '@/modules/pages/core/pages.cache-keys';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import {
@@ -306,7 +307,8 @@ export class ClsiService implements OnModuleDestroy {
             };
           }
         }
-        const cacheKey = `flux:clsi:compile:${this.hashSource(
+        const cacheKey = PAGES_CACHE_KEYS.clsiCompile(
+          this.hashSource(
           [
             effectiveSpaceId,
             scratchWorkspaceId,
@@ -318,7 +320,8 @@ export class ClsiService implements OnModuleDestroy {
             dto.syntaxOnly ?? false,
             dto.stopOnFirstError ?? false,
           ].join('|'),
-        )}`;
+          ),
+        );
         const cacheable = !!(dto.useCache && plan.hasMainContent);
 
         if (cacheable && this.cache) {

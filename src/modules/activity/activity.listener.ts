@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PROJECT_REDIS_KEYS } from '@/modules/project/core/constants/cache.constant';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ActivityService } from './activity.service';
 import { DomainActivityEvent } from './events/activity.events';
@@ -216,17 +217,23 @@ export class ActivityListener {
   ) {
     try {
       if (projectId) {
-        await this.redisCache.del(`flux:analytics:proj:${projectId}:insights`);
-        await this.redisCache.del(`flux:analytics:proj:${projectId}:overview`);
-        await this.redisCache.delPattern(`flux:analytics:proj:${projectId}:*`);
-        await this.redisCache.del(`analytics:project:${projectId}:insights`);
-        await this.redisCache.delPattern(`analytics:project:${projectId}:*`);
+        await this.redisCache.del(
+          PROJECT_REDIS_KEYS.analyticsProjectInsights(projectId),
+        );
+        await this.redisCache.del(
+          PROJECT_REDIS_KEYS.analyticsProjectOverview(projectId),
+        );
+        await this.redisCache.delPattern(
+          PROJECT_REDIS_KEYS.analyticsProjectPattern(projectId),
+        );
       }
       if (userId) {
-        await this.redisCache.del(`flux:analytics:user:${userId}:overview`);
-        await this.redisCache.delPattern(`flux:analytics:user:${userId}:*`);
-        await this.redisCache.del(`analytics:user:${userId}:overview`);
-        await this.redisCache.delPattern(`analytics:user:${userId}:*`);
+        await this.redisCache.del(
+          PROJECT_REDIS_KEYS.analyticsUserOverview(userId),
+        );
+        await this.redisCache.delPattern(
+          PROJECT_REDIS_KEYS.analyticsUserPattern(userId),
+        );
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
