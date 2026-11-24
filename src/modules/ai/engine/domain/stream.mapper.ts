@@ -9,7 +9,7 @@ import {
   TranslatedSseFrame,
 } from '../types/engine.type';
 
-export interface RawSseEvent {
+interface RawSseEvent {
   event: string;
   data: string;
 }
@@ -155,7 +155,7 @@ function normalizeEditorPatch(
   };
 }
 
-export function normalizeProvenanceList(
+function normalizeProvenanceList(
   raw: unknown,
 ): FrontendProvenanceItem[] {
   if (!Array.isArray(raw)) return [];
@@ -623,7 +623,6 @@ export function translateEngineSseFrame(
           encodeSseEvent({ type: 'error', message: errorMessage }),
           encodeSseEvent({ type: 'done' }),
         ],
-        errorMessage,
         finished: true,
       };
     }

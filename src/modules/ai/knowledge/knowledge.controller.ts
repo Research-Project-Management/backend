@@ -22,6 +22,7 @@ import {
 } from '@/modules/identity/auth';
 import { normalizeScopeAlias } from '../access/domain/scope.mapper';
 import { GetKnowledgeBulkDto } from './dto/knowledge.dto';
+import { KnowledgeIngestService } from './services/ingest.service';
 import { KnowledgeService } from './services/knowledge.service';
 
 @ApiTags('AI - Knowledge')
@@ -29,7 +30,10 @@ import { KnowledgeService } from './services/knowledge.service';
 @Controller('api/ai/documents')
 @UseGuards(JwtAuthGuard)
 export class KnowledgeController {
-  constructor(private readonly knowledgeService: KnowledgeService) {}
+  constructor(
+    private readonly knowledgeService: KnowledgeService,
+    private readonly ingestService: KnowledgeIngestService,
+  ) {}
 
   @Post('upload')
   @UseGuards(VerifiedEmailGuard)
@@ -68,7 +72,7 @@ export class KnowledgeController {
     const spaceId = normalizeScopeAlias(fields.spaceId || fields.space_id);
     const chatId = fields.chatId || fields.chat_id;
 
-    return this.knowledgeService.uploadDocument(
+    return this.ingestService.ingestUploadedBuffer(
       userId,
       buffer,
       mimeType,

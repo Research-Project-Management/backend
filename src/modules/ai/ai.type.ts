@@ -33,5 +33,4 @@ export interface AiAuthorizedScope {
 export interface IAiFacade {
   generate(params: AiGenerateParams): Promise<AiGenerateResult>;
   authorizeScope(params: AiAuthorizeScopeParams): Promise<AiAuthorizedScope>;
-  health(): Promise<AiHealthStatus>;
 }

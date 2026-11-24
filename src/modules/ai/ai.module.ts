@@ -15,6 +15,6 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
       useExisting: AiFacade,
     },
   ],
-  exports: [AiFacade, AI_FACADE],
+  exports: [AI_FACADE],
 })
 export class AiModule {}

@@ -397,4 +397,127 @@ describe('AI Module Deepening: Batched Document Resolution & SQL Pagination', ()
       expect(resolveSpaceSpy).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('Lightweight ChatService access & fast resume persistence', () => {
+    it('skips userSettings and user profile queries on cancel, listCheckpoints, and rewindThread', async () => {
+      const userSettingsFindUnique = jest.fn();
+      const userFindUnique = jest.fn();
+      const mockPrisma = fromPartial<PrismaService>({
+        space: { findFirst: jest.fn().mockResolvedValue(null) },
+        project: { findFirst: jest.fn().mockResolvedValue(null) },
+        aiChat: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: chatId,
+            createdById: userId,
+            spaceId: userId,
+            title: 'Thread',
+          }),
+        },
+        userSettings: { findUnique: userSettingsFindUnique },
+        user: { findUnique: userFindUnique },
+      });
+
+      const accessRepo = new AccessRepository(mockPrisma);
+      const spaceAccess = new SpaceAccessService(accessRepo);
+      const documentAccess = new DocumentAccessService(accessRepo, spaceAccess);
+      const accessService = new AccessService(
+        spaceAccess,
+        documentAccess,
+        accessRepo,
+      );
+      const chatRepo = new ChatRepository(mockPrisma);
+      const sessionService = new SessionService(chatRepo, spaceAccess);
+      const titleService = new TitleService(chatRepo);
+      const mockEngine = fromPartial<IAiEnginePort>({
+        cancelThread: jest.fn().mockResolvedValue(undefined),
+        listThreadCheckpoints: jest.fn().mockResolvedValue({
+          chat_id: chatId,
+          space_id: userId,
+          checkpoints: [],
+        }),
+        rewindThread: jest.fn().mockResolvedValue({
+          chat_id: chatId,
+          space_id: userId,
+          target_checkpoint_id: 'ckpt-1',
+          new_checkpoint_id: 'ckpt-2',
+          message_count: 1,
+          reverted_count: 0,
+          revert_results: [],
+        }),
+      });
+      const chatService = new ChatService(
+        mockEngine,
+        accessService,
+        sessionService,
+        titleService,
+      );
+
+      await chatService.cancel(userId, chatId);
+      await chatService.listCheckpoints(userId, chatId);
+      await chatService.rewindThread(userId, chatId, 'ckpt-1');
+
+      expect(userSettingsFindUnique).not.toHaveBeenCalled();
+      expect(userFindUnique).not.toHaveBeenCalled();
+    });
+
+    it('persists resumeSync assistant message via appendMessagesFast instead of appendMessages', async () => {
+      const mockPrisma = fromPartial<PrismaService>({
+        space: { findFirst: jest.fn().mockResolvedValue(null) },
+        project: { findFirst: jest.fn().mockResolvedValue(null) },
+        aiChat: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: chatId,
+            createdById: userId,
+            spaceId: userId,
+            title: 'Resumed Thread',
+          }),
+          update: jest.fn().mockResolvedValue({ id: chatId }),
+        },
+        aiMessage: {
+          createMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      });
+
+      const accessRepo = new AccessRepository(mockPrisma);
+      const spaceAccess = new SpaceAccessService(accessRepo);
+      const documentAccess = new DocumentAccessService(accessRepo, spaceAccess);
+      const accessService = new AccessService(
+        spaceAccess,
+        documentAccess,
+        accessRepo,
+      );
+      const chatRepo = new ChatRepository(mockPrisma);
+      const sessionService = new SessionService(chatRepo, spaceAccess);
+      const titleService = new TitleService(chatRepo);
+      const mockEngine = fromPartial<IAiEnginePort>({
+        resumeSync: jest.fn().mockResolvedValue({
+          content: 'Resumed response',
+          route: 'project_agent',
+          status: 'completed',
+          citations: [],
+          sources: [],
+          interrupts: [],
+          usage: {},
+          trace_id: 'trace-r1',
+        }),
+      });
+      const chatService = new ChatService(
+        mockEngine,
+        accessService,
+        sessionService,
+        titleService,
+      );
+
+      const fastSpy = jest.spyOn(sessionService, 'appendMessagesFast');
+      const slowSpy = jest.spyOn(sessionService, 'appendMessages');
+
+      await chatService.resumeSync(userId, {
+        chatId,
+        decision: { approved: true },
+      });
+
+      expect(fastSpy).toHaveBeenCalledTimes(1);
+      expect(slowSpy).not.toHaveBeenCalled();
+    });
+  });
 });

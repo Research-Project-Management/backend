@@ -11,7 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-export function NormalizeNull(): PropertyDecorator {
+function NormalizeNull(): PropertyDecorator {
   return Transform(({ value }: { value: unknown }) =>
     value === null ? undefined : value,
   );

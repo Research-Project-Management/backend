@@ -55,7 +55,6 @@ export class SessionService {
       this.cache.del(AI_REDIS_KEYS.userChats(userId, null)),
     ];
     if (chatId) {
-      keys.push(this.cache.del(AI_REDIS_KEYS.chatSession(chatId)));
       keys.push(
         this.cache.del(`${AI_REDIS_KEYS.chatSession(chatId)}:${userId}`),
       );
@@ -167,15 +166,7 @@ export class SessionService {
     });
 
     if (dto.messages && dto.messages.length > 0) {
-      const normalized = dto.messages.map((m) => ({
-        role: sanitizeMessageRole(m.role),
-        content: sanitizeMessageContent(m.content),
-        sources: (m.attachments || m.sources) as
-          Prisma.InputJsonValue | undefined,
-        widgets: m.widgets as Prisma.InputJsonValue | undefined,
-        selectionContext: m.selectionContext as
-          Prisma.InputJsonValue | undefined,
-      }));
+      const normalized = this.normalizeMessages(dto.messages);
       const updated = await this.chatRepo.createMessages(
         created.id,
         normalized,
@@ -249,14 +240,7 @@ export class SessionService {
       throw new UnprocessableEntityException('Messages array cannot be empty');
     }
 
-    const formatted = dto.messages.map((m) => ({
-      role: sanitizeMessageRole(m.role),
-      content: sanitizeMessageContent(m.content),
-      sources: (m.attachments || m.sources) as
-        Prisma.InputJsonValue | undefined,
-      widgets: m.widgets as Prisma.InputJsonValue | undefined,
-      selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
-    }));
+    const formatted = this.normalizeMessages(dto.messages);
 
     if (formatted.some((m) => !m.content || !m.content.trim())) {
       throw new UnprocessableEntityException('Message content cannot be empty');
@@ -290,7 +274,18 @@ export class SessionService {
       return;
     }
 
-    const formatted = dto.messages.map((m) => ({
+    const formatted = this.normalizeMessages(dto.messages);
+
+    if (formatted.some((m) => !m.content || !m.content.trim())) {
+      return;
+    }
+
+    await this.chatRepo.insertMessagesFast(chatId, formatted, dto.documentIds);
+    await this.invalidateCache(userId, chatId, spaceId);
+  }
+
+  private normalizeMessages(messages: AppendMessagesDto['messages']) {
+    return messages.map((m) => ({
       role: sanitizeMessageRole(m.role),
       content: sanitizeMessageContent(m.content),
       sources: (m.attachments || m.sources) as
@@ -299,13 +294,6 @@ export class SessionService {
       widgets: m.widgets as Prisma.InputJsonValue | undefined,
       selectionContext: m.selectionContext as Prisma.InputJsonValue | undefined,
     }));
-
-    if (formatted.some((m) => !m.content || !m.content.trim())) {
-      return;
-    }
-
-    await this.chatRepo.insertMessagesFast(chatId, formatted, dto.documentIds);
-    await this.invalidateCache(userId, chatId, spaceId);
   }
 
   async renameChat(

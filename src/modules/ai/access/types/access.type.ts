@@ -21,6 +21,12 @@ export interface LlmOverridePayload {
   base_url?: string;
 }
 
+export interface UserProfileContext {
+  name?: string;
+  email?: string;
+  institution?: string;
+}
+
 export interface ResolvedChatDocuments {
   resolvedDocumentIds: string[];
   enrichedSources: EnrichedAttachedSource[];
@@ -35,6 +41,7 @@ export interface ChatTurnAccess {
   enrichedSources: EnrichedAttachedSource[];
   existingChat: ChatOwnershipRecord | null;
   llmOverride?: LlmOverridePayload | null;
+  userProfile?: UserProfileContext | null;
 }
 
 export interface EnrichedAttachedSource {

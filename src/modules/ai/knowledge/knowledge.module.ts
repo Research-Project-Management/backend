@@ -39,6 +39,5 @@ const workerProviders = shouldRunWorkerConsumers()
     VerifiedEmailGuard,
     ...workerProviders,
   ],
-  exports: [KnowledgeService, KnowledgeIngestService],
 })
 export class KnowledgeModule {}

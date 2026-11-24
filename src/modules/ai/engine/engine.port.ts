@@ -6,7 +6,6 @@ import type {
   EngineChatResponse,
   EngineDeleteResponse,
   EngineIngestInput,
-  EngineIngestJobResponse,
   EngineIngestResponse,
   EngineKnowledgeSearchHit,
   EngineKnowledgeSearchInput,
@@ -56,10 +55,6 @@ export interface IAiEnginePort {
   deleteThread(spaceId: string, chatId: string): Promise<EngineDeleteResponse>;
   deleteSpaceThreads(spaceId: string): Promise<EngineDeleteResponse>;
   ingestDocument(input: EngineIngestInput): Promise<EngineIngestResponse>;
-  enqueueKnowledgeIngest(
-    input: EngineIngestInput,
-  ): Promise<EngineIngestJobResponse>;
-  getKnowledgeJob(jobId: string): Promise<EngineIngestJobResponse>;
   searchKnowledge(
     input: EngineKnowledgeSearchInput,
   ): Promise<EngineKnowledgeSearchHit[]>;

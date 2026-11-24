@@ -7,6 +7,7 @@ import type {
   LlmOverridePayload,
   PageLookupRecord,
   SpaceRecord,
+  UserProfileContext,
 } from './types/access.type';
 
 @Injectable()
@@ -150,17 +151,6 @@ export class AccessRepository {
     return Array.isArray(rows) ? rows : [];
   }
 
-  async findStorageFileMetadata(fileId: string): Promise<unknown> {
-    if (!this.prisma.fileNode?.findUnique) return null;
-    const row = await this.prisma.fileNode
-      .findUnique({
-        where: { id: fileId },
-        select: { metadata: true },
-      })
-      .catch(() => null);
-    return row?.metadata ?? null;
-  }
-
   async findLibraryItemsWithAttachments(ids: string[]) {
     if (!ids.length || !this.prisma.libraryItem?.findMany) return [];
     const rows = await this.prisma.libraryItem
@@ -240,5 +230,33 @@ export class AccessRepository {
       })
       .catch(() => null);
     return resolveDecryptedLlmOverride(row?.editorConfig);
+  }
+
+  async findUserProfile(userId: string): Promise<UserProfileContext | null> {
+    if (!userId || !this.prisma.user?.findUnique) return null;
+    const user = await this.prisma.user
+      .findUnique({
+        where: { id: userId },
+        select: {
+          email: true,
+          profile: {
+            select: {
+              name: true,
+              institution: true,
+            },
+          },
+        },
+      })
+      .catch(() => null);
+    if (!user) return null;
+    const name = user.profile?.name?.trim() || undefined;
+    const email = user.email?.trim() || undefined;
+    const institution = user.profile?.institution?.trim() || undefined;
+    if (!name && !email && !institution) return null;
+    return {
+      ...(name ? { name } : {}),
+      ...(email ? { email } : {}),
+      ...(institution ? { institution } : {}),
+    };
   }
 }

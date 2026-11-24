@@ -49,8 +49,6 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
       deleteThread: jest.fn(),
       deleteSpaceThreads: jest.fn(),
       ingestDocument: jest.fn(),
-      enqueueKnowledgeIngest: jest.fn(),
-      getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn(),
     };

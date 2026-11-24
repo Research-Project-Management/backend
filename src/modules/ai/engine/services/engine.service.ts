@@ -237,7 +237,7 @@ export class EngineService implements IAiEnginePort {
     );
   }
 
-  async enqueueKnowledgeIngest(
+  private async enqueueKnowledgeIngest(
     input: EngineIngestInput,
   ): Promise<EngineIngestJobResponse> {
     const formData = new FormData();
@@ -259,7 +259,9 @@ export class EngineService implements IAiEnginePort {
     });
   }
 
-  async getKnowledgeJob(jobId: string): Promise<EngineIngestJobResponse> {
+  private async getKnowledgeJob(
+    jobId: string,
+  ): Promise<EngineIngestJobResponse> {
     return this.http.requestJson<EngineIngestJobResponse>(
       `/knowledge/jobs/${encodeURIComponent(jobId)}`,
       {

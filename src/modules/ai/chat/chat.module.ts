@@ -22,6 +22,5 @@ import { TitleService } from './services/title.service';
     PaperChatService,
     VerifiedEmailGuard,
   ],
-  exports: [ChatService, SessionService, PaperChatService],
 })
 export class ChatModule {}

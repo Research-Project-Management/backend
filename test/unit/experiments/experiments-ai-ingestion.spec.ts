@@ -99,8 +99,6 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       deleteThread: jest.fn(),
       deleteSpaceThreads: jest.fn(),
       ingestDocument: jest.fn(),
-      enqueueKnowledgeIngest: jest.fn(),
-      getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn().mockResolvedValue({
         space_id: 'project-physics',

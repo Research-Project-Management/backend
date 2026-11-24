@@ -18,7 +18,7 @@ import {
 } from '../types/engine.type';
 import { EngineHttpService } from './http.service';
 
-export interface PipeStreamParams {
+interface PipeStreamParams {
   path: string;
   body: unknown;
   reply: FastifyReply;

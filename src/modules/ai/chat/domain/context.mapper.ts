@@ -3,11 +3,14 @@ import type {
   EngineMessage,
 } from '../../engine/types/engine.type';
 import { AI_CONTEXT_CHAR_LIMITS } from '../../ai.constant';
-import type { LlmOverridePayload } from '../../access/types/access.type';
+import type {
+  LlmOverridePayload,
+  UserProfileContext,
+} from '../../access/types/access.type';
 import type { QueryDto } from '../dto/query.dto';
 import { sanitizeMessageContent, sanitizeMessageRole } from './session.mapper';
 
-export interface NormalizedUserMessage {
+interface NormalizedUserMessage {
   role: 'user' | 'assistant';
   content: string;
   attachments?: unknown;
@@ -86,6 +89,7 @@ export function buildEngineChatRequest(params: {
   prependSystemMessage?: string;
   delegationToken?: string;
   llmOverride?: LlmOverridePayload | null;
+  userProfile?: UserProfileContext | null;
 }): EngineChatRequest {
   const { dto } = params;
   const normalizedMsgs = extractNormalizedMessages(dto);
@@ -197,6 +201,9 @@ export function buildEngineChatRequest(params: {
   if (dto.useRag !== undefined) context.use_rag = dto.useRag;
   if (params.llmOverride?.api_key) {
     context.llm_override = params.llmOverride;
+  }
+  if (params.userProfile) {
+    context.user_profile = params.userProfile;
   }
 
   const allowedDomains = Array.isArray(context.allowed_domains)

@@ -55,6 +55,32 @@ export class DocumentAccessService {
     private readonly spaceAccess: SpaceAccessService,
   ) {}
 
+  private resolvePrimaryAttachmentAndRagId<
+    T extends {
+      attachmentType?: string | null;
+      fileId?: string | null;
+      metadata?: unknown;
+    },
+  >(
+    itemMetadata: unknown,
+    attachments?: T[] | null,
+  ): {
+    primaryAtt: T | undefined;
+    fileId: string | null;
+    ragDocId: string | null;
+  } {
+    const primaryAtt =
+      attachments && attachments.length > 0
+        ? attachments.find((att) => att.attachmentType === 'primary_pdf') ||
+          attachments[0]
+        : undefined;
+    const fileId = primaryAtt?.fileId ?? null;
+    const ragDocId =
+      extractRagDocIdFromMetadata(itemMetadata) ??
+      (primaryAtt ? extractRagDocIdFromMetadata(primaryAtt.metadata) : null);
+    return { primaryAtt, fileId, ragDocId };
+  }
+
   private async resolveLibraryItemsMap(
     ids: string[],
     knownFileRagIds?: ReadonlyMap<string, string | null>,
@@ -70,21 +96,14 @@ export class DocumentAccessService {
     >();
 
     for (const item of items) {
-      const attachments = item.attachments || [];
-      const primaryAtt =
-        attachments.find((att) => att.attachmentType === 'primary_pdf') ||
-        attachments[0];
-      const fileId = primaryAtt?.fileId ?? null;
-
-      let ragDocId = extractRagDocIdFromMetadata(item.metadata);
-      if (!ragDocId && primaryAtt) {
-        ragDocId = extractRagDocIdFromMetadata(primaryAtt.metadata);
-        if (!ragDocId && fileId) {
-          if (knownFileRagIds?.has(fileId)) {
-            ragDocId = knownFileRagIds.get(fileId) ?? null;
-          } else {
-            pendingFileIds.push(fileId);
-          }
+      const { fileId, ragDocId: inlineRagDocId } =
+        this.resolvePrimaryAttachmentAndRagId(item.metadata, item.attachments);
+      let ragDocId = inlineRagDocId;
+      if (!ragDocId && fileId) {
+        if (knownFileRagIds?.has(fileId)) {
+          ragDocId = knownFileRagIds.get(fileId) ?? null;
+        } else {
+          pendingFileIds.push(fileId);
         }
       }
       primaryAttByItem.set(item.id, { fileId, ragDocId });
@@ -213,24 +232,18 @@ export class DocumentAccessService {
         throw new ForbiddenException('You do not have access to this paper');
       }
 
-      const primaryAtt =
-        item.attachments && item.attachments.length > 0
-          ? item.attachments.find(
-              (att) => att.attachmentType === 'primary_pdf',
-            ) || item.attachments[0]
-          : undefined;
-      const primaryFileId = primaryAtt?.fileId ?? null;
+      const {
+        primaryAtt,
+        fileId: primaryFileId,
+        ragDocId: inlineRagDocId,
+      } = this.resolvePrimaryAttachmentAndRagId(item.metadata, item.attachments);
+      let ragDocId = inlineRagDocId;
 
-      let ragDocId = extractRagDocIdFromMetadata(item.metadata);
-
-      if (!ragDocId && primaryAtt) {
-        ragDocId = extractRagDocIdFromMetadata(primaryAtt.metadata);
-        if (!ragDocId && primaryAtt.fileId) {
-          const fileMeta = await this.repo.findStorageFileMetadata(
-            primaryAtt.fileId,
-          );
-          ragDocId = extractRagDocIdFromMetadata(fileMeta);
-        }
+      if (!ragDocId && primaryFileId) {
+        const [fileRow] = await this.repo.findStorageFilesMetadata([
+          primaryFileId,
+        ]);
+        ragDocId = extractRagDocIdFromMetadata(fileRow?.metadata);
       }
 
       const itemMeta =

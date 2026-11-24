@@ -48,6 +48,21 @@ export class AccessService {
     return this.documentAccess.resolvePaperTarget(userId, paperOrFileId);
   }
 
+  async authorizeChatAccess(
+    userId: string,
+    chatId: string,
+    rawSpaceId?: string | null,
+  ): Promise<ResolvedSpaceScope & { existingChat: ChatOwnershipRecord | null }> {
+    const [existingChat, scope] = await Promise.all([
+      this.spaceAccess.verifyChatOwnership(userId, chatId),
+      this.spaceAccess.resolveSpace(userId, rawSpaceId),
+    ]);
+    return {
+      ...scope,
+      existingChat,
+    };
+  }
+
   async authorizeChatTurn(params: {
     userId: string;
     spaceId?: string | null;
@@ -60,7 +75,7 @@ export class AccessService {
       (params.documentIds && params.documentIds.length > 0) ||
       Array.isArray(params.attachedSources);
 
-    const [existingChat, resolvedDocs, scope, llmOverride] =
+    const [existingChat, resolvedDocs, scope, llmOverride, userProfile] =
       await Promise.all([
         this.spaceAccess.verifyChatOwnership(params.userId, params.chatId),
         hasScopedDocs
@@ -82,6 +97,9 @@ export class AccessService {
         this.repo
           ? this.repo.findUserLlmOverride(params.userId)
           : Promise.resolve(null),
+        this.repo
+          ? this.repo.findUserProfile(params.userId)
+          : Promise.resolve(null),
       ]);
 
     const pageScope =
@@ -99,6 +117,7 @@ export class AccessService {
       enrichedSources: resolvedDocs.enrichedSources,
       existingChat,
       ...(llmOverride ? { llmOverride } : {}),
+      ...(userProfile ? { userProfile } : {}),
     };
   }
 }

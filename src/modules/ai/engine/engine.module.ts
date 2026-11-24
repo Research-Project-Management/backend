@@ -14,6 +14,6 @@ import { EngineStreamService } from './services/stream.service';
       useExisting: EngineService,
     },
   ],
-  exports: [EngineService, AI_ENGINE_PORT],
+  exports: [AI_ENGINE_PORT],
 })
 export class EngineModule {}

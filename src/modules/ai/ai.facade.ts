@@ -5,7 +5,6 @@ import type {
   AiAuthorizeScopeParams,
   AiGenerateParams,
   AiGenerateResult,
-  AiHealthStatus,
   IAiFacade,
 } from './ai.type';
 import { AccessService } from './access/services/access.service';
@@ -83,9 +82,5 @@ export class AiFacade implements IAiFacade {
     });
 
     return { text: response.content };
-  }
-
-  async health(): Promise<AiHealthStatus> {
-    return this.engine.health();
   }
 }

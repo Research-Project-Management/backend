@@ -165,29 +165,16 @@ export class ChatService {
 
     return this.engine.resumeStream(engineRequest, reply, {
       onComplete: async (result) => {
-        const hasWidgets = Boolean(result.widgets && result.widgets.length > 0);
-        if (result.cancelled || (!result.content.trim() && !hasWidgets)) return;
-        await this.sessionService
-          .appendMessages(dto.chatId, userId, {
-            messages: [
-              {
-                role: 'assistant',
-                content: this.resolveFallbackAssistantText(
-                  result.content,
-                  result.widgets,
-                ),
-                ...(result.sources.length > 0
-                  ? { sources: result.sources }
-                  : {}),
-                ...(hasWidgets ? { widgets: result.widgets } : {}),
-              },
-            ],
-          })
-          .catch((err: unknown) => {
-            this.logger.warn(
-              `Could not persist resumed stream assistant message: ${getErrorMessage(err)}`,
-            );
-          });
+        if (result.cancelled) return;
+        await this.persistResumedAssistantMessage({
+          chatId: dto.chatId,
+          userId,
+          spaceId: engineRequest.space_id,
+          content: result.content,
+          sources: result.sources,
+          widgets: result.widgets,
+          mode: 'stream',
+        });
       },
     });
   }
@@ -205,41 +192,24 @@ export class ChatService {
 
     const response = await this.engine.resumeSync(engineRequest);
 
-    if (
-      response.content.trim() ||
-      (response.widgets && response.widgets.length > 0)
-    ) {
-      await this.sessionService
-        .appendMessages(dto.chatId, userId, {
-          messages: [
-            {
-              role: 'assistant',
-              content: this.resolveFallbackAssistantText(
-                response.content,
-                response.widgets,
-              ),
-              sources: response.sources,
-              ...(response.widgets && response.widgets.length > 0
-                ? { widgets: response.widgets }
-                : {}),
-            },
-          ],
-        })
-        .catch((err: unknown) => {
-          this.logger.warn(
-            `Could not persist resumed sync assistant message: ${getErrorMessage(err)}`,
-          );
-        });
-    }
+    await this.persistResumedAssistantMessage({
+      chatId: dto.chatId,
+      userId,
+      spaceId: engineRequest.space_id,
+      content: response.content,
+      sources: response.sources,
+      widgets: response.widgets,
+      mode: 'sync',
+    });
     return response;
   }
 
   async cancel(userId: string, chatId: string, rawSpaceId?: string) {
-    const scope = await this.accessService.authorizeChatTurn({
+    const scope = await this.accessService.authorizeChatAccess(
       userId,
-      spaceId: rawSpaceId,
       chatId,
-    });
+      rawSpaceId,
+    );
     await this.engine.cancelThread(scope.spaceId, chatId);
     return { chatId, spaceId: scope.spaceId, status: 'cancelling' as const };
   }
@@ -266,11 +236,11 @@ export class ChatService {
     rawSpaceId?: string,
     limit?: number,
   ) {
-    const scope = await this.accessService.authorizeChatTurn({
+    const scope = await this.accessService.authorizeChatAccess(
       userId,
-      spaceId: rawSpaceId,
       chatId,
-    });
+      rawSpaceId,
+    );
     return this.engine.listThreadCheckpoints(chatId, scope.spaceId, limit);
   }
 
@@ -286,11 +256,11 @@ export class ChatService {
     if (!cleanCheckpoint) {
       throw new UnprocessableEntityException('checkpointId is required');
     }
-    const scope = await this.accessService.authorizeChatTurn({
+    const scope = await this.accessService.authorizeChatAccess(
       userId,
-      spaceId: rawSpaceId,
       chatId,
-    });
+      rawSpaceId,
+    );
     return this.engine.rewindThread(
       chatId,
       scope.spaceId,
@@ -386,6 +356,7 @@ export class ChatService {
       prependSystemMessage: options?.prependSystemMessage,
       delegationToken,
       llmOverride: turnAccess.llmOverride,
+      userProfile: turnAccess.userProfile,
     });
 
     return {
@@ -420,6 +391,39 @@ export class ChatService {
       document_ids: turnAccess.resolvedDocumentIds,
       ...(delegationToken ? { delegation_token: delegationToken } : {}),
     };
+  }
+
+  private async persistResumedAssistantMessage(params: {
+    chatId: string;
+    userId: string;
+    spaceId: string;
+    content: string;
+    sources: unknown[];
+    widgets?: unknown[];
+    mode: 'stream' | 'sync';
+  }): Promise<void> {
+    const hasWidgets = Boolean(params.widgets && params.widgets.length > 0);
+    if (!params.content.trim() && !hasWidgets) return;
+
+    await this.sessionService
+      .appendMessagesFast(params.chatId, params.userId, params.spaceId, {
+        messages: [
+          {
+            role: 'assistant',
+            content: this.resolveFallbackAssistantText(
+              params.content,
+              params.widgets,
+            ),
+            ...(params.sources.length > 0 ? { sources: params.sources } : {}),
+            ...(hasWidgets ? { widgets: params.widgets } : {}),
+          },
+        ],
+      })
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `Could not persist resumed ${params.mode} assistant message: ${getErrorMessage(err)}`,
+        );
+      });
   }
 
   private async persistAssistantResponse(params: {

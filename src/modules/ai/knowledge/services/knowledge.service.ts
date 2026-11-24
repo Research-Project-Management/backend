@@ -8,12 +8,7 @@ import {
   readMetadataRecord,
 } from '../domain/knowledge.mapper';
 import { KnowledgeRepository } from '../knowledge.repository';
-import type {
-  KnowledgeDocumentItem,
-  KnowledgeUploadOptions,
-  KnowledgeUploadResult,
-} from '../types/knowledge.type';
-import { KnowledgeIngestService } from './ingest.service';
+import type { KnowledgeDocumentItem } from '../types/knowledge.type';
 
 @Injectable()
 export class KnowledgeService {
@@ -24,24 +19,7 @@ export class KnowledgeService {
     @Inject(AI_ENGINE_PORT)
     private readonly engine: IAiEnginePort,
     private readonly accessService: AccessService,
-    private readonly ingestService: KnowledgeIngestService,
   ) {}
-
-  uploadDocument(
-    userId: string,
-    fileBuffer: Buffer,
-    mimeType: string,
-    filename: string,
-    options?: KnowledgeUploadOptions,
-  ): Promise<KnowledgeUploadResult> {
-    return this.ingestService.ingestUploadedBuffer(
-      userId,
-      fileBuffer,
-      mimeType,
-      filename,
-      options,
-    );
-  }
 
   async getDocuments(
     userId: string,

@@ -319,5 +319,4 @@ export interface TranslatedSseFrame {
   interrupts?: unknown[];
   finished?: boolean;
   cancelled?: boolean;
-  errorMessage?: string;
 }

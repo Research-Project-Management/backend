@@ -179,8 +179,6 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         deleted_threads: 2,
       }),
       ingestDocument: jest.fn(),
-      enqueueKnowledgeIngest: jest.fn(),
-      getKnowledgeJob: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn(),
     };

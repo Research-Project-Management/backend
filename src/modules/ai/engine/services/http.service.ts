@@ -40,10 +40,6 @@ export class EngineHttpService {
     ).trim();
   }
 
-  getBaseUrl(): string {
-    return this.fluxUrl;
-  }
-
   getInternalHeaders(
     traceId?: string,
     delegationToken?: string,
@@ -76,13 +72,6 @@ export class EngineHttpService {
   ): Promise<T> {
     const method = options.method ?? 'GET';
     const timeoutMs = options.timeoutMs ?? AI_ENGINE_TIMEOUTS_MS.DEFAULT;
-
-    if (!options.skipCircuitBreaker && this.circuitBreaker.isOpen()) {
-      throw new ServiceUnavailableException(
-        'AI service is temporarily unavailable (circuit breaker is open)',
-      );
-    }
-
     const headers: Record<string, string> = {
       ...this.getInternalHeaders(options.traceId, options.delegationToken),
     };
@@ -95,43 +84,14 @@ export class EngineHttpService {
       requestBody = JSON.stringify(options.body);
     }
 
-    const res = await tryCatch(
-      fetch(`${this.fluxUrl}${path}`, {
-        method,
-        headers,
-        body: requestBody,
-        signal: AbortSignal.timeout(timeoutMs),
-      }),
-    );
-
-    if (!res.ok) {
-      const message = getErrorMessage(res.error);
-      if (!options.skipCircuitBreaker) {
-        this.circuitBreaker.recordFailure(message);
-      }
-      this.logger.warn(`AI request failed [${method} ${path}]: ${message}`);
-      throw new ServiceUnavailableException(
-        `AI service unreachable: ${message}`,
-      );
-    }
-
-    const response = res.value;
-    if (!response.ok) {
-      const detail = await this.extractErrorDetail(response);
-      if (response.status >= 500) {
-        if (!options.skipCircuitBreaker) {
-          this.circuitBreaker.recordFailure(detail);
-        }
-        throw new ServiceUnavailableException(
-          `AI service upstream error (${response.status}): ${detail}`,
-        );
-      }
-      throw this.mapClientError(response.status, detail);
-    }
-
-    if (!options.skipCircuitBreaker) {
-      this.circuitBreaker.recordSuccess();
-    }
+    const response = await this.executeFetch({
+      path,
+      method,
+      headers,
+      body: requestBody,
+      signal: AbortSignal.timeout(timeoutMs),
+      skipCircuitBreaker: options.skipCircuitBreaker,
+    });
 
     const jsonRes = await tryCatch(response.json());
     if (!jsonRes.ok) {
@@ -147,7 +107,33 @@ export class EngineHttpService {
     traceId?: string,
     delegationToken?: string,
   ): Promise<Response> {
-    if (this.circuitBreaker.isOpen()) {
+    return this.executeFetch({
+      path,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        ...this.getInternalHeaders(traceId, delegationToken),
+      },
+      body: JSON.stringify(body),
+      signal,
+      isStream: true,
+    });
+  }
+
+  private async executeFetch(params: {
+    path: string;
+    method: 'GET' | 'POST' | 'DELETE';
+    headers: Record<string, string>;
+    body?: BodyInit;
+    signal: AbortSignal;
+    skipCircuitBreaker?: boolean;
+    isStream?: boolean;
+  }): Promise<Response> {
+    const { path, method, headers, body, signal, skipCircuitBreaker, isStream } =
+      params;
+
+    if (!skipCircuitBreaker && this.circuitBreaker.isOpen()) {
       throw new ServiceUnavailableException(
         'AI service is temporarily unavailable (circuit breaker is open)',
       );
@@ -155,21 +141,23 @@ export class EngineHttpService {
 
     const res = await tryCatch(
       fetch(`${this.fluxUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-          ...this.getInternalHeaders(traceId, delegationToken),
-        },
-        body: JSON.stringify(body),
+        method,
+        headers,
+        body,
         signal,
       }),
     );
 
     if (!res.ok) {
       const message = getErrorMessage(res.error);
-      if (!signal.aborted) {
+      if (!skipCircuitBreaker && !(isStream && signal.aborted)) {
         this.circuitBreaker.recordFailure(message);
+      }
+      if (!isStream) {
+        this.logger.warn(`AI request failed [${method} ${path}]: ${message}`);
+        throw new ServiceUnavailableException(
+          `AI service unreachable: ${message}`,
+        );
       }
       throw new ServiceUnavailableException(`AI stream failed: ${message}`);
     }
@@ -178,15 +166,21 @@ export class EngineHttpService {
     if (!response.ok) {
       const detail = await this.extractErrorDetail(response);
       if (response.status >= 500) {
-        this.circuitBreaker.recordFailure(detail);
+        if (!skipCircuitBreaker) {
+          this.circuitBreaker.recordFailure(detail);
+        }
+        const label = isStream ? 'AI stream' : 'AI service';
         throw new ServiceUnavailableException(
-          `AI stream upstream error (${response.status}): ${detail}`,
+          `${label} upstream error (${response.status}): ${detail}`,
         );
       }
       throw this.mapClientError(response.status, detail);
     }
 
-    this.circuitBreaker.recordSuccess();
+    if (!skipCircuitBreaker) {
+      this.circuitBreaker.recordSuccess();
+    }
+
     return response;
   }
 

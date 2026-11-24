@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 
-export interface AiKnowledgeEnablementConfig {
+interface AiKnowledgeEnablementConfig {
   enabled?: string;
   url?: string;
   nodeEnv?: string;
