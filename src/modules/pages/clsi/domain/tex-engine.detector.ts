@@ -4,13 +4,19 @@
  * (% !TEX program = ...) and package hints (fontspec, luacode) to select the compiler.
  */
 
+import { VIETNAMESE_LATIN_REGEX } from '@/modules/pages/core/domain/latex-preamble';
 import { DraftModeManager } from './draft-mode.manager';
 
 export type SupportedEngine = 'pdflatex' | 'xelatex' | 'lualatex';
 
 export interface EngineDetectionResult {
   engine: SupportedEngine;
-  detectedFrom: 'explicit' | 'magic-comment' | 'package-hint' | 'default';
+  detectedFrom:
+    | 'explicit'
+    | 'magic-comment'
+    | 'package-hint'
+    | 'unicode-hint'
+    | 'default';
   mainFileHint?: string;
   bibProgramHint?: 'biber' | 'bibtex';
   /** Detected constructs for user advisory diagnostics; never used to enable shell escape. */
@@ -35,25 +41,22 @@ export class TexEngineDetector {
       source || '',
     );
 
-    if (requestedEngine && requestedEngine !== 'auto') {
-      const normalized = requestedEngine.toLowerCase();
-      if (
-        normalized === 'pdflatex' ||
-        normalized === 'xelatex' ||
-        normalized === 'lualatex'
-      ) {
-        return {
-          engine: normalized,
-          detectedFrom: 'explicit',
-          shellEscapeAdvisories,
-        };
-      }
+    const normalizedRequested = requestedEngine?.toLowerCase();
+    if (
+      normalizedRequested === 'xelatex' ||
+      normalizedRequested === 'lualatex'
+    ) {
+      return {
+        engine: normalizedRequested,
+        detectedFrom: 'explicit',
+        shellEscapeAdvisories,
+      };
     }
 
     if (!source) {
       return {
         engine: 'pdflatex',
-        detectedFrom: 'default',
+        detectedFrom: normalizedRequested === 'pdflatex' ? 'explicit' : 'default',
         shellEscapeAdvisories: [],
       };
     }
@@ -121,9 +124,42 @@ export class TexEngineDetector {
       };
     }
 
+    const uncommented = source
+      .replace(/(^|[^\\])%[^\r\n]*/g, '$1')
+      .normalize('NFC');
+    const hasVietnamese = VIETNAMESE_LATIN_REGEX.test(uncommented);
+    const hasVietnamesePdfLatexPkg =
+      /\\usepackage(?:\[[^\]]*\])?\{vietnam\}|\\usepackage\[[^\]]*\bT5\b[^\]]*\]\{fontenc\}|\\usepackage\[[^\]]*\bvietnamese\b[^\]]*\]\{babel\}/.test(
+        uncommented,
+      );
+
+    let hasNonLatin = false;
+    for (const ch of uncommented) {
+      const cp = ch.codePointAt(0);
+      if (
+        cp !== undefined &&
+        cp > 0x024f &&
+        !(cp >= 0x1e00 && cp <= 0x1eff) &&
+        !(cp >= 0x2000 && cp <= 0x206f)
+      ) {
+        hasNonLatin = true;
+        break;
+      }
+    }
+
+    if ((hasVietnamese && !hasVietnamesePdfLatexPkg) || hasNonLatin) {
+      return {
+        engine: 'xelatex',
+        detectedFrom: 'unicode-hint',
+        mainFileHint,
+        bibProgramHint,
+        shellEscapeAdvisories,
+      };
+    }
+
     return {
       engine: 'pdflatex',
-      detectedFrom: 'default',
+      detectedFrom: normalizedRequested === 'pdflatex' ? 'explicit' : 'default',
       mainFileHint,
       bibProgramHint,
       shellEscapeAdvisories,

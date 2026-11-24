@@ -150,8 +150,7 @@ export class ClsiService implements OnModuleDestroy {
     this.workspace = workspace ?? new WorkspaceRepository(scratchDir);
 
     this.remoteClient =
-      remoteClient ??
-      new RemoteClsiClientAdapter(this.configService);
+      remoteClient ?? new RemoteClsiClientAdapter(this.configService);
     this.workspacePlanner =
       workspacePlanner ??
       new WorkspacePlannerService(
@@ -309,17 +308,17 @@ export class ClsiService implements OnModuleDestroy {
         }
         const cacheKey = PAGES_CACHE_KEYS.clsiCompile(
           this.hashSource(
-          [
-            effectiveSpaceId,
-            scratchWorkspaceId,
-            plan.fingerprint,
-            plan.mainFile,
-            requestedEngine || 'auto',
-            texLiveVersion,
-            dto.draft ?? false,
-            dto.syntaxOnly ?? false,
-            dto.stopOnFirstError ?? false,
-          ].join('|'),
+            [
+              effectiveSpaceId,
+              scratchWorkspaceId,
+              plan.fingerprint,
+              plan.mainFile,
+              requestedEngine || 'auto',
+              texLiveVersion,
+              dto.draft ?? false,
+              dto.syntaxOnly ?? false,
+              dto.stopOnFirstError ?? false,
+            ].join('|'),
           ),
         );
         const cacheable = !!(dto.useCache && plan.hasMainContent);

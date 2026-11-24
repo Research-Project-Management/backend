@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import {
   IIntegrationProvider,
@@ -246,7 +251,9 @@ export class ZoteroProvider implements IIntegrationProvider {
 
       this.inMemoryStore.delete(params.codeOrToken);
       if (this.redis) {
-        await this.redis.del(INTEGRATIONS_CACHE_KEYS.zoteroRequestToken(params.codeOrToken));
+        await this.redis.del(
+          INTEGRATIONS_CACHE_KEYS.zoteroRequestToken(params.codeOrToken),
+        );
       }
 
       return {

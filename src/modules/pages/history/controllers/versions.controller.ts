@@ -1,6 +1,6 @@
 /**
- * modules/pages/history/controllers/versions.controller.ts
- * Domain controller exposing version history, diff, label, timeline, and point-in-time endpoints.
+ * history/controllers/versions.controller.ts
+ * Canonical REST API Controller for Document-scoped Version History, Diff, Timeline & Point-in-time reads.
  */
 
 import {
@@ -26,110 +26,91 @@ import {
 import { AuthenticatedRequest } from '@/core';
 import { VersionsService } from '../services/versions.service';
 
-@ApiTags('Manuscripts - Pages History & Export')
+@ApiTags('Pages - Document Versions')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/pages')
+@Controller('api/v1/pages/docs/:docId')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class VersionsController {
-  constructor(private readonly pageVersionsService: VersionsService) {}
+  constructor(private readonly versionsService: VersionsService) {}
 
-  @Get(['pages/:pageId/versions', 'docs/:pageId/versions'])
+  @Get('versions')
   async getVersions(
-    @Param('pageId') pageId: string,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @Param('docId') docId: string,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    return this.pageVersionsService.getVersions(pageId, project);
+    return this.versionsService.getVersions(docId, space);
   }
 
-  @Get([
-    'pages/:pageId/versions/diff',
-    'pages/:pageId/diff',
-    'docs/:pageId/versions/diff',
-    'docs/:pageId/diff',
-  ])
+  @Get('versions/diff')
   async getDiff(
-    @Param('pageId') pageId: string,
+    @Param('docId') docId: string,
     @Query('from') from: string,
     @Query('to') to: string,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    return this.pageVersionsService.getDiff(pageId, from, to, project);
+    return this.versionsService.getDiff(docId, from, to, space);
   }
 
-  @Get([
-    'pages/:pageId/versions/:versionId',
-    'docs/:pageId/versions/:versionId',
-  ])
+  @Get('versions/:versionId')
   async getVersionById(
-    @Param('pageId') pageId: string,
+    @Param('docId') docId: string,
     @Param('versionId') versionId: string,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    return this.pageVersionsService.getVersionById(pageId, versionId, project);
+    return this.versionsService.getVersionById(docId, versionId, space);
   }
 
-  @Post(['pages/:pageId/versions', 'docs/:pageId/versions'])
+  @Post('versions')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.CREATED)
   async createVersion(
-    @Param('pageId') pageId: string,
+    @Param('docId') docId: string,
     @Body() body: { label?: string; content?: string },
     @Req() req: AuthenticatedRequest,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    return this.pageVersionsService.createVersion(pageId, body, req, project);
+    return this.versionsService.createVersion(docId, body, req, space);
   }
 
-  @Post([
-    'pages/:pageId/versions/:versionId/restore',
-    'docs/:pageId/versions/:versionId/restore',
-  ])
+  @Post('versions/:versionId/restore')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async restoreVersion(
-    @Param('pageId') pageId: string,
+    @Param('docId') docId: string,
     @Param('versionId') versionId: string,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @ResolvedSpace() space?: string | { id: string } | null,
     @CurrentUser('id') userId?: string,
   ) {
-    return this.pageVersionsService.restoreVersion(
-      pageId,
-      versionId,
-      project,
-      userId,
-    );
+    return this.versionsService.restoreVersion(docId, versionId, space, userId);
   }
 
-  @Post([
-    'pages/:pageId/versions/:versionId/label',
-    'docs/:pageId/versions/:versionId/label',
-  ])
+  @Post('versions/:versionId/label')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
   async labelVersion(
     @Param('versionId') versionId: string,
     @Body() body: { label: string; title?: string },
     @Req() req: AuthenticatedRequest,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    return this.pageVersionsService.labelVersion(versionId, body, req, project);
+    return this.versionsService.labelVersion(versionId, body, req, space);
   }
 
-  @Get(['pages/:pageId/timeline', 'docs/:pageId/timeline'])
+  @Get('timeline')
   async getTimeline(
-    @Param('pageId') pageId: string,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @Param('docId') docId: string,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    return this.pageVersionsService.getTimeline(pageId, project);
+    return this.versionsService.getTimeline(docId, space);
   }
 
-  @Get(['pages/:pageId/at', 'docs/:pageId/at'])
+  @Get('at')
   async getAt(
-    @Param('pageId') pageId: string,
+    @Param('docId') docId: string,
     @Query('timestamp') timestamp?: string,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @ResolvedSpace() space?: string | { id: string } | null,
   ) {
-    return this.pageVersionsService.getAt(pageId, timestamp, project);
+    return this.versionsService.getAt(docId, timestamp, space);
   }
 }

@@ -12,7 +12,10 @@ import {
   aggregateProjectDistributions,
   buildWorkItemTimeSeries,
 } from './domain/analytics.domain';
-import { LabelDistributionItem, TimeSeriesPoint } from './types/analytics.types';
+import {
+  LabelDistributionItem,
+  TimeSeriesPoint,
+} from './types/analytics.types';
 
 @Injectable()
 export class AnalyticsService {

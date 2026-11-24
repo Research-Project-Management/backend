@@ -1,6 +1,6 @@
 /**
- * project-history/controllers/history.controller.ts
- * REST API Controller for Project History, Snapshots, Diff & Labels.
+ * history/controllers/history.controller.ts
+ * Canonical REST API Controller for Space/Project History, Snapshots, Diff & Labels.
  */
 
 import {
@@ -32,7 +32,6 @@ import {
   ResolvedSpace,
   Role,
 } from '@/modules/project/access';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { AuthenticatedRequest } from '@/core';
 import { HistoryService } from '../services/history.service';
 import {
@@ -48,176 +47,97 @@ import {
   VersionLabelDto,
 } from '../dto/history.dto';
 
-@ApiTags('Pages - Project History & Snapshots')
+@ApiTags('Pages - History & Snapshots')
 @ApiBearerAuth('JWT-auth')
-@Controller([
-  'api/v1/pages/spaces/:spaceId/history',
-  'api/v1/pages/pages/:pageId/history',
-  'api/v1/pages/docs/:docId/history',
-])
+@Controller('api/v1/pages/spaces/:spaceId/history')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
 
+  private resolveSpaceId(
+    routeSpaceId: string,
+    resolvedSpace?: string | { id?: string } | null,
+  ): string {
+    return (
+      (typeof resolvedSpace === 'string'
+        ? resolvedSpace
+        : resolvedSpace?.id) || routeSpaceId
+    );
+  }
+
   private resolveUserId(req?: AuthenticatedRequest): string | null {
     return req?.user?.sub || req?.user?.id || req?.user?.userId || null;
   }
 
-  private resolveCoordinates(
-    routeSpaceId: string | undefined,
-    paramPageId: string | undefined,
-    paramDocId: string | undefined,
-    queryPageId: string | undefined,
-    resolvedSpace: string | { id?: string } | null | undefined,
-    req: unknown,
-  ): { spaceId: string; pageId?: string } {
-    return resolvePageControllerCoordinates(
-      { spaceId: routeSpaceId, pageId: paramPageId, docId: paramDocId },
-      resolvedSpace,
-      queryPageId,
-      req,
-    );
-  }
-
-  @Get('')
-  @ApiOperation({
-    summary: 'Get project history events and versions overview',
-  })
-  async getProjectHistory(
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
-    @ResolvedSpace() resolvedSpace?: string | { id?: string },
-    @Req() req?: AuthenticatedRequest,
-  ) {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId,
-      resolvedSpace,
-      req,
-    );
-    const versions = await this.historyService.listVersions(spaceId, pageId);
-    const events = versions.map((v) => ({
-      id: v.id,
-      version: v.version,
-      label: v.labels?.[0]?.label || v.summary || `Version ${v.version}`,
-      createdAt: v.createdAt,
-      userId: v.createdById || 'anonymous',
-      summary: v.summary,
-    }));
-    return { events, history: events, versions };
-  }
-
   @Get('versions')
   @ApiOperation({
-    summary: 'List all historical snapshot versions and labels for project',
+    summary: 'List all historical snapshot versions and labels',
   })
   @ApiResponse({ status: 200, type: [VersionListItemDto] })
   async listVersions(
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Param('spaceId') routeSpaceId: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
-    @Req() req?: AuthenticatedRequest,
   ): Promise<VersionListItemDto[]> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId,
-      resolvedSpace,
-      req,
+    return await this.historyService.listVersions(
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      pageId,
     );
-    return await this.historyService.listVersions(spaceId, pageId);
   }
 
   @Post('snapshots')
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
-    summary: 'Manually capture an immutable snapshot of current project files',
+    summary: 'Manually capture an immutable snapshot of current files',
   })
   @ApiResponse({ status: 201, type: SnapshotDetailDto })
   async createSnapshot(
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: CreateSnapshotDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId ?? dto?.pageId,
-      resolvedSpace,
-      req,
-    );
     return await this.historyService.createSnapshot(
-      spaceId,
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
       dto,
       this.resolveUserId(req),
-      pageId,
+      pageId ?? dto.pageId,
     );
   }
 
   @Get('versions/:version')
   @ApiOperation({
-    summary:
-      'Get full project file tree and content snapshot for a specific version',
+    summary: 'Get full file tree and content snapshot for a specific version',
   })
   @ApiResponse({ status: 200, type: SnapshotDetailDto })
   async getSnapshot(
+    @Param('spaceId') routeSpaceId: string,
     @Param('version', ParseIntPipe) version: number,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
-    @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId,
-      resolvedSpace,
-      req,
+    return await this.historyService.getSnapshot(
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      version,
+      pageId,
     );
-    return await this.historyService.getSnapshot(spaceId, version, pageId);
   }
 
   @Get('diff')
   @ApiOperation({
-    summary:
-      'Compute Myers line diffs and word highlights between two versions',
+    summary: 'Compute Myers line diffs and word highlights between two versions',
   })
   @ApiResponse({ status: 200, type: DiffResponseDto })
   async compareVersions(
+    @Param('spaceId') routeSpaceId: string,
     @Query() query: DiffQueryDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
-    @Req() req?: AuthenticatedRequest,
   ): Promise<DiffResponseDto> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId,
-      resolvedSpace,
-      req,
-    );
     return await this.historyService.compareVersions(
-      spaceId,
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
       query.baseVersion,
       query.targetVersion,
       pageId,
@@ -227,91 +147,63 @@ export class HistoryController {
   @Post('versions/:version/labels')
   @RequireRole(Role.CONTRIBUTOR)
   @ApiOperation({
-    summary:
-      'Attach or update a named label/milestone tag on a specific version',
+    summary: 'Attach or update a named label/milestone tag on a version',
   })
   @ApiResponse({ status: 201, type: VersionLabelDto })
   async labelVersion(
+    @Param('spaceId') routeSpaceId: string,
     @Param('version', ParseIntPipe) version: number,
     @Body() dto: LabelVersionDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<VersionLabelDto> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId ?? dto?.pageId,
-      resolvedSpace,
-      req,
-    );
     return await this.historyService.labelVersion(
-      spaceId,
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
       version,
       dto.label,
       this.resolveUserId(req),
-      pageId,
+      pageId ?? dto.pageId,
     );
   }
 
   @Delete('labels/:labelId')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Remove a named label from project history' })
+  @ApiOperation({ summary: 'Remove a named label from history' })
   @ApiResponse({ status: 204 })
   async deleteLabel(
+    @Param('spaceId') routeSpaceId: string,
     @Param('labelId') labelId: string,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
-    @Req() req?: AuthenticatedRequest,
   ): Promise<void> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId,
-      resolvedSpace,
-      req,
+    await this.historyService.deleteLabel(
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      labelId,
+      pageId,
     );
-    await this.historyService.deleteLabel(spaceId, labelId, pageId);
   }
 
   @Post('restore')
   @RequireRole(Role.COORDINATOR)
   @ApiOperation({
     summary:
-      'Rollback project to a historical version (creates version N+1 non-destructively)',
+      'Rollback to a historical version (creates version N+1 non-destructively)',
   })
   @ApiResponse({ status: 200 })
   async restoreVersion(
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: RestoreVersionDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ) {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId ?? dto?.pageId,
-      resolvedSpace,
-      req,
-    );
     return await this.historyService.restoreVersion(
-      spaceId,
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
       dto.targetVersion,
       this.resolveUserId(req),
-      pageId,
+      pageId ?? dto.pageId,
     );
   }
 
@@ -324,29 +216,19 @@ export class HistoryController {
   })
   @ApiResponse({ status: 200, type: RestoreSingleFileResponseDto })
   async restoreSingleFile(
+    @Param('spaceId') routeSpaceId: string,
     @Param('version', ParseIntPipe) version: number,
     @Body() dto: RestoreSingleFileDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<RestoreSingleFileResponseDto> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId ?? dto?.pageId,
-      resolvedSpace,
-      req,
-    );
     return await this.historyService.restoreSingleFile(
-      spaceId,
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
       version,
       dto,
       this.resolveUserId(req),
-      pageId,
+      pageId ?? dto.pageId,
     );
   }
 
@@ -356,26 +238,15 @@ export class HistoryController {
     summary: 'Export historical version snapshot as a streaming PKZIP archive',
   })
   async exportVersionZip(
+    @Param('spaceId') routeSpaceId: string,
     @Param('version', ParseIntPipe) version: number,
     @Query('projectName') projectName: string | undefined,
     @Res() res: FastifyReply,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') paramPageId?: string,
-    @Param('docId') paramDocId?: string,
-    @Query('pageId') queryPageId?: string,
+    @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
-    @Req() req?: AuthenticatedRequest,
   ): Promise<void> {
-    const { spaceId, pageId } = this.resolveCoordinates(
-      routeSpaceId,
-      paramPageId,
-      paramDocId,
-      queryPageId,
-      resolvedSpace,
-      req,
-    );
     const result = await this.historyService.exportVersionZipStream(
-      spaceId,
+      this.resolveSpaceId(routeSpaceId, resolvedSpace),
       version,
       projectName,
       pageId,

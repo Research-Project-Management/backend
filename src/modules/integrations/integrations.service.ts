@@ -215,7 +215,10 @@ export class IntegrationsService {
   ): Promise<OAuthInitiationResult> {
     this.validateRedirectUri(redirectUri);
     this.pruneExpiredOAuthStates();
-    const result = await this.getProvider(provider).initiateOAuth(userId, redirectUri);
+    const result = await this.getProvider(provider).initiateOAuth(
+      userId,
+      redirectUri,
+    );
     if (result.state) {
       if (this.redis) {
         await this.redis.set(
@@ -246,14 +249,19 @@ export class IntegrationsService {
 
     if (params.state) {
       if (this.redis) {
-        const storedJson = await this.redis.get<string | { userId: string; provider: string }>(
-          INTEGRATIONS_CACHE_KEYS.oauthState(params.state),
-        );
+        const storedJson = await this.redis.get<
+          string | { userId: string; provider: string }
+        >(INTEGRATIONS_CACHE_KEYS.oauthState(params.state));
         if (storedJson) {
-          const stored = typeof storedJson === 'string' ? JSON.parse(storedJson) : storedJson;
+          const stored =
+            typeof storedJson === 'string'
+              ? JSON.parse(storedJson)
+              : storedJson;
           if (stored.provider === params.provider) {
             stateUserId = stored.userId;
-            await this.redis.del(INTEGRATIONS_CACHE_KEYS.oauthState(params.state));
+            await this.redis.del(
+              INTEGRATIONS_CACHE_KEYS.oauthState(params.state),
+            );
           } else {
             throw new BadRequestException('OAuth state provider mismatch');
           }
@@ -382,7 +390,7 @@ export class IntegrationsService {
     userId: string,
     conn: UserIntegration,
   ): Promise<string> {
-    const provider = conn.provider as IntegrationProviderType;
+    const provider = conn.provider;
     const providerInstance = this.getProvider(provider);
 
     const isExpired =
@@ -392,7 +400,8 @@ export class IntegrationsService {
     if (isExpired && conn.refreshToken && providerInstance.refreshAccessToken) {
       try {
         const decryptedRefresh = decryptToken(conn.refreshToken);
-        const exchange = await providerInstance.refreshAccessToken(decryptedRefresh);
+        const exchange =
+          await providerInstance.refreshAccessToken(decryptedRefresh);
         const newEncryptedAccess = encryptToken(exchange.accessToken);
         const newEncryptedRefresh = exchange.refreshToken
           ? encryptToken(exchange.refreshToken)
@@ -429,7 +438,7 @@ export class IntegrationsService {
     conn: UserIntegration,
     operation: (decryptedToken: string) => Promise<T>,
   ): Promise<T> {
-    const provider = conn.provider as IntegrationProviderType;
+    const provider = conn.provider;
     const providerInstance = this.getProvider(provider);
     const token = await this.getValidAccessToken(userId, conn);
 
@@ -438,14 +447,19 @@ export class IntegrationsService {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (
-        (errMsg.includes('401') || errMsg.includes('unauthorized') || errMsg.includes('Unauthorized')) &&
+        (errMsg.includes('401') ||
+          errMsg.includes('unauthorized') ||
+          errMsg.includes('Unauthorized')) &&
         conn.refreshToken &&
         providerInstance.refreshAccessToken
       ) {
         try {
-          this.logger.log(`Received 401 for ${provider}; attempting token refresh retry...`);
+          this.logger.log(
+            `Received 401 for ${provider}; attempting token refresh retry...`,
+          );
           const decryptedRefresh = decryptToken(conn.refreshToken);
-          const exchange = await providerInstance.refreshAccessToken(decryptedRefresh);
+          const exchange =
+            await providerInstance.refreshAccessToken(decryptedRefresh);
           const newEncryptedAccess = encryptToken(exchange.accessToken);
           const newEncryptedRefresh = exchange.refreshToken
             ? encryptToken(exchange.refreshToken)
