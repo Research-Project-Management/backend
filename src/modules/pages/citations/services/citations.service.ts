@@ -9,17 +9,18 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
-import { CitationsRepository } from './citations.repository';
+import { CitationsRepository } from '../repositories/citations.repository';
+import { CitationIndexService } from './index.service';
 import { DoiContentNegotiationService } from '@/modules/library/citation/services/doi-negotiation.service';
+import { IdentifierVo } from '../domain/value-objects.domain';
+import { BibEntry, buildBibEntryFromInput } from '../domain/bib-entry.domain';
 import {
-  IdentifierVo,
-  BibEntry,
   IdentifierResolver,
-  IIdentifierResolverPort,
-  IdentifierNotFoundException,
-  BibtexParser,
-  buildBibEntryFromInput,
-} from './domain';
+  ResilientIdentifierResolver,
+} from './resolver.service';
+import { IIdentifierResolverPort } from '../domain/citations.ports';
+import { IdentifierNotFoundException } from '../domain/citations.errors';
+import { BibtexParser } from '../domain/bibtex.domain';
 import {
   CitationQueryDto,
   ResolveIdentifierDto,
@@ -28,7 +29,7 @@ import {
   ListCitationsResponseDto,
   BibMutationResponseDto,
   UpsertCitationEntriesDto,
-} from './dto/citations.dto';
+} from '../dto/citations.dto';
 
 @Injectable()
 export class CitationsService {
@@ -39,28 +40,43 @@ export class CitationsService {
   constructor(
     private readonly repository: CitationsRepository,
     @Optional() bibParser?: BibtexParser,
-    @Optional() identifierResolver?: IdentifierResolver,
+    @Optional() identifierResolver?: ResilientIdentifierResolver,
     @Optional()
     private readonly doiNegotiation?: DoiContentNegotiationService,
+    @Optional()
+    private readonly citationIndex?: CitationIndexService,
   ) {
     this.bibParser = bibParser ?? new BibtexParser();
-    this.identifierResolver = identifierResolver ?? new IdentifierResolver();
+    this.identifierResolver =
+      identifierResolver ?? new ResilientIdentifierResolver(new IdentifierResolver());
   }
 
   /**
    * List or search citation entries across all .bib files in the project.
+   * Uses CQRS L1/L2 cached CitationIndexService when available.
    */
   public async listCitations(
-    projectId: string,
+    spaceId: string,
     queryDto: CitationQueryDto,
     pageId?: string,
   ): Promise<ListCitationsResponseDto> {
+    const resolvedPageId = pageId ?? queryDto.pageId;
+    const limit = queryDto.limit ?? 500;
+
+    if (this.citationIndex) {
+      return this.citationIndex.queryCitations(
+        spaceId,
+        queryDto.query,
+        limit,
+        resolvedPageId,
+      );
+    }
+
     const bibFiles = await this.repository.collectBibFiles(
-      projectId,
-      pageId ?? queryDto.pageId,
+      spaceId,
+      resolvedPageId,
     );
     const term = (queryDto.query || '').trim().toLowerCase();
-    const limit = queryDto.limit ?? 500;
 
     const allMatches: CitationEntryDto[] = [];
     for (const file of bibFiles) {
@@ -91,7 +107,7 @@ export class CitationsService {
    * Resolve DOI (via library/citation) or arXiv/ISBN identifier and append to project .bib file.
    */
   public async resolveIdentifier(
-    projectId: string,
+    spaceId: string,
     dto: ResolveIdentifierDto,
     pageId?: string,
   ): Promise<BibMutationResponseDto> {
@@ -129,11 +145,12 @@ export class CitationsService {
 
     const targetFile = dto.targetBibFile || 'references.bib';
     const result = await this.repository.appendEntriesToBib(
-      projectId,
+      spaceId,
       [resolvedEntry],
       targetFile,
       pageId ?? dto.pageId,
     );
+    await this.citationIndex?.invalidateSpace(spaceId, pageId ?? dto.pageId);
 
     return {
       filePath: result.filePath,
@@ -147,7 +164,7 @@ export class CitationsService {
    * Sync reference collection from library / external provider into project .bib file.
    */
   public async syncLibraryCollection(
-    projectId: string,
+    spaceId: string,
     userId: string,
     dto: SyncLibraryDto,
     pageId?: string,
@@ -155,18 +172,20 @@ export class CitationsService {
     const rawBibtex = await this.repository.fetchCollectionBibtex(
       userId,
       dto.collectionId,
-      projectId,
+      spaceId,
     );
 
     const entries = this.bibParser.parse(rawBibtex);
     const targetFile = dto.targetBibFile || 'references.bib';
 
     const result = await this.repository.appendEntriesToBib(
-      projectId,
+      spaceId,
       entries,
       targetFile,
       pageId ?? dto.pageId,
+      dto.conflictPolicy ?? 'overwrite',
     );
+    await this.citationIndex?.invalidateSpace(spaceId, pageId ?? dto.pageId);
 
     if (result.conflicts.length > 0) {
       this.logger.warn(
@@ -186,7 +205,7 @@ export class CitationsService {
    * Format and upsert structured citation entries or raw BibTeX into the project's .bib file.
    */
   public async upsertEntries(
-    projectId: string,
+    spaceId: string,
     dto: UpsertCitationEntriesDto,
     pageId?: string,
   ): Promise<BibMutationResponseDto> {
@@ -210,11 +229,13 @@ export class CitationsService {
     }
 
     const result = await this.repository.appendEntriesToBib(
-      projectId,
+      spaceId,
       domainEntries,
       targetFile,
       pageId ?? dto.pageId,
+      dto.conflictPolicy ?? 'overwrite',
     );
+    await this.citationIndex?.invalidateSpace(spaceId, pageId ?? dto.pageId);
 
     return {
       filePath: result.filePath,

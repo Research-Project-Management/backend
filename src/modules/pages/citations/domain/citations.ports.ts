@@ -3,9 +3,8 @@
  * Domain port interfaces for Citations & Bibliography.
  */
 
-import { BibEntry } from './bib-entry.entity';
-import { BibliographyFile } from './bibliography-file.entity';
-import { IdentifierVo } from './identifier';
+import { BibEntry, BibliographyFile } from './bib-entry.domain';
+import { IdentifierVo } from './value-objects.domain';
 
 export interface IBibtexParserPort {
   /**
@@ -24,10 +23,10 @@ export interface ICitationsAggregatorPort {
    * Scans the project virtual tree for all *.bib files, loads their lines from Docstore,
    * and returns an array of parsed BibliographyFile entities.
    */
-  collectBibFiles(projectId: string): Promise<BibliographyFile[]>;
+  collectBibFiles(spaceId: string): Promise<BibliographyFile[]>;
 
   appendEntriesToBib(
-    projectId: string,
+    spaceId: string,
     entries: BibEntry[],
     targetFilename?: string,
     pageId?: string,

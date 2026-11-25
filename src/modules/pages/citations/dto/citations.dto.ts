@@ -4,20 +4,30 @@
  */
 
 import {
+  ArrayMaxSize,
   IsArray,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
+  MaxLength,
+  Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { StructuredCitationEntryInput } from '../domain';
+import type { StructuredCitationEntryInput } from '../types/citations.types';
+import type { ConflictPolicy } from '../domain/bibtex.domain';
+
+const MAX_RAW_BIBTEX_LENGTH = 2 * 1024 * 1024; // 2MB guardrail
+const MAX_BATCH_ENTRIES = 500;
 
 export class CitationQueryDto {
   @ApiPropertyOptional({
     description: 'Search term (matching key, author, title, year)',
   })
   @IsString()
+  @MaxLength(200)
   @IsOptional()
   query?: string;
 
@@ -26,6 +36,8 @@ export class CitationQueryDto {
     default: 500,
   })
   @IsNumber()
+  @Min(1)
+  @Max(2000)
   @IsOptional()
   limit?: number;
 
@@ -41,6 +53,7 @@ export class ResolveIdentifierDto {
       'Academic identifier (DOI like 10.1145/... or arXiv like 1706.03762)',
   })
   @IsString()
+  @MaxLength(512)
   @IsNotEmpty({ message: 'identifier is required' })
   identifier!: string;
 
@@ -49,6 +62,7 @@ export class ResolveIdentifierDto {
     default: 'references.bib',
   })
   @IsString()
+  @MaxLength(255)
   @IsOptional()
   targetBibFile?: string;
 
@@ -61,6 +75,7 @@ export class ResolveIdentifierDto {
 export class SyncLibraryDto {
   @ApiProperty({ description: 'Collection ID to sync from library' })
   @IsString()
+  @MaxLength(255)
   @IsNotEmpty({ message: 'collectionId is required' })
   collectionId!: string;
 
@@ -69,6 +84,7 @@ export class SyncLibraryDto {
     default: 'references.bib',
   })
   @IsString()
+  @MaxLength(255)
   @IsOptional()
   targetBibFile?: string;
 
@@ -76,21 +92,32 @@ export class SyncLibraryDto {
   @IsString()
   @IsOptional()
   pageId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Policy when a citeKey already exists in target .bib',
+    enum: ['overwrite', 'skip', 'rename'],
+    default: 'overwrite',
+  })
+  @IsIn(['overwrite', 'skip', 'rename'])
+  @IsOptional()
+  conflictPolicy?: ConflictPolicy;
 }
 
 export class UpsertCitationEntriesDto {
   @ApiPropertyOptional({
-    description: 'Structured citation entries to upsert',
+    description: 'Structured citation entries to upsert (max 500 per request)',
   })
   @IsArray()
+  @ArrayMaxSize(MAX_BATCH_ENTRIES)
   @IsOptional()
   entries?: StructuredCitationEntryInput[];
 
   @ApiPropertyOptional({
     description:
-      'Raw BibTeX string to parse and upsert into the target .bib file',
+      'Raw BibTeX string to parse and upsert into the target .bib file (max 2MB)',
   })
   @IsString()
+  @MaxLength(MAX_RAW_BIBTEX_LENGTH)
   @IsOptional()
   rawBibtex?: string;
 
@@ -99,6 +126,7 @@ export class UpsertCitationEntriesDto {
     default: 'references.bib',
   })
   @IsString()
+  @MaxLength(255)
   @IsOptional()
   targetBibFile?: string;
 
@@ -106,6 +134,15 @@ export class UpsertCitationEntriesDto {
   @IsString()
   @IsOptional()
   pageId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Policy when a citeKey already exists in target .bib',
+    enum: ['overwrite', 'skip', 'rename'],
+    default: 'overwrite',
+  })
+  @IsIn(['overwrite', 'skip', 'rename'])
+  @IsOptional()
+  conflictPolicy?: ConflictPolicy;
 }
 
 export class CitationEntryDto {

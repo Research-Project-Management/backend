@@ -4,11 +4,12 @@
  * (CrossRef Content Negotiation, arXiv Atom Export API, and OpenLibrary Books API).
  */
 
-import { IIdentifierResolverPort } from './citations.ports';
-import { IdentifierVo } from './identifier';
-import { BibEntry } from './bib-entry.entity';
-import { BibtexParser } from './bibtex.parser';
-import { sanitizeCitationKey } from './bibtex.formatter';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { CircuitBreaker, RedisCacheService } from '@/core';
+import { IIdentifierResolverPort } from '../domain/citations.ports';
+import { IdentifierVo, IdentifierType } from '../domain/value-objects.domain';
+import { BibEntry, BibValueFormat } from '../domain/bib-entry.domain';
+import { BibtexParser, sanitizeCitationKey } from '../domain/bibtex.domain';
 
 interface CrossrefDateParts {
   'date-parts'?: number[][];
@@ -81,14 +82,19 @@ function formatCrossrefPersonList(
 }
 
 /**
- * Decorator Pattern: Wraps a fetch implementation with timeout and transient 5xx retry.
+ * Decorator Pattern: Wraps a fetch implementation with timeout, 429 Retry-After,
+ * and transient 5xx exponential backoff with jitter.
  */
 function createResilientFetch(
   baseFetch: FetchLikeFn = (url, init) => fetch(url, init),
-  options: { timeoutMs?: number; maxRetries?: number } = {},
+  options: { timeoutMs?: number; maxRetries?: number; baseDelayMs?: number } = {},
 ): FetchLikeFn {
   const timeoutMs = options.timeoutMs ?? 8000;
-  const maxRetries = options.maxRetries ?? 1;
+  const maxRetries = options.maxRetries ?? 2;
+  const baseDelayMs = options.baseDelayMs ?? 200;
+
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
 
   return async (url: string, init?: RequestInit): Promise<Response> => {
     let lastError: unknown;
@@ -105,10 +111,20 @@ function createResilientFetch(
         };
         const response = await baseFetch(url, mergedInit);
         if (
-          response.status >= 500 &&
-          response.status < 600 &&
+          (response.status === 429 ||
+            (response.status >= 500 && response.status < 600)) &&
           attempt < maxRetries
         ) {
+          let delayMs =
+            baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 100);
+          if (response.status === 429) {
+            const retryAfter = response.headers?.get?.('retry-after');
+            const parsedSec = retryAfter ? Number.parseInt(retryAfter, 10) : NaN;
+            if (Number.isFinite(parsedSec) && parsedSec > 0) {
+              delayMs = Math.min(parsedSec * 1000, 3000);
+            }
+          }
+          await sleep(delayMs);
           continue;
         }
         return response;
@@ -117,6 +133,9 @@ function createResilientFetch(
         if (attempt >= maxRetries) {
           throw err;
         }
+        const delayMs =
+          baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 100);
+        await sleep(delayMs);
       }
     }
     throw lastError;
@@ -550,3 +569,160 @@ function decodeXmlEntities(s: string): string {
     )
     .replace(/&amp;/g, '&');
 }
+
+
+/**
+ * citations/domain/resilient-identifier-resolver.decorator.ts
+ * Decorator wrapping IIdentifierResolverPort with:
+ * 1. Singleflight request coalescing (prevents thundering herd on same DOI/arXiv/ISBN)
+ * 2. Redis positive + negative caching (7d hit TTL, 10m miss TTL)
+ * 3. Per-provider Circuit Breaker (isolates CrossRef / arXiv / OpenLibrary failures)
+ */
+
+// ─── Resilient Decorator (Singleflight + Redis Cache + CircuitBreaker) ────────
+
+interface CachedIdentifierPayload {
+  hit: boolean;
+  key?: string;
+  entryType?: string;
+  fields?: Record<string, string>;
+  valueFormat?: BibValueFormat;
+}
+
+const POSITIVE_CACHE_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
+const NEGATIVE_CACHE_TTL_SEC = 10 * 60; // 10 minutes
+const CACHE_KEY_PREFIX = 'citation:meta:v1';
+
+@Injectable()
+export class ResilientIdentifierResolver implements IIdentifierResolverPort {
+  private readonly logger = new Logger(ResilientIdentifierResolver.name);
+  private readonly inFlight = new Map<string, Promise<BibEntry | null>>();
+  private readonly breakers: Record<Exclude<IdentifierType, 'unknown'>, CircuitBreaker>;
+
+  constructor(
+    @Optional() private readonly inner: IIdentifierResolverPort = new IdentifierResolver(),
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {
+    this.breakers = {
+      doi: new CircuitBreaker({
+        name: 'citation-resolver-doi',
+        failureThreshold: 5,
+        successThreshold: 2,
+        cooldownMs: 30_000,
+      }),
+      arxiv: new CircuitBreaker({
+        name: 'citation-resolver-arxiv',
+        failureThreshold: 5,
+        successThreshold: 2,
+        cooldownMs: 30_000,
+      }),
+      isbn: new CircuitBreaker({
+        name: 'citation-resolver-isbn',
+        failureThreshold: 5,
+        successThreshold: 2,
+        cooldownMs: 30_000,
+      }),
+    };
+  }
+
+  public async resolve(identifier: IdentifierVo): Promise<BibEntry | null> {
+    if (identifier.type === 'unknown') {
+      return null;
+    }
+
+    const cacheKey = `${CACHE_KEY_PREFIX}:${identifier.type}:${identifier.clean.toLowerCase()}`;
+
+    // 1. Check Redis cache first
+    const cached = await this.readCache(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    // 2. Singleflight coalescing for concurrent identical requests
+    const existing = this.inFlight.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = this.resolveWithCircuitBreaker(identifier, cacheKey).finally(
+      () => {
+        this.inFlight.delete(cacheKey);
+      },
+    );
+    this.inFlight.set(cacheKey, promise);
+    return promise;
+  }
+
+  private async resolveWithCircuitBreaker(
+    identifier: IdentifierVo,
+    cacheKey: string,
+  ): Promise<BibEntry | null> {
+    const breaker =
+      this.breakers[identifier.type as Exclude<IdentifierType, 'unknown'>];
+
+    try {
+      const entry = await breaker.execute(() => this.inner.resolve(identifier));
+      await this.writeCache(cacheKey, entry);
+      return entry;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Identifier resolution failed for ${identifier.type}:${identifier.clean}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  private async readCache(
+    cacheKey: string,
+  ): Promise<BibEntry | null | undefined> {
+    if (!this.cache) return undefined;
+    try {
+      const payload = await this.cache.get<CachedIdentifierPayload>(cacheKey);
+      if (!payload) return undefined;
+      if (!payload.hit) return null;
+      if (payload.key && payload.entryType && payload.fields) {
+        return new BibEntry({
+          key: payload.key,
+          entryType: payload.entryType,
+          fields: payload.fields,
+          valueFormat: payload.valueFormat ?? 'plain',
+        });
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async writeCache(
+    cacheKey: string,
+    entry: BibEntry | null,
+  ): Promise<void> {
+    if (!this.cache) return;
+    try {
+      if (entry) {
+        const fieldsObj: Record<string, string> = {};
+        for (const [k, v] of entry.fields.entries()) {
+          fieldsObj[k] = v;
+        }
+        const payload: CachedIdentifierPayload = {
+          hit: true,
+          key: entry.key.value,
+          entryType: entry.entryType,
+          fields: fieldsObj,
+          valueFormat: entry.valueFormat,
+        };
+        await this.cache.set(cacheKey, payload, POSITIVE_CACHE_TTL_SEC);
+      } else {
+        await this.cache.set<CachedIdentifierPayload>(
+          cacheKey,
+          { hit: false },
+          NEGATIVE_CACHE_TTL_SEC,
+        );
+      }
+    } catch {
+      // Cache write failure should never fail resolution
+    }
+  }
+}
+

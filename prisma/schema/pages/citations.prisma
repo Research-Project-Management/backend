@@ -1,0 +1,32 @@
+// ============================================================================
+// Pages Subsystem: Citations & Bibliography Read Model (CQRS Projection)
+// Self-managed domain schema: PageCitationEntry
+// ============================================================================
+
+model PageCitationEntry {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  spaceId      String   @map("space_id") @db.Uuid
+  pageId       String?  @map("page_id") @db.Uuid
+  docId        String   @map("doc_id") @db.Uuid
+  filePath     String   @map("file_path") @db.VarChar(1000)
+  citeKey      String   @map("cite_key") @db.VarChar(255)
+  citeKeyLower String   @map("cite_key_lower") @db.VarChar(255)
+  entryType    String   @map("entry_type") @db.VarChar(64)
+  title        String   @default("") @db.Text
+  authorsText  String   @default("") @map("authors_text") @db.Text
+  authorsJson  Json     @default("[]") @map("authors_json") @db.JsonB
+  year         String?  @db.VarChar(32)
+  journal      String?  @db.Text
+  doi          String?  @db.VarChar(255)
+  url          String?  @db.Text
+  fieldsJson   Json     @default("{}") @map("fields_json") @db.JsonB
+  contentHash  String   @map("content_hash") @db.VarChar(64)
+  docVersion   Int      @default(0) @map("doc_version")
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([spaceId, docId, citeKeyLower], map: "uq_page_citation_entries_doc_key")
+  @@index([spaceId, pageId, citeKeyLower], map: "idx_page_citation_entries_space_page_key")
+  @@index([spaceId, docId], map: "idx_page_citation_entries_space_doc")
+  @@index([spaceId, doi], map: "idx_page_citation_entries_space_doi")
+  @@map("page_citation_entries")
+}

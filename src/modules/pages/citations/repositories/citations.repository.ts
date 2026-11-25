@@ -27,15 +27,17 @@ import {
   LiveCollaborationPort,
   PageDomainEventBus,
 } from '@/modules/pages/core';
+import { DistributedLockService } from '@/core';
 
 import {
   ICitationsAggregatorPort,
   ILibrarySyncPort,
   IBibtexParserPort,
-  BibliographyFile,
-  BibEntry,
-  BibtexParser,
-} from './domain';
+} from '../domain/citations.ports';
+import { BibEntry, BibliographyFile } from '../domain/bib-entry.domain';
+import { BibtexParser, ConflictPolicy } from '../domain/bibtex.domain';
+import { LibrarySyncAdapter } from '../services/sync.service';
+import { CitationMetricsService } from '../services/index.service';
 
 @Injectable()
 export class CitationsRepository
@@ -61,6 +63,12 @@ export class CitationsRepository
     private readonly liveCollab?: LiveCollaborationPort,
     @Optional()
     private readonly domainEventBus?: PageDomainEventBus,
+    @Optional()
+    private readonly lockService?: DistributedLockService,
+    @Optional()
+    private readonly librarySyncAdapter?: LibrarySyncAdapter,
+    @Optional()
+    private readonly metrics?: CitationMetricsService,
   ) {
     this.bibParser = bibParser ?? new BibtexParser();
   }
@@ -68,7 +76,7 @@ export class CitationsRepository
   // ─── Project .bib File Aggregation & Upsert ─────────────────────────────────
 
   private async notifyDocMutated(
-    projectId: string,
+    spaceId: string,
     docId: string,
     lines: string[],
     version: number,
@@ -76,7 +84,7 @@ export class CitationsRepository
     if (this.domainEventBus) {
       await this.domainEventBus.publish({
         type: 'manuscript.document.mutated',
-        projectId,
+        projectId: spaceId,
         docId,
         lines,
         version,
@@ -85,13 +93,13 @@ export class CitationsRepository
       });
     } else {
       await this.liveCollab
-        ?.applyExternalText(projectId, docId, lines.join('\n'))
+        ?.applyExternalText(spaceId, docId, lines.join('\n'))
         .catch(() => {});
     }
   }
 
   public async collectBibFiles(
-    projectId: string,
+    spaceId: string,
     pageId?: string,
   ): Promise<BibliographyFile[]> {
     const bibFiles: BibliographyFile[] = [];
@@ -101,7 +109,7 @@ export class CitationsRepository
 
     try {
       const nodes = await this.structureService.getAllNodes(
-        projectId,
+        spaceId,
         undefined,
         pageId,
       );
@@ -118,14 +126,14 @@ export class CitationsRepository
       // Read-your-writes consistency: flush active in-memory Yjs buffers for bib files before reading
       if (this.liveCollab && validBibNodes.length > 0) {
         const bibDocIds = validBibNodes.map((n) => n.docId);
-        await this.liveCollab.flushDocs(projectId, bibDocIds).catch(() => []);
+        await this.liveCollab.flushDocs(spaceId, bibDocIds).catch(() => []);
       }
 
       const results = await Promise.all(
         validBibNodes.map(async (node) => {
           try {
             const doc = await this.docstoreService!.getDoc(
-              projectId,
+              spaceId,
               node.docId,
             );
             const rawText = (doc.lines || []).join('\n');
@@ -148,7 +156,7 @@ export class CitationsRepository
       }
     } catch (err: unknown) {
       this.logger.error(
-        `Error scanning bib nodes for project ${projectId}: ${(err as Error)?.message}`,
+        `Error scanning bib nodes for project ${spaceId}: ${(err as Error)?.message}`,
       );
     }
 
@@ -156,27 +164,127 @@ export class CitationsRepository
   }
 
   public async appendEntriesToBib(
-    projectId: string,
+    spaceId: string,
     entries: BibEntry[],
     targetFilename = 'references.bib',
     pageId?: string,
+    conflictPolicy: ConflictPolicy = 'overwrite',
   ): Promise<{ filePath: string; docId?: string; conflicts: string[] }> {
     const cleanFilename = NodePathVo.toRelative(
       targetFilename.replace(/^(\.\/)+/, ''),
     );
     const cleanPath = `/${cleanFilename}`;
-    const conflicts: string[] = [];
 
     if (
       entries.length === 0 ||
       !this.structureService ||
       !this.docstoreService
     ) {
-      return { filePath: cleanPath, conflicts };
+      return { filePath: cleanPath, conflicts: [] };
     }
 
-    const nodes = await this.structureService.getAllNodes(
-      projectId,
+    const lockResource = `citation:bib:${spaceId}:${pageId ?? 'default'}:${cleanPath}`;
+    const executeWrite = () =>
+      this.appendEntriesWithOccRetry(
+        spaceId,
+        entries,
+        cleanFilename,
+        cleanPath,
+        pageId,
+        conflictPolicy,
+      );
+
+    if (!this.lockService) {
+      return executeWrite();
+    }
+
+    const maxLockAttempts = 4;
+    for (let attempt = 0; attempt < maxLockAttempts; attempt++) {
+      const lockedResult = await this.lockService.withLock(
+        lockResource,
+        10_000,
+        () => executeWrite(),
+      );
+      if (lockedResult !== null) {
+        return lockedResult;
+      }
+      if (attempt < maxLockAttempts - 1) {
+        const delayMs = 80 * (attempt + 1) + Math.floor(Math.random() * 60);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+
+    // Fallback to OCC retry if lock remained contested
+    return executeWrite();
+  }
+
+  private isConflictError(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const status = (err as { status?: number; statusCode?: number }).status ??
+      (err as { status?: number; statusCode?: number }).statusCode;
+    if (status === 409) return true;
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    return (
+      msg.includes('conflict') ||
+      msg.includes('revision') ||
+      msg.includes('expectedrev') ||
+      msg.includes('already exists') ||
+      msg.includes('unique constraint')
+    );
+  }
+
+  private async appendEntriesWithOccRetry(
+    spaceId: string,
+    entries: BibEntry[],
+    cleanFilename: string,
+    cleanPath: string,
+    pageId?: string,
+    conflictPolicy: ConflictPolicy = 'overwrite',
+  ): Promise<{ filePath: string; docId?: string; conflicts: string[] }> {
+    const maxAttempts = 3;
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await this.appendEntriesOnce(
+          spaceId,
+          entries,
+          cleanFilename,
+          cleanPath,
+          pageId,
+          conflictPolicy,
+        );
+      } catch (err: unknown) {
+        lastError = err;
+        if (this.isConflictError(err) && attempt < maxAttempts - 1) {
+          this.metrics?.recordOccRetry();
+          const backoffMs =
+            50 * Math.pow(2, attempt) + Math.floor(Math.random() * 50);
+          this.logger.warn(
+            `OCC/create conflict on ${cleanPath} (attempt ${attempt + 1}/${maxAttempts}), retrying in ${backoffMs}ms`,
+          );
+          await new Promise((r) => setTimeout(r, backoffMs));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw lastError;
+  }
+
+  private async appendEntriesOnce(
+    spaceId: string,
+    entries: BibEntry[],
+    cleanFilename: string,
+    cleanPath: string,
+    pageId?: string,
+    conflictPolicy: ConflictPolicy = 'overwrite',
+  ): Promise<{ filePath: string; docId?: string; conflicts: string[] }> {
+    const conflicts: string[] = [];
+
+    const nodes = await this.structureService!.getAllNodes(
+      spaceId,
       undefined,
       pageId,
     );
@@ -187,33 +295,26 @@ export class CitationsRepository
     if (targetNode && targetNode.docId) {
       const docId = targetNode.docId;
       await (
-        this.liveCollab?.flushDoc?.(projectId, docId) ??
-        this.liveCollab?.flushDocs?.(projectId, [docId])
+        this.liveCollab?.flushDoc?.(spaceId, docId) ??
+        this.liveCollab?.flushDocs?.(spaceId, [docId])
       )?.catch(() => {});
 
-      const doc = await this.docstoreService.getDoc(projectId, docId);
+      const doc = await this.docstoreService!.getDoc(spaceId, docId);
       const currentLines = doc.lines || [];
       const currentText = currentLines.join('\n');
 
-      const entryKeyRegex = /@([a-zA-Z]+)\s*\{\s*([^,\s]+)\s*,/g;
-      const existingKeys = new Set<string>();
-      const maskedText = BibtexParser.maskCommentsPreserveLength(currentText);
-      let m: RegExpExecArray | null;
-      while ((m = entryKeyRegex.exec(maskedText)) !== null) {
-        existingKeys.add(m[2].trim().toLowerCase());
-      }
-
-      let updatedText = currentText;
-      for (const entry of entries) {
-        const k = entry.key.value.trim().toLowerCase();
-        if (existingKeys.has(k)) {
-          conflicts.push(entry.key.value);
-        }
-        updatedText = this.upsertEntryText(
-          updatedText,
-          entry.key.value,
-          entry.toBibtexString(),
+      const { text: updatedText, conflicts: batchConflicts } =
+        BibtexParser.upsertEntriesBatch(
+          currentText,
+          entries.map((entry) => ({
+            key: entry.key.value,
+            bibString: entry.toBibtexString(),
+          })),
+          conflictPolicy,
         );
+      conflicts.push(...batchConflicts);
+      if (batchConflicts.length > 0) {
+        this.metrics?.recordConflicts(batchConflicts.length);
       }
 
       if (updatedText === currentText) {
@@ -222,28 +323,27 @@ export class CitationsRepository
 
       const nextLines = updatedText.split('\n');
       const nextVersion = (doc.version ?? 0) + 1;
-      await this.docstoreService.updateDoc(projectId, docId, {
+      await this.docstoreService!.updateDoc(spaceId, docId, {
         lines: nextLines,
         version: nextVersion,
         expectedRev: doc.rev,
       });
 
-      await this.notifyDocMutated(projectId, docId, nextLines, nextVersion);
+      await this.notifyDocMutated(spaceId, docId, nextLines, nextVersion);
 
       return { filePath: targetNode.path, docId, conflicts };
     }
 
-    let initialText = '';
-    for (const entry of entries) {
-      initialText = this.upsertEntryText(
-        initialText,
-        entry.key.value,
-        entry.toBibtexString(),
-      );
-    }
+    const { text: initialText } = BibtexParser.upsertEntriesBatch(
+      '',
+      entries.map((entry) => ({
+        key: entry.key.value,
+        bibString: entry.toBibtexString(),
+      })),
+    );
     const entryLines = initialText.replace(/\n$/, '').split('\n');
 
-    const createdDoc = await this.docstoreService.createDoc(projectId, {
+    const createdDoc = await this.docstoreService!.createDoc(spaceId, {
       path: cleanPath,
       lines: entryLines,
       ...(pageId ? { pageId } : {}),
@@ -254,8 +354,8 @@ export class CitationsRepository
 
     let newNode: PageNodeEntity;
     try {
-      newNode = await this.structureService.createNode(
-        projectId,
+      newNode = await this.structureService!.createNode(
+        spaceId,
         {
           path: cleanPath,
           name: NodePathVo.basename(cleanPath) || cleanFilename,
@@ -268,13 +368,13 @@ export class CitationsRepository
       );
     } catch (err) {
       if (createdDocId) {
-        if (typeof this.docstoreService.deleteDoc === 'function') {
-          await this.docstoreService
-            .deleteDoc(projectId, createdDocId)
+        if (typeof this.docstoreService!.deleteDoc === 'function') {
+          await this.docstoreService!
+            .deleteDoc(spaceId, createdDocId)
             .catch(() => undefined);
-        } else if (typeof this.docstoreService.patchDoc === 'function') {
-          await this.docstoreService
-            .patchDoc(projectId, createdDocId, { deleted: true })
+        } else if (typeof this.docstoreService!.patchDoc === 'function') {
+          await this.docstoreService!
+            .patchDoc(spaceId, createdDocId, { deleted: true })
             .catch(() => undefined);
         }
       }
@@ -283,7 +383,7 @@ export class CitationsRepository
 
     if (createdDocId) {
       await this.notifyDocMutated(
-        projectId,
+        spaceId,
         createdDocId,
         entryLines,
         (createdDoc as { version?: number }).version ?? 1,
@@ -298,65 +398,21 @@ export class CitationsRepository
   public async fetchCollectionBibtex(
     userId: string,
     collectionId: string,
-    projectId?: string,
+    spaceId?: string,
   ): Promise<string> {
-    if (
-      collectionId.startsWith('zotero:') ||
-      collectionId.startsWith('group:')
-    ) {
-      const rawCollId = collectionId.startsWith('zotero:')
-        ? collectionId.replace('zotero:', '')
-        : collectionId;
-
-      if (!this.integrationsService) {
-        throw new ServiceUnavailableException(
-          'Zotero integration services are not configured',
-        );
-      }
-
-      const res = await this.integrationsService.fetchRemoteCollectionBibtex(
+    if (this.librarySyncAdapter) {
+      return this.librarySyncAdapter.fetchCollectionBibtex(
         userId,
-        'zotero',
-        rawCollId,
+        collectionId,
+        spaceId,
       );
-      return res.bibtex;
     }
 
-    if (collectionId.startsWith('mendeley:')) {
-      const rawCollId = collectionId.replace('mendeley:', '');
-
-      if (!this.integrationsService) {
-        throw new ServiceUnavailableException(
-          'Mendeley integration services are not configured',
-        );
-      }
-
-      const res = await this.integrationsService.fetchRemoteCollectionBibtex(
-        userId,
-        'mendeley',
-        rawCollId,
-      );
-      return res.bibtex;
-    }
-
-    if (this.libraryFacade) {
-      try {
-        const exportRes = await this.libraryFacade.exportLibrary(userId, {
-          format: 'bibtex',
-          collectionId,
-          spaceId: projectId,
-        });
-        if (exportRes?.content !== undefined) {
-          return exportRes.content;
-        }
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Failed to export collection BibTeX via LibraryFacade: ${(err as Error)?.message}`,
-        );
-      }
-    }
-
-    throw new NotFoundException(`Collection ${collectionId} not found`);
+    const fallbackAdapter = new LibrarySyncAdapter(
+      this.integrationsService,
+      this.libraryFacade,
+    );
+    return fallbackAdapter.fetchCollectionBibtex(userId, collectionId, spaceId);
   }
 
   private upsertEntryText(
