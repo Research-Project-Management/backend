@@ -12,13 +12,9 @@ import {
 import { CitationsRepository } from '../repositories/citations.repository';
 import { CitationIndexService } from './index.service';
 import { DoiContentNegotiationService } from '@/modules/library/citation/services/doi-negotiation.service';
+import { QueryResolverService } from '@/modules/library/citation/services/query-resolver.service';
 import { IdentifierVo } from '../domain/value-objects.domain';
 import { BibEntry, buildBibEntryFromInput } from '../domain/bib-entry.domain';
-import {
-  IdentifierResolver,
-  ResilientIdentifierResolver,
-} from './resolver.service';
-import { IIdentifierResolverPort } from '../domain/citations.ports';
 import { IdentifierNotFoundException } from '../domain/citations.errors';
 import { BibtexParser } from '../domain/bibtex.domain';
 import {
@@ -35,20 +31,18 @@ import {
 export class CitationsService {
   private readonly logger = new Logger(CitationsService.name);
   private readonly bibParser: BibtexParser;
-  private readonly identifierResolver: IIdentifierResolverPort;
 
   constructor(
     private readonly repository: CitationsRepository,
     @Optional() bibParser?: BibtexParser,
-    @Optional() identifierResolver?: ResilientIdentifierResolver,
     @Optional()
     private readonly doiNegotiation?: DoiContentNegotiationService,
+    @Optional()
+    private readonly queryResolver?: QueryResolverService,
     @Optional()
     private readonly citationIndex?: CitationIndexService,
   ) {
     this.bibParser = bibParser ?? new BibtexParser();
-    this.identifierResolver =
-      identifierResolver ?? new ResilientIdentifierResolver(new IdentifierResolver());
   }
 
   /**
@@ -136,8 +130,32 @@ export class CitationsService {
       }
     }
 
-    if (!resolvedEntry) {
-      resolvedEntry = await this.identifierResolver.resolve(idVo);
+    if (!resolvedEntry && this.queryResolver) {
+      try {
+        const refData = await this.queryResolver.resolveAcademicQuery(
+          idVo.clean,
+        );
+        if (refData?.found && refData.work) {
+          const work = refData.work;
+          resolvedEntry = buildBibEntryFromInput({
+            title: work.title,
+            authors: work.authors,
+            year: work.year,
+            journal: work.journal,
+            publisher: work.publisher,
+            volume: work.volume,
+            issue: work.issue,
+            pages: work.pages,
+            doi: work.doi,
+            url: work.url,
+            type: work.type,
+          });
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Library QueryResolverService failed for ${idVo.clean}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     if (!resolvedEntry) {
       throw new IdentifierNotFoundException(dto.identifier);

@@ -37,7 +37,6 @@ import {
 import { BibEntry, BibliographyFile } from '../domain/bib-entry.domain';
 import { BibtexParser, ConflictPolicy } from '../domain/bibtex.domain';
 import { LibrarySyncAdapter } from '../services/sync.service';
-import { CitationMetricsService } from '../services/index.service';
 
 @Injectable()
 export class CitationsRepository
@@ -67,8 +66,6 @@ export class CitationsRepository
     private readonly lockService?: DistributedLockService,
     @Optional()
     private readonly librarySyncAdapter?: LibrarySyncAdapter,
-    @Optional()
-    private readonly metrics?: CitationMetricsService,
   ) {
     this.bibParser = bibParser ?? new BibtexParser();
   }
@@ -257,7 +254,6 @@ export class CitationsRepository
       } catch (err: unknown) {
         lastError = err;
         if (this.isConflictError(err) && attempt < maxAttempts - 1) {
-          this.metrics?.recordOccRetry();
           const backoffMs =
             50 * Math.pow(2, attempt) + Math.floor(Math.random() * 50);
           this.logger.warn(
@@ -313,9 +309,6 @@ export class CitationsRepository
           conflictPolicy,
         );
       conflicts.push(...batchConflicts);
-      if (batchConflicts.length > 0) {
-        this.metrics?.recordConflicts(batchConflicts.length);
-      }
 
       if (updatedText === currentText) {
         return { filePath: targetNode.path, docId, conflicts };

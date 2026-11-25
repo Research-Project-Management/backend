@@ -35,10 +35,6 @@ import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { CitationsService } from './services/citations.service';
 import {
-  CitationSyncQueueService,
-  CitationSyncJobStatusDto,
-} from './services/sync.service';
-import {
   CitationQueryDto,
   ResolveIdentifierDto,
   SyncLibraryDto,
@@ -62,10 +58,7 @@ interface RequestWithUser {
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class CitationsController {
-  constructor(
-    private readonly citationsService: CitationsService,
-    private readonly syncQueueService?: CitationSyncQueueService,
-  ) {}
+  constructor(private readonly citationsService: CitationsService) {}
 
   private resolveUserId(req?: RequestWithUser): string {
     const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
@@ -214,62 +207,6 @@ export class CitationsController {
         dto,
         pageId,
       );
-    } catch (err) {
-      this.handleError(err);
-    }
-  }
-
-  @Post('sync-library/async')
-  @UseGuards(UserRateLimitGuard)
-  @RequireRole(Role.CONTRIBUTOR)
-  @UserRateLimit('import')
-  @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({
-    summary:
-      'Enqueue async reference collection sync job via BullMQ (202 Accepted)',
-  })
-  async syncLibraryAsync(
-    @Param('spaceId') routeSpaceId: string,
-    @Body() dto: SyncLibraryDto,
-    @Req() req: RequestWithUser,
-    @ResolvedSpace() resolvedSpace?: string | { id?: string },
-    @Query('pageId') queryPageId?: string,
-  ): Promise<{ jobId: string; status: 'queued' }> {
-    const userId = this.resolveUserId(req);
-    try {
-      const { spaceId, pageId } = resolvePageControllerCoordinates(
-        { spaceId: routeSpaceId },
-        resolvedSpace,
-        queryPageId ?? dto?.pageId,
-        req,
-      );
-      if (!this.syncQueueService?.isAvailable()) {
-        throw new BadRequestException('Async sync queue is not enabled');
-      }
-      return await this.syncQueueService.enqueueSync({
-        spaceId,
-        userId,
-        dto,
-        pageId,
-      });
-    } catch (err) {
-      this.handleError(err);
-    }
-  }
-
-  @Get('sync-library/:jobId')
-  @RequireRole(Role.REVIEWER)
-  @ApiOperation({
-    summary: 'Check status and result of an async library sync job',
-  })
-  async getSyncJobStatus(
-    @Param('jobId') jobId: string,
-  ): Promise<CitationSyncJobStatusDto> {
-    try {
-      if (!this.syncQueueService) {
-        throw new NotFoundException(`Sync job ${jobId} not found`);
-      }
-      return await this.syncQueueService.getJobStatus(jobId);
     } catch (err) {
       this.handleError(err);
     }
