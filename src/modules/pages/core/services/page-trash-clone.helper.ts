@@ -166,6 +166,15 @@ export async function restoreDeletedDocOrFile(
       },
     );
 
+    if (docPageId && prisma.page?.updateMany) {
+      await Promise.resolve(
+        prisma.page.updateMany({
+          where: { id: docPageId, spaceId: docProjectId, deletedAt: { not: null } },
+          data: { deletedAt: null },
+        }),
+      ).catch(() => undefined);
+    }
+
     if (
       docPageId &&
       /\.(tex|rtex|rnw)$/i.test(parsed.leafName) &&

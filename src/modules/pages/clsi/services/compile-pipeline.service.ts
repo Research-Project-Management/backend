@@ -242,10 +242,15 @@ export class CompilePipeline {
       });
     }
 
+    const isForbiddenConfigFile = (relPath: string): boolean => {
+      const base = path.posix.basename(relPath.replace(/\\/g, '/')).toLowerCase();
+      return base === 'latexmkrc' || base === '.latexmkrc';
+    };
+
     if (dto.files) {
       for (const [filePath, content] of Object.entries(dto.files)) {
         const cleanPath = cleanRelPath(filePath);
-        if (cleanPath === mainFile) continue;
+        if (cleanPath === mainFile || isForbiddenConfigFile(cleanPath)) continue;
         workspaceFiles.push({
           path: cleanPath,
           content,
@@ -257,7 +262,7 @@ export class CompilePipeline {
       for (const res of dto.resources) {
         if (res.content !== undefined) {
           const cleanPath = cleanRelPath(res.path);
-          if (cleanPath === mainFile) continue;
+          if (cleanPath === mainFile || isForbiddenConfigFile(cleanPath)) continue;
           workspaceFiles.push({
             path: cleanPath,
             content: res.content,

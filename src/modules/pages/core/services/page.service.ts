@@ -481,7 +481,7 @@ export class PageService {
         (id: string) => id !== labelId,
       );
       await this.pageScopeRepo.updateDocInProject(projectId, pageId, {
-        ranges: { labelIds, labels },
+        ranges: { ...ranges, labelIds, labels },
       });
       return { labels };
     }

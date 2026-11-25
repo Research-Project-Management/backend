@@ -37,7 +37,7 @@ import { CitationsService } from './services/citations.service';
 import {
   CitationSyncQueueService,
   CitationSyncJobStatusDto,
-} from './services/citation-sync-queue.service';
+} from './services/sync.service';
 import {
   CitationQueryDto,
   ResolveIdentifierDto,

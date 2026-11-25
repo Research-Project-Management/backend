@@ -63,12 +63,29 @@ export class DistributedLockService {
     }
 
     const now = Date.now();
+    if (this.inMemoryLocks.size >= 1000) {
+      this.pruneExpiredInMemoryLocks(now);
+    }
     const current = this.inMemoryLocks.get(lockKey);
     if (!current || current.expiresAt <= now) {
       this.inMemoryLocks.set(lockKey, { token, expiresAt: now + ttlMs });
       return token;
     }
     return null;
+  }
+
+  private pruneExpiredInMemoryLocks(now: number): void {
+    for (const [k, entry] of this.inMemoryLocks.entries()) {
+      if (entry.expiresAt <= now) {
+        this.inMemoryLocks.delete(k);
+      }
+    }
+    // Hard cap safety net to prevent unbounded heap growth under fallback storms
+    while (this.inMemoryLocks.size >= 5000) {
+      const oldest = this.inMemoryLocks.keys().next().value;
+      if (oldest === undefined) break;
+      this.inMemoryLocks.delete(oldest);
+    }
   }
 
   /**

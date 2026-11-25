@@ -28,6 +28,7 @@ export class RedisPubSubService implements OnModuleInit, OnModuleDestroy {
   private subClient: Redis | null = null;
   private pubReady = false;
   private subReady = false;
+  private subConnectPromise: Promise<void> | null = null;
   private readonly listeners = new Map<string, Set<PubSubMessageHandler>>();
 
   constructor(private readonly configService: ConfigService) {}
@@ -138,48 +139,63 @@ export class RedisPubSubService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureSubscriberConnected(): Promise<void> {
     if (this.subClient || !this.pubClient) return;
+    if (this.subConnectPromise) {
+      return this.subConnectPromise;
+    }
 
-    const sub = this.pubClient.duplicate();
-    sub.on('ready', () => {
-      this.subReady = true;
-      for (const ch of this.listeners.keys()) {
-        void sub.subscribe(ch).catch((err: unknown) => {
-          this.logger.warn(
-            `Redis Pub/Sub re-subscribe failed on "${ch}": ${getErrorMessage(err)}`,
-          );
-        });
-      }
-    });
-    sub.on('close', () => {
-      this.subReady = false;
-    });
-    sub.on('error', (err: Error) => {
-      this.subReady = false;
-      this.logger.warn(`Redis Pub/Sub subscriber error: ${err.message}`);
-    });
-    sub.on('message', (channel: string, message: string) => {
-      const handlers = this.listeners.get(channel);
-      if (!handlers) return;
-      for (const fn of Array.from(handlers)) {
-        try {
-          fn(channel, message);
-        } catch (err: unknown) {
-          this.logger.warn(
-            `Pub/Sub handler error on "${channel}": ${getErrorMessage(err)}`,
-          );
+    const connectTask = (async () => {
+      if (this.subClient || !this.pubClient) return;
+      const sub = this.pubClient.duplicate();
+      sub.on('ready', () => {
+        this.subReady = true;
+        for (const ch of this.listeners.keys()) {
+          void sub.subscribe(ch).catch((err: unknown) => {
+            this.logger.warn(
+              `Redis Pub/Sub re-subscribe failed on "${ch}": ${getErrorMessage(err)}`,
+            );
+          });
         }
-      }
-    });
+      });
+      sub.on('close', () => {
+        this.subReady = false;
+      });
+      sub.on('error', (err: Error) => {
+        this.subReady = false;
+        this.logger.warn(`Redis Pub/Sub subscriber error: ${err.message}`);
+      });
+      sub.on('message', (channel: string, message: string) => {
+        const handlers = this.listeners.get(channel);
+        if (!handlers) return;
+        for (const fn of Array.from(handlers)) {
+          try {
+            fn(channel, message);
+          } catch (err: unknown) {
+            this.logger.warn(
+              `Pub/Sub handler error on "${channel}": ${getErrorMessage(err)}`,
+            );
+          }
+        }
+      });
 
+      try {
+        await sub.connect();
+        this.subClient = sub;
+        this.subReady = true;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to connect Redis Pub/Sub subscriber: ${getErrorMessage(err)}`,
+        );
+        sub.disconnect();
+      }
+    })();
+
+    this.subConnectPromise = connectTask;
     try {
-      await sub.connect();
-      this.subClient = sub;
-      this.subReady = true;
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Failed to connect Redis Pub/Sub subscriber: ${getErrorMessage(err)}`,
-      );
-      sub.disconnect();
+      await connectTask;
+    } finally {
+      if (this.subConnectPromise === connectTask) {
+        this.subConnectPromise = null;
+      }
     }
   }
 }

@@ -222,7 +222,7 @@ export async function getWordCountHelper(
   // Multi-file project word count if files map is provided or projectId is provided without explicit single-file source
   if (
     (dto.files && Object.keys(dto.files).length > 0) ||
-    (projectId && projectId !== 'default' && dto.source === undefined)
+    (projectId && projectId !== 'default' && !dto.source)
   ) {
     let stringFiles: Record<string, string> = {};
     let rootFile = dto.filename || 'main.tex';

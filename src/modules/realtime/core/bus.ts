@@ -139,6 +139,18 @@ export class RealtimeEventBus implements OnModuleInit, OnModuleDestroy {
 
     try {
       const sub = baseClient.duplicate() as BusSubscriberClient;
+      sub.on?.('ready', () => {
+        this.subscriberReady = true;
+        if (typeof sub.subscribe === 'function') {
+          void sub.subscribe(REALTIME_BUS_CHANNEL).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`Realtime bus re-subscribe error: ${msg}`);
+          });
+        }
+      });
+      sub.on?.('close', () => {
+        this.subscriberReady = false;
+      });
       sub.on?.('error', (err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Realtime bus subscriber error: ${msg}`);
@@ -235,10 +247,15 @@ export class RealtimeEventBus implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatchLocal(envelope: RealtimeBusEnvelope): Promise<void> {
-    for (const handler of Array.from(this.handlers)) {
-      try {
-        await handler(envelope);
-      } catch (err: unknown) {
+    const handlers = Array.from(this.handlers);
+    if (handlers.length === 0) return;
+
+    const results = await Promise.allSettled(
+      handlers.map((handler) => Promise.resolve().then(() => handler(envelope))),
+    );
+    for (const res of results) {
+      if (res.status === 'rejected') {
+        const err = res.reason;
         this.logger.warn(
           `Realtime bus handler error for ${envelope.type}: ${
             err instanceof Error ? err.message : String(err)

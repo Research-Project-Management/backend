@@ -304,8 +304,6 @@ export class FilestoreService {
             );
           });
       }
-
-      return saved;
     } catch (err) {
       if (
         quotaDeltaApplied > 0n &&

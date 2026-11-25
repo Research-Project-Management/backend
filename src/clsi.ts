@@ -30,7 +30,12 @@ async function bootstrap() {
     }),
   );
 
-  app.enableCors({ origin: true, credentials: true });
+  const corsOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : process.env.NODE_ENV === 'production'
+      ? false
+      : true;
+  app.enableCors({ origin: corsOrigins, credentials: true });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

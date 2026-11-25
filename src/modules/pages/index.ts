@@ -51,7 +51,9 @@ export * from './history/domain/ports';
 
 // Subsystem 5: Academic Authoring & Packaging
 export * from './spelling';
-export * from './citations';
+export { CitationsModule } from './citations/citations.module';
+export { CitationsService } from './citations/services/citations.service';
+export * from './citations/dto/citations.dto';
 export * from './templates';
 export * from './export-import';
 export * from './git-bridge';

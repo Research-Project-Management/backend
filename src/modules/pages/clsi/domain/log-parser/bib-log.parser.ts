@@ -1,5 +1,5 @@
 /**
- * modules/pages/diagnostics/domain/bib-log.parser.ts
+ * modules/pages/clsi/domain/log-parser/bib-log.parser.ts
  * Pure domain parser for BibTeX and Biber `.blg` compilation logs.
  * Zero I/O, zero NestJS imports.
  */

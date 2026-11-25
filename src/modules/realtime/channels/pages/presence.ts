@@ -144,6 +144,7 @@ export class RoomPresenceStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
+        const roomKey = PAGES_REDIS_KEYS.projectRoom(session.spaceId);
         await Promise.all([
           client.set(
             PAGES_REDIS_KEYS.presence(session.socketId),
@@ -151,10 +152,8 @@ export class RoomPresenceStore {
             'EX',
             this.sessionTtlSeconds,
           ),
-          client.sadd(
-            PAGES_REDIS_KEYS.projectRoom(session.spaceId),
-            session.socketId,
-          ),
+          client.sadd(roomKey, session.socketId),
+          client.expire(roomKey, this.sessionTtlSeconds * 2),
         ]);
       } catch (err) {
         this.logger.warn(`Redis addProjectSession error: ${String(err)}`);

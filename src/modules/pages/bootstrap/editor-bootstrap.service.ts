@@ -499,9 +499,9 @@ export class EditorBootstrapService {
             },
           ];
 
-    const normalizedRole = (params.role || Role.CONTRIBUTOR).toLowerCase();
+    const normalizedRole = (params.role || Role.REVIEWER).toLowerCase();
     const roleRank =
-      RoleHierarchy[normalizedRole as Role] ?? RoleHierarchy[Role.CONTRIBUTOR];
+      RoleHierarchy[normalizedRole as Role] ?? RoleHierarchy[Role.REVIEWER];
     const canEdit = roleRank >= RoleHierarchy[Role.CONTRIBUTOR];
 
     // Phase 2: Hydrate activeDoc alongside Soft Branches bounded by per-branch deadline (reusing validNodes)

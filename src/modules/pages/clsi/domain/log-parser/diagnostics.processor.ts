@@ -1,5 +1,5 @@
 /**
- * modules/pages/diagnostics/domain/diagnostics.processor.ts
+ * modules/pages/clsi/domain/log-parser/diagnostics.processor.ts
  * Pure domain post-processing pipeline for parsed compiler diagnostics:
  * 1) Deduplication
  * 2) Cascade Error Suppression (Emergency stop / Fatal error after root cause)
@@ -10,7 +10,7 @@
 import type {
   CompilerDiagnostic,
   DiagnosticsSummary,
-} from '@/modules/pages/clsi/domain/clsi.ports';
+} from '../clsi.ports';
 import {
   CASCADE_SUPPRESSION_MAP,
   FATAL_CASCADE_PATTERNS,

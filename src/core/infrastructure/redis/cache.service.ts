@@ -1,9 +1,11 @@
 import {
   Injectable,
   Logger,
+  Optional,
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import * as crypto from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 
@@ -16,11 +18,16 @@ import {
   resolveLaneRedisUrl,
 } from './client.factory';
 import { BoundedMemoryStore } from './memory.store';
+import { RedisPubSubService } from './pubsub.service';
+
+const L1_INVALIDATION_CHANNEL = 'flux:cache:l1-inv';
 
 @Injectable()
 export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   private redisClient: Redis | null = null;
   private isConnected = false;
+  private readonly instanceId = crypto.randomUUID();
+  private unsubscribeL1Inv: (() => Promise<void>) | null = null;
   private readonly memoryStore = new BoundedMemoryStore(5000);
   /**
    * Single-flight request coalescing map.
@@ -32,7 +39,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   private singleflightCoalesced = 0;
   private readonly logger = new Logger(RedisCacheService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly pubSub?: RedisPubSubService,
+  ) {}
 
   onModuleInit() {
     if (isRedisDisabled()) {
@@ -86,12 +96,42 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
           `Initial Redis connection deferred: ${getErrorMessage(err)}`,
         );
       });
+
+      if (this.pubSub) {
+        void this.pubSub
+          .subscribe(L1_INVALIDATION_CHANNEL, (_ch, raw) => {
+            try {
+              const msg = JSON.parse(raw) as {
+                origin?: string;
+                key?: string;
+                pattern?: string;
+              };
+              if (msg.origin === this.instanceId) return;
+              if (msg.key) {
+                this.memoryStore.delete(msg.key);
+              } else if (msg.pattern) {
+                const rx = this.patternToRegex(msg.pattern);
+                this.memoryStore.deleteMatching((k) => rx.test(k));
+              }
+            } catch {
+              // Ignore malformed invalidation frames
+            }
+          })
+          .then((unsub) => {
+            this.unsubscribeL1Inv = unsub;
+          })
+          .catch(() => undefined);
+      }
     } catch (err: unknown) {
       this.logger.warn(`Redis initialization warning: ${getErrorMessage(err)}`);
     }
   }
 
   async onModuleDestroy() {
+    if (this.unsubscribeL1Inv) {
+      await this.unsubscribeL1Inv().catch(() => undefined);
+      this.unsubscribeL1Inv = null;
+    }
     await closeRedisClient(this.redisClient);
     this.redisClient = null;
     this.isConnected = false;
@@ -237,9 +277,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     value: string,
     ttlSeconds?: number,
   ): Promise<boolean> {
+    const serialized = JSON.stringify(value);
     if (!this.isReady() || !this.redisClient) {
       if (this.memoryStore.hasValid(key)) return false;
-      this.memoryStore.set(key, value, ttlSeconds);
+      this.memoryStore.set(key, serialized, ttlSeconds);
       return true;
     }
     try {
@@ -248,7 +289,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
           ? await this.redisClient.set(key, value, 'EX', ttlSeconds, 'NX')
           : await this.redisClient.set(key, value, 'NX');
       if (res === 'OK') {
-        this.memoryStore.set(key, value, ttlSeconds);
+        this.memoryStore.set(key, serialized, ttlSeconds);
         return true;
       }
       return false;
@@ -279,9 +320,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
 
   async del(key: string): Promise<void> {
     this.memoryStore.delete(key);
+    this.broadcastL1Invalidation({ key });
     if (!this.isReady() || !this.redisClient) return;
     try {
-      await this.redisClient.del(key);
+      await this.redisClient.unlink(key);
     } catch (err: unknown) {
       this.logger.warn(
         `Cache del failed for key "${key}": ${getErrorMessage(err)}`,
@@ -307,51 +349,65 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Non-blocking pattern deletion using Redis SCAN stream to prevent event-loop blocking.
-   */
-  async delPattern(pattern: string): Promise<void> {
-    // Delete in-memory keys matching pattern
-    const regexPattern = new RegExp(
+  private patternToRegex(pattern: string): RegExp {
+    return new RegExp(
       '^' +
         pattern.replace(/[-/\\^$+?.()|[\]{}]/g, '\\$&').replace(/\*/g, '.*') +
         '$',
     );
+  }
+
+  private broadcastL1Invalidation(payload: {
+    key?: string;
+    pattern?: string;
+  }): void {
+    if (!this.pubSub?.isReady()) return;
+    void this.pubSub
+      .publish(
+        L1_INVALIDATION_CHANNEL,
+        JSON.stringify({ origin: this.instanceId, ...payload }),
+      )
+      .catch(() => undefined);
+  }
+
+  /**
+   * Non-blocking streaming pattern deletion using Redis SCAN + UNLINK.
+   * Processes batches incrementally with backpressure (pause/resume) to keep RAM O(1).
+   */
+  async delPattern(pattern: string): Promise<void> {
+    const regexPattern = this.patternToRegex(pattern);
     this.memoryStore.deleteMatching((k) => regexPattern.test(k));
+    this.broadcastL1Invalidation({ pattern });
 
     if (!this.isReady() || !this.redisClient) return;
+    const client = this.redisClient;
     try {
-      const stream = this.redisClient.scanStream({
+      const stream = client.scanStream({
         match: pattern,
         count: 100,
       });
 
-      const keysToDelete: string[] = [];
-      stream.on('data', (resultKeys: string[]) => {
-        if (resultKeys && resultKeys.length > 0) {
-          keysToDelete.push(...resultKeys);
-        }
-      });
-
       await new Promise<void>((resolve) => {
-        stream.on('end', () => {
+        stream.on('data', (resultKeys: string[]) => {
+          if (!resultKeys || resultKeys.length === 0) return;
+          stream.pause();
           void (async () => {
-            if (keysToDelete.length > 0 && this.redisClient) {
-              try {
-                // Delete in batches of 100 keys
-                for (let i = 0; i < keysToDelete.length; i += 100) {
-                  const batch = keysToDelete.slice(i, i + 100);
-                  await this.redisClient.del(...batch);
-                }
-              } catch (delErr) {
-                this.logger.warn(
-                  `Batch cache del failed: ${getErrorMessage(delErr)}`,
-                );
+            try {
+              for (let i = 0; i < resultKeys.length; i += 100) {
+                const batch = resultKeys.slice(i, i + 100);
+                await client.unlink(...batch);
               }
+            } catch (delErr) {
+              this.logger.warn(
+                `Batch cache unlink failed: ${getErrorMessage(delErr)}`,
+              );
+            } finally {
+              stream.resume();
             }
-            resolve();
           })();
         });
+
+        stream.on('end', () => resolve());
 
         stream.on('error', (err) => {
           this.logger.warn(

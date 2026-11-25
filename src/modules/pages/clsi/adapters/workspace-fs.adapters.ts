@@ -430,9 +430,6 @@ export class OutputFileFinder implements IOutputFileFinder {
   }
 }
 
-/** @deprecated Use OutputFileFinder */
-export { OutputFileFinder as OverleafOutputFileFinder };
-
 // ─────────────────────────────────────────────────────────────────
 // PKZIP Disk Artifact Stream Helper
 // ─────────────────────────────────────────────────────────────────

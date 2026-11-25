@@ -24,7 +24,7 @@ import { ClsiService } from './clsi/services/clsi.service';
 import { SnapshotService } from './history/services/snapshot.service';
 import { RestoreService } from './history/services/restore.service';
 import { DiffService } from './history/services/diff.service';
-import { CitationsService } from './citations/citations.service';
+import { CitationsService } from './citations/services/citations.service';
 import { ExportImportService } from './export-import/export-import.service';
 import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
 import { PageDomainEventBus } from './core/events/event-bus.service';

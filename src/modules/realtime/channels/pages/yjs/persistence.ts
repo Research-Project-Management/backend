@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 import { applyTextEditsAndCapture } from './util';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, RedisPubSubService } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { LineArray, DocNotFoundError } from '@/modules/pages/docstore/domain';
 import { PAGES_EVENTS, PAGES_REDIS_KEYS, PAGES_ROOMS } from '../config';
@@ -26,6 +26,7 @@ export interface YjsPersistenceContext {
   readonly instanceId: string;
   readonly logger: Logger;
   readonly redis?: RedisCacheService;
+  readonly pubSub?: RedisPubSubService;
   readonly docstoreService?: DocstoreService;
   readonly server: Server | null;
   readonly activeDocs: Map<string, ActiveDocSession>;

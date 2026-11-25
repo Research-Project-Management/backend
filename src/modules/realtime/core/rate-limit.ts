@@ -72,12 +72,18 @@ export class WsRateLimiter {
     let state = this.socketStates.get(client.id);
 
     if (!state) {
-      if (this.socketStates.size > maxTrackedSockets) {
+      if (this.socketStates.size >= maxTrackedSockets) {
         const staleCutoff = now - staleSocketTtlMs;
         for (const [k, s] of this.socketStates) {
           if (s.lastActive < staleCutoff) {
             this.socketStates.delete(k);
           }
+        }
+        // Hard-cap safety net under connection flood when no entries are stale yet
+        while (this.socketStates.size >= maxTrackedSockets) {
+          const oldestKey = this.socketStates.keys().next().value;
+          if (oldestKey === undefined) break;
+          this.socketStates.delete(oldestKey);
         }
       }
       state = {
@@ -123,6 +129,7 @@ export class WsRateLimiter {
       this.logger.warn(
         `Socket ${client.id} exceeded rate limits in ${state.consecutiveThrottledWindows} consecutive windows. Disconnecting socket.`,
       );
+      this.socketStates.delete(client.id);
       if (typeof client.disconnect === 'function') {
         client.disconnect(true);
       }

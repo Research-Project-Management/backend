@@ -76,6 +76,7 @@ export async function ensureCanonicalPageId(
     ).catch(() => null);
     if (
       directPage?.id &&
+      !directPage.deletedAt &&
       (!directPage.spaceId || directPage.spaceId === spaceId)
     ) {
       return directPage.id;
@@ -108,17 +109,6 @@ export async function ensureCanonicalPageId(
     ).catch(() => null);
     if (existingActivePage?.id) {
       return existingActivePage.id;
-    }
-
-    const existingAnyPage = await Promise.resolve(
-      db.page.findFirst({
-        where: { spaceId },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true },
-      }),
-    ).catch(() => null);
-    if (existingAnyPage?.id) {
-      return existingAnyPage.id;
     }
   }
 

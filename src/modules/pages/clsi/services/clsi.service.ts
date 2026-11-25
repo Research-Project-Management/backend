@@ -302,7 +302,11 @@ export class ClsiService implements OnModuleDestroy {
             ].join('|'),
           ),
         );
-        const cacheable = !!(dto.useCache && plan.hasMainContent);
+        const cacheable = !!(
+          dto.useCache &&
+          !dto.forceClean &&
+          plan.hasMainContent
+        );
 
         if (cacheable && this.cache) {
           const cacheLookupStart = Date.now();
@@ -519,6 +523,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public cancelCompile(projectId: string, userId?: string): boolean {
+    const cancelledLock = this.compileLock.cancel(projectId, userId);
     const compileKey = getCompileName(projectId, userId);
     const existingJobId = this.activeQueueJobIds.get(compileKey);
     if (existingJobId && this.compileQueue) {
@@ -528,7 +533,7 @@ export class ClsiService implements OnModuleDestroy {
         .then((job) => job?.remove())
         .catch(() => {});
     }
-    return Boolean(existingJobId);
+    return cancelledLock || Boolean(existingJobId);
   }
 
   public async forwardSync(dto: ForwardSyncDto, authorizedProjectId?: string) {

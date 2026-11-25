@@ -863,6 +863,3 @@ export class WorkspacePlannerService {
     }
   }
 }
-
-/** @deprecated Use WorkspacePlannerService */
-export { WorkspacePlannerService as ClsiWorkspacePlannerService };

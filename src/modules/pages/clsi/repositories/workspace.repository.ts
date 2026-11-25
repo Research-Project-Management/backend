@@ -456,9 +456,6 @@ export class WorkspaceRepository implements IWorkspaceManager {
   }
 }
 
-/** @deprecated Use WorkspaceRepository */
-export { WorkspaceRepository as OverleafIncrementalWorkspace };
-
 export {
   type LockOptions,
   ProjectLockManager,
@@ -467,7 +464,6 @@ export {
   type DiskUsageOptions,
   DiskUsageCleaner,
   OutputFileFinder,
-  OverleafOutputFileFinder,
   type ZipDiskEntry,
   createZipStreamFromDisk,
 } from '../adapters/workspace-fs.adapters';

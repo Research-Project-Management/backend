@@ -101,7 +101,8 @@ export class SuggestionsController {
     @ResolvedSpace() authSpace: string | { id: string } | null,
     @Req() req?: AuthenticatedRequest,
   ) {
-    const isAccept = body.action === 'accept';
+    const isAccept =
+      body.action === 'accept' || body.action === 'accept_all';
     const resolvedCount = await this.suggestionsService.batchResolve(
       docId,
       authSpace,

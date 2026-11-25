@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -141,6 +142,8 @@ export class SuggestionsService {
       );
     }
 
+    await this.assertDocNotLocked(docTargetId);
+
     const type: ChangeType =
       body.type === 'delete' ? ChangeType.delete : ChangeType.insert;
     const text = body.suggestedText || body.originalText || '';
@@ -246,6 +249,17 @@ export class SuggestionsService {
     );
   }
 
+  private async assertDocNotLocked(docId: string): Promise<void> {
+    const review = await this.repo.findDocReview?.(docId);
+    if (review?.status === 'locked') {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'DOCUMENT_LOCKED',
+        message: 'Cannot modify suggestions on a locked document',
+      });
+    }
+  }
+
   private async resolveSingle(
     isAccept: boolean,
     targetId: string,
@@ -266,6 +280,10 @@ export class SuggestionsService {
     );
     if (!spaceId) {
       throw new NotFoundException(`Suggestion ${suggestionId} not found`);
+    }
+
+    if (docId) {
+      await this.assertDocNotLocked(docId);
     }
 
     const existing = await this.repo.findChange(spaceId, suggestionId, docId);

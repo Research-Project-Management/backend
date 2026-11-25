@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { BullRootModuleOptions } from '@nestjs/bullmq';
 
 export const MANUSCRIPT_CLSI_QUEUE = 'MANUSCRIPT_CLSI_QUEUE';
+export const CITATION_SYNC_QUEUE = 'CITATION_SYNC_QUEUE';
 
 /**
  * Standard BullMQ & Redis connection provider for NestJS.

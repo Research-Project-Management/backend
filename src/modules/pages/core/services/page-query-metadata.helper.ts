@@ -548,8 +548,12 @@ export async function resolveAndAssignLabelsForDoc(
   const targetProjectId = getRecordSpaceId(doc) || projectId;
   const labels = await resolveProjectLabels(prisma, targetProjectId, labelIds);
 
+  const existingRanges = (
+    doc?.ranges && typeof doc.ranges === 'object' ? doc.ranges : {}
+  ) as Record<string, unknown>;
+
   await pageScopeRepo.updateDocInProject(projectId, pageId, {
-    ranges: { labelIds, labels },
+    ranges: { ...existingRanges, labelIds, labels },
   });
 
   return { labels };

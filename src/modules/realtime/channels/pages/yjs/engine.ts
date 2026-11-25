@@ -60,6 +60,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
   private readonly inFlightFlushes = new Map<string, Promise<void>>();
   private readonly yjsConfig: PagesYjsConfig;
   private sweepTimer: NodeJS.Timeout | null = null;
+  private isSweeping = false;
 
   private readonly validator: YjsUpdateValidator;
   private readonly syncProtocol: YjsSyncProtocol;
@@ -102,6 +103,7 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
       instanceId: this.instanceId,
       logger: this.logger,
       redis: this.redis,
+      pubSub: this.pubSub,
       docstoreService: this.docstoreService,
       server: this.server,
       activeDocs: this.activeDocs,
@@ -135,42 +137,48 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
   }
 
   public async sweepIdleDocs(): Promise<number> {
-    const now = Date.now();
-    let evictedCount = 0;
-    const advise = () =>
-      this.resourceGovernor?.adviseEviction({
-        activeCount: this.activeDocs.size,
-        baseIdleTtlMs: this.yjsConfig.idleThresholdMs,
-        hardCap: this.yjsConfig.maxActiveDocs,
-      });
-    const idleTtlMs =
-      advise()?.effectiveIdleTtlMs ?? this.yjsConfig.idleThresholdMs;
+    if (this.isSweeping) return 0;
+    this.isSweeping = true;
+    try {
+      const now = Date.now();
+      let evictedCount = 0;
+      const advise = () =>
+        this.resourceGovernor?.adviseEviction({
+          activeCount: this.activeDocs.size,
+          baseIdleTtlMs: this.yjsConfig.idleThresholdMs,
+          hardCap: this.yjsConfig.maxActiveDocs,
+        });
+      const idleTtlMs =
+        advise()?.effectiveIdleTtlMs ?? this.yjsConfig.idleThresholdMs;
 
-    for (const [, session] of this.activeDocs.entries()) {
-      if (now - session.lastActiveAt > idleTtlMs) {
-        await this.evictDoc(session.projectId, session.docId);
-        evictedCount++;
+      for (const session of [...this.activeDocs.values()]) {
+        if (now - session.lastActiveAt > idleTtlMs) {
+          await this.evictDoc(session.projectId, session.docId);
+          evictedCount++;
+        }
       }
-    }
-    if (evictedCount > 0) {
-      this.logger.log(
-        `Garbage collected ${evictedCount} idle Y.Doc in-memory session(s)`,
-      );
-    }
+      if (evictedCount > 0) {
+        this.logger.log(
+          `Garbage collected ${evictedCount} idle Y.Doc in-memory session(s)`,
+        );
+      }
 
-    const targetEvictions =
-      advise()?.targetEvictions ??
-      Math.max(0, this.activeDocs.size - this.yjsConfig.maxActiveDocs);
-    if (targetEvictions > 0) {
-      const sorted = [...this.activeDocs.values()].sort(
-        (a, b) => a.lastActiveAt - b.lastActiveAt,
-      );
-      for (let i = 0; i < Math.min(targetEvictions, sorted.length); i++) {
-        await this.evictDoc(sorted[i].projectId, sorted[i].docId);
-        evictedCount++;
+      const targetEvictions =
+        advise()?.targetEvictions ??
+        Math.max(0, this.activeDocs.size - this.yjsConfig.maxActiveDocs);
+      if (targetEvictions > 0) {
+        const sorted = [...this.activeDocs.values()].sort(
+          (a, b) => a.lastActiveAt - b.lastActiveAt,
+        );
+        for (let i = 0; i < Math.min(targetEvictions, sorted.length); i++) {
+          await this.evictDoc(sorted[i].projectId, sorted[i].docId);
+          evictedCount++;
+        }
       }
+      return evictedCount;
+    } finally {
+      this.isSweeping = false;
     }
-    return evictedCount;
   }
 
   public async onModuleInit(): Promise<void> {

@@ -1,5 +1,5 @@
 /**
- * modules/pages/diagnostics/domain/error-knowledge-base.ts
+ * modules/pages/clsi/domain/log-parser/error-knowledge-base.ts
  * Pure domain LaTeX error knowledge base and package lookup tables.
  * Zero I/O, zero NestJS imports.
  */
@@ -8,7 +8,6 @@ import {
   ErrorExplanationVo,
   ErrorExplanationProps,
 } from './diagnostic-item.entity';
-import { ExplanationNotFoundException } from './diagnostics.errors';
 
 export const PKG_LOOKUP: Record<string, string> = {
   includegraphics: 'graphicx',
@@ -171,7 +170,6 @@ export interface RuleDefinition extends ErrorExplanationProps {
 export interface ErrorExplainerLike {
   explain(message: string, context?: string): ErrorExplanationVo | null;
   getByCode(code: string): ErrorExplanationVo | null;
-  getAllRules(): ErrorExplanationVo[];
 }
 
 const LATEX_KB_BASE_URL =
@@ -595,20 +593,5 @@ export class ErrorKnowledgeBase implements ErrorExplainerLike {
       rule = this.rules.find((r) => r.patterns.some((p) => p.test(code)));
     }
     return rule ? new ErrorExplanationVo(rule) : null;
-  }
-
-  public requireByCode(code: string): ErrorExplanationVo {
-    if (!code || typeof code !== 'string') {
-      throw new ExplanationNotFoundException(String(code));
-    }
-    const found = this.getByCode(code);
-    if (!found) {
-      throw new ExplanationNotFoundException(code);
-    }
-    return found;
-  }
-
-  public getAllRules(): ErrorExplanationVo[] {
-    return this.rules.map((r) => new ErrorExplanationVo(r));
   }
 }

@@ -1,5 +1,5 @@
 /**
- * modules/pages/diagnostics/domain/log-path.helper.ts
+ * modules/pages/clsi/domain/log-parser/log-path.helper.ts
  * Pure TeX paren-cleaning and nested project relative path normalizers.
  */
 

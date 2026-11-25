@@ -229,12 +229,6 @@ export class PagesGateway
         dto.docId,
         dto.data as Uint8Array,
       );
-      if (reply.length > 0) {
-        client.emit(PAGES_EVENTS.YJS_SYNC_STEP_2, {
-          docId: dto.docId,
-          data: reply,
-        });
-      }
       return { success: true, data: reply };
     } catch (err) {
       this.logger.warn(`Yjs SyncStep1 error: ${String(err)}`);

@@ -1,5 +1,5 @@
 /**
- * modules/pages/diagnostics/domain/compile-log.analyzer.ts
+ * modules/pages/clsi/domain/log-parser/compile-log.analyzer.ts
  * Pure domain LaTeX compilation log analyzer (TeX Paren-Tree State Machine).
  * Zero I/O, zero NestJS imports.
  */
@@ -18,7 +18,7 @@ import {
   DiagnosticsSummary,
   ILogParser,
   LogParseOptions,
-} from '@/modules/pages/clsi/domain/clsi.ports';
+} from '../clsi.ports';
 import {
   ENV_PKG_LOOKUP,
   ErrorKnowledgeBase,

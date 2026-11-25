@@ -63,11 +63,11 @@ export class CompilePageDto {
 
   @ApiPropertyOptional({
     description: 'TeX Live distribution version',
-    enum: ['2025', '2024', '2023', '2022', '2021'],
+    enum: ['2026', '2025', '2024', '2023', '2022', '2021', '2020'],
     default: '2025',
   })
   @IsOptional()
-  @IsIn(['2025', '2024', '2023', '2022', '2021'])
+  @IsIn(['2026', '2025', '2024', '2023', '2022', '2021', '2020'])
   texLiveVersion?: string;
 
   @ApiPropertyOptional({
