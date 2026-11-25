@@ -1,11 +1,6 @@
 export { ExperimentsModule } from './experiments.module';
 export { ExperimentsFacade } from './experiments.facade';
-export {
-  EXPERIMENTS_PORT,
-  EXPERIMENTS_PROCESSING_QUEUE,
-  EXPERIMENTS_JOB_PROCESS_FILE,
-  EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-} from './experiments.constant';
+export { EXPERIMENTS_PORT } from './experiments.constant';
 export {
   getFileContentPath,
   type IExperimentsPort,

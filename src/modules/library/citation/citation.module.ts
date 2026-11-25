@@ -60,6 +60,11 @@ import { CslStyleRegistry } from './domain/citation.domain';
     ExportsRepository,
     PdfBakerService,
   ],
-  exports: [CITATION_FACADE, CitationFacade],
+  exports: [
+    CITATION_FACADE,
+    CitationFacade,
+    DoiContentNegotiationService,
+    QueryResolverService,
+  ],
 })
 export class CitationModule {}

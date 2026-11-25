@@ -1,5 +1,5 @@
 /**
- * project-history/domain/ports.ts
+ * history/domain/ports.ts
  * Consolidated domain value objects (DiffHunkVo, FileDiffVo) and outbound ports
  * (IDiffEnginePort, IHistoryRepositoryPort, ISnapshotCollectorPort, ISnapshotRestorerPort)
  * for Project History.

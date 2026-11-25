@@ -6,7 +6,6 @@ import {
   FileTrashedEvent,
   FileUploadedEvent,
 } from '../domain/experiments.event';
-import { ExperimentsQueueProducer } from './experiments.producer';
 
 export interface ExperimentOutboxEvent {
   id: string;
@@ -23,7 +22,6 @@ export class ExperimentsEventListener {
 
   constructor(
     @Optional() private readonly redis?: RedisCacheService,
-    @Optional() private readonly queueProducer?: ExperimentsQueueProducer,
     @Optional() private readonly pubSub?: RedisPubSubService,
   ) {}
 
@@ -39,24 +37,6 @@ export class ExperimentsEventListener {
       s3Key: event.s3Key,
       projectId: event.projectId ?? null,
     });
-
-    if (this.queueProducer) {
-      await this.queueProducer
-        .queueFileProcessing({
-          fileId: event.fileId,
-          blobId: event.blobId,
-          s3Key: event.s3Key,
-          mimeType: event.mimeType,
-          filename: event.filename,
-          userId: event.authorId,
-          projectId: event.projectId ?? null,
-        })
-        .catch((err: unknown) => {
-          this.logger.warn(
-            `Failed to queue background file processing for ${event.fileId}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
-    }
   }
 
   @OnEvent('file.downloaded')

@@ -1,12 +1,12 @@
 import { Injectable, Optional, NotFoundException } from '@nestjs/common';
 import { HistoryRepository } from '../history.repository';
-import { SnapshotRestorerAdapter } from '../adapters/snapshot-restorer.adapter';
+import { SnapshotRestorerAdapter } from '../adapters/restorer.adapter';
 import { VersionNotFoundException } from '../domain/errors';
+import { SnapshotDetailDto } from '../dto/snapshot.dto';
 import {
-  SnapshotDetailDto,
   RestoreSingleFileDto,
   RestoreSingleFileResponseDto,
-} from '../dto/history.dto';
+} from '../dto/restore.dto';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { SnapshotService } from './snapshot.service';
 

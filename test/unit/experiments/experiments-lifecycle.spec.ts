@@ -7,10 +7,7 @@ import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';
 import { BlobService } from '@/modules/files/services/blob.service';
 import { FilesUploadService } from '@/modules/files/services/upload.service';
-import { EXPERIMENTS_JOB_MAINTENANCE_TRASH } from '@/modules/experiments';
 import { ExperimentNode } from '@/modules/experiments/domain/node.domain';
-import { ExperimentsQueueConsumer } from '@/modules/experiments/processors/experiments.processor';
-import { ExperimentsQueueProducer } from '@/modules/experiments/processors/experiments.producer';
 import { TrashService } from '@/modules/experiments/services/trash.service';
 import { PutBucketLifecycleConfigurationCommand } from '@aws-sdk/client-s3';
 
@@ -319,84 +316,6 @@ describe('Storage Lifecycle & Maintenance Pipeline Suite (Phase 4)', () => {
       expect(count).toBe(1);
       expect(mockDriver.delete).toHaveBeenCalledWith('blobs/cc/orphan.pdf');
       expect(mockBlobRepo.delete).toHaveBeenCalledWith('dead-blob-001');
-    });
-  });
-
-  describe('ExperimentsQueueConsumer - Maintenance Job Dispatching', () => {
-    let consumer: ExperimentsQueueConsumer;
-    let mockDriver: any;
-    let mockNodeRepo: any;
-    let mockBlobRepo: any;
-    let mockTrashService: any;
-
-    beforeEach(() => {
-      mockDriver = { getStream: jest.fn(), delete: jest.fn() };
-      mockNodeRepo = { findById: jest.fn(), update: jest.fn() };
-      mockBlobRepo = {
-        findById: jest.fn(),
-        reclaimStuckClaims: jest.fn().mockResolvedValue(0),
-        claimOrphanBlobsBatch: jest.fn().mockResolvedValue([]),
-      };
-      mockTrashService = {
-        processExpiredTrash: jest.fn().mockResolvedValue({ purgedCount: 3 }),
-      };
-
-      const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaRepo = {} as any;
-      const filesPort = new FilesFacade(
-        mockDriver,
-        blobService,
-        mockBlobRepo as BlobRepository,
-        quotaRepo,
-        new FilesUploadService(
-          mockDriver,
-          blobService,
-          mockBlobRepo as BlobRepository,
-          quotaRepo,
-          {} as SessionRepository,
-        ),
-      );
-      consumer = new ExperimentsQueueConsumer(
-        filesPort,
-        mockNodeRepo,
-        mockTrashService,
-      );
-    });
-
-    it('should dispatch to TrashService.processExpiredTrash when job name is maintenance-trash-retention', async () => {
-      const res = await consumer.process({
-        id: 'job-1',
-        name: EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-        data: {},
-      } as any);
-
-      expect(mockTrashService.processExpiredTrash).toHaveBeenCalled();
-      expect(res).toEqual({ purgedCount: 3 });
-    });
-  });
-
-  describe('ExperimentsQueueProducer - Lifecycle Scheduling Bootstrap', () => {
-    let producer: ExperimentsQueueProducer;
-    let mockQueue: any;
-
-    beforeEach(() => {
-      mockQueue = {
-        on: jest.fn(),
-        upsertJobScheduler: jest.fn().mockResolvedValue(undefined),
-      };
-      producer = new ExperimentsQueueProducer(mockQueue);
-    });
-
-    it('onApplicationBootstrap should schedule trash retention repeatable job in BullMQ', async () => {
-      await producer.onApplicationBootstrap();
-
-      expect(mockQueue.upsertJobScheduler).toHaveBeenCalledWith(
-        'repeat-trash-retention',
-        { pattern: '0 3 * * *' },
-        expect.objectContaining({
-          name: EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-        }),
-      );
     });
   });
 });

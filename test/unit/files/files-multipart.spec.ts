@@ -12,8 +12,7 @@ import {
   UploadSessionStatus,
 } from '@/modules/files';
 import {
-  FILES_JOB_DELETE_STAGING_OBJECT,
-  FILES_JOB_PROMOTE_CAS,
+  FILE_JOBS,
   MIN_MULTIPART_PART_SIZE_BYTES,
   MULTIPART_LARGE_PART_SIZE_BYTES,
   MULTIPART_MEDIUM_PART_SIZE_BYTES,
@@ -24,7 +23,7 @@ import { FilesFacade } from '@/modules/files/files.facade';
 import { FilesController } from '@/modules/files/controllers/files.controller';
 import { LocalFilesController } from '@/modules/files/controllers/local.controller';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
-import { FilesFinalizeCasProcessor } from '@/modules/files/processors/files-finalize-cas.processor';
+import { CasProcessor } from '@/modules/files/processors/cas.processor';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';
@@ -280,7 +279,7 @@ describe('FilesController Multipart Endpoints', () => {
   let tempDir: string;
   let localAdapter: LocalStorageAdapter;
   let controller: FilesController;
-  let casProcessor: FilesFinalizeCasProcessor;
+  let casProcessor: CasProcessor;
   let repos: ReturnType<typeof createInMemoryRepos>;
 
   beforeEach(() => {
@@ -297,7 +296,7 @@ describe('FilesController Multipart Endpoints', () => {
       repos.sessionRepo,
       repos.finalizeCasQueue as any,
     );
-    casProcessor = new FilesFinalizeCasProcessor(
+    casProcessor = new CasProcessor(
       localAdapter,
       blobService,
       repos.blobRepo,
@@ -375,11 +374,11 @@ describe('FilesController Multipart Endpoints', () => {
     expect(await localAdapter.exists(stagingKey)).toBe(true);
 
     expect(repos.enqueuedJobs).toHaveLength(1);
-    expect(repos.enqueuedJobs[0].name).toBe(FILES_JOB_PROMOTE_CAS);
+    expect(repos.enqueuedJobs[0].name).toBe(FILE_JOBS.PROMOTE_CAS);
 
     await casProcessor.process({
       id: 'job-promote-1',
-      name: FILES_JOB_PROMOTE_CAS,
+      name: FILE_JOBS.PROMOTE_CAS,
       data: repos.enqueuedJobs[0].data,
     } as any);
 
@@ -391,12 +390,12 @@ describe('FilesController Multipart Endpoints', () => {
     expect(await localAdapter.exists(stagingKey)).toBe(true);
 
     expect(repos.enqueuedJobs).toHaveLength(2);
-    expect(repos.enqueuedJobs[1].name).toBe(FILES_JOB_DELETE_STAGING_OBJECT);
+    expect(repos.enqueuedJobs[1].name).toBe(FILE_JOBS.DELETE_STAGING);
     expect(repos.enqueuedJobs[1].opts?.delay).toBe(STAGING_DELETE_DELAY_MS);
 
     await casProcessor.process({
       id: 'job-del-1',
-      name: FILES_JOB_DELETE_STAGING_OBJECT,
+      name: FILE_JOBS.DELETE_STAGING,
       data: repos.enqueuedJobs[1].data,
     } as any);
     expect(await localAdapter.exists(stagingKey)).toBe(false);

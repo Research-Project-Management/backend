@@ -20,7 +20,7 @@ import { DocstoreService } from './docstore/docstore.service';
 import { UpdateDocDto } from './docstore/dto/doc.dto';
 import { StructureService } from './structure/structure.service';
 import { FilestoreService } from './filestore/filestore.service';
-import { ClsiService } from './clsi/services/clsi.service';
+import { ClsiService } from './clsi/clsi.service';
 import { SnapshotService } from './history/services/snapshot.service';
 import { RestoreService } from './history/services/restore.service';
 import { DiffService } from './history/services/diff.service';
@@ -40,13 +40,13 @@ import {
   MoveNodeDto,
   RenameNodeDto,
 } from './structure/dto/node.dto';
-import { CompilePageDto, ClsiWordCountDto } from './clsi/dto/clsi.dto';
+import { CompilePageDto, ClsiWordCountDto } from './clsi/dto/compile.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './clsi/dto/synctex.dto';
 import {
   CitationQueryDto,
   ResolveIdentifierDto,
 } from './citations/dto/citations.dto';
-import { CreateSnapshotDto } from './history/dto/history.dto';
+import { CreateSnapshotDto } from './history/dto/snapshot.dto';
 import { ExportZipQueryDto } from './export-import/dto/export-import.dto';
 
 @Injectable()

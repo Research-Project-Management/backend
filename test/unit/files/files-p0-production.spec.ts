@@ -27,8 +27,7 @@ import {
   UploadSessionStatus,
 } from '@/modules/files';
 import {
-  FILES_JOB_DELETE_STAGING_OBJECT,
-  FILES_JOB_PROMOTE_CAS,
+  FILE_JOBS,
   MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER,
   PRESIGN_COMPLETE_IDEM_TTL_SECONDS,
   STALE_FINALIZING_LEASE_MINUTES,
@@ -37,7 +36,7 @@ import {
 import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import { FilesController } from '@/modules/files/controllers/files.controller';
-import { FilesFinalizeCasProcessor } from '@/modules/files/processors/files-finalize-cas.processor';
+import { CasProcessor } from '@/modules/files/processors/cas.processor';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';
@@ -671,7 +670,7 @@ describe('FilesModule P0 Production Hardening', () => {
     it('isolates post-facto P2002 hash collision into blobs/raw without deleting winner CAS key and guards delayed delete', async () => {
       const harness = createStatefulHarness();
       const blobService = new BlobService(localAdapter, harness.blobRepo);
-      const casProcessor = new FilesFinalizeCasProcessor(
+      const casProcessor = new CasProcessor(
         localAdapter,
         blobService,
         harness.blobRepo,
@@ -703,7 +702,7 @@ describe('FilesModule P0 Production Hardening', () => {
       // Promote blob 1 normally to canonical CAS
       await casProcessor.process({
         id: 'promote-1',
-        name: FILES_JOB_PROMOTE_CAS,
+        name: FILE_JOBS.PROMOTE_CAS,
         data: { blobId: fast1.blob.id, stagingKey: key1 },
       } as Job);
       expect(harness.blobs.get(fast1.blob.id)?.s3Key).toBe(winnerCanonicalKey);
@@ -719,7 +718,7 @@ describe('FilesModule P0 Production Hardening', () => {
 
       const collisionRes = (await casProcessor.process({
         id: 'promote-2',
-        name: FILES_JOB_PROMOTE_CAS,
+        name: FILE_JOBS.PROMOTE_CAS,
         data: { blobId: fast2.blob.id, stagingKey: key2 },
       } as Job)) as { promoted: boolean; isolated: boolean; finalKey?: string };
 
@@ -737,7 +736,7 @@ describe('FilesModule P0 Production Hardening', () => {
 
       // Enqueued delayed delete must specify STAGING_DELETE_DELAY_MS
       const delJobs = harness.enqueuedJobs.filter(
-        (j) => j.name === FILES_JOB_DELETE_STAGING_OBJECT,
+        (j) => j.name === FILE_JOBS.DELETE_STAGING,
       );
       expect(delJobs).toHaveLength(2);
       expect(delJobs[1].opts?.delay).toBe(STAGING_DELETE_DELAY_MS);
@@ -753,7 +752,7 @@ describe('FilesModule P0 Production Hardening', () => {
 
       const refused = await casProcessor.process({
         id: 'del-guard-1',
-        name: FILES_JOB_DELETE_STAGING_OBJECT,
+        name: FILE_JOBS.DELETE_STAGING,
         data: { storageKey: unpromotedKey },
       } as Job);
       expect(refused).toBe(false);
@@ -762,7 +761,7 @@ describe('FilesModule P0 Production Hardening', () => {
       // Once staging key is no longer referenced in DB, delayed delete removes it
       const deleted = await casProcessor.process({
         id: 'del-ok-2',
-        name: FILES_JOB_DELETE_STAGING_OBJECT,
+        name: FILE_JOBS.DELETE_STAGING,
         data: { storageKey: key2 },
       } as Job);
       expect(deleted).toBe(true);
@@ -866,7 +865,7 @@ describe('FilesModule P0 Production Hardening', () => {
       expect(harness.enqueuedJobs).toHaveLength(1);
       expect(harness.enqueuedJobs[0]).toEqual(
         expect.objectContaining({
-          name: FILES_JOB_PROMOTE_CAS,
+          name: FILE_JOBS.PROMOTE_CAS,
           data: expect.objectContaining({
             blobId: 'unpromoted-blob-1',
             stagingKey: 'uploads/staging/u1/stuck.pdf',

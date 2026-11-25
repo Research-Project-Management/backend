@@ -77,7 +77,9 @@ export class PrismaService
     this.$on('query', (event: Prisma.QueryEvent) => {
       if (event.duration >= slowQueryThresholdMs) {
         this.logger.warn(
-          `[SlowQuery ${event.duration}ms] ${event.query} | params=${event.params}`,
+          logQueries
+            ? `[SlowQuery ${event.duration}ms] ${event.query} | params=${event.params}`
+            : `[SlowQuery ${event.duration}ms] ${event.query}`,
         );
       } else if (logQueries) {
         this.logger.debug(

@@ -9,7 +9,7 @@ try {
 
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
-import { LoggerService } from './core';
+import { LoggerService, QUEUE_NAMES } from './core';
 
 // Standard process-level diagnostics for unhandled rejections and fatal errors
 process.on('unhandledRejection', (reason: unknown) => {
@@ -42,9 +42,7 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   logger.log('✅ [Flux Dedicated Worker] Successfully initialized.');
-  logger.log(
-    '📡 Subscribed queues: [LIBRARY_INGESTION_QUEUE, LIBRARY_OUTBOX_QUEUE, FILES_MAINTENANCE_QUEUE, FILES_MEDIA_QUEUE, FILES_FINALIZE_CAS_QUEUE, EXPERIMENTS_PROCESSING_QUEUE, AI_KNOWLEDGE_QUEUE]',
-  );
+  logger.log(`📡 Subscribed queues: [${QUEUE_NAMES.join(', ')}]`);
   logger.log('⚡ Ready to process background jobs...');
 }
 

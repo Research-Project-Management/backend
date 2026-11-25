@@ -2,7 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { HistoryRepository } from '../history.repository';
 import { VersionNotFoundException } from '../domain/errors';
 import { DiffEngine } from '../domain/diff.engine';
-import { DiffResponseDto } from '../dto/history.dto';
+import { DiffResponseDto } from '../dto/diff.dto';
 
 const DIFF_CACHE_MAX_ENTRIES = 256;
 const DIFF_CACHE_MAX_BYTES = 32 * 1024 * 1024; // 32 MB total budget

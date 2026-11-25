@@ -16,8 +16,8 @@ import { LabelService } from './services/label.service';
 import { RestoreService } from './services/restore.service';
 import { MaintenanceService } from './services/maintenance.service';
 import { HistoryRepository } from './history.repository';
-import { SnapshotCollectorAdapter } from './adapters/snapshot-collector.adapter';
-import { SnapshotRestorerAdapter } from './adapters/snapshot-restorer.adapter';
+import { SnapshotCollectorAdapter } from './adapters/collector.adapter';
+import { SnapshotRestorerAdapter } from './adapters/restorer.adapter';
 import { DiffEngine } from './domain/diff.engine';
 
 @Module({

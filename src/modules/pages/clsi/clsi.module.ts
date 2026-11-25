@@ -7,57 +7,48 @@
 
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BullModule } from '@nestjs/bullmq';
-import { MANUSCRIPT_CLSI_QUEUE } from '@/core/infrastructure/queue/bullmq.config';
 import { CoreModule as AppCoreModule } from '@/core';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
+import { HistoryModule } from '@/modules/pages/history/history.module';
 import { ClsiController } from './clsi.controller';
-import { ClsiService } from './services/clsi.service';
-import { RemoteClsiClientAdapter } from './services/remote-clsi.client';
-import { WorkspacePlannerService } from './services/workspace-planner.service';
-import { ClsiCompileProcessor } from './processors/clsi-compile.processor';
-import {
-  WorkspaceRepository,
-  DiskUsageCleaner,
-} from './repositories/workspace.repository';
-import {
-  CompilePipeline,
-  LocalProcessRunner,
-  DockerSandboxRunner,
-  LatexmkEngine,
-  ClsiHealthCheck,
-} from './services/compile-pipeline.service';
-import { ISandboxRunner } from './domain/clsi.ports';
+import { ClsiService } from './clsi.service';
+import { RemoteClsiClientAdapter } from './adapters/remote-clsi.adapter';
+import { CompileSourceService } from './services/compile-source.service';
+import { ClsiRepository } from './clsi.repository';
+import { DiskUsageCleaner } from './adapters/scratch-disk.adapter';
+import { CompileService } from './services/compile.service';
+import { LocalProcessRunner } from './sandbox/local.sandbox';
+import { DockerSandboxRunner } from './sandbox/docker.sandbox';
+import { LatexmkEngine } from './adapters/latexmk.adapter';
+import { ClsiHealthCheck } from './adapters/health.adapter';
+import { ISandboxRunner } from './domain/ports';
 import {
   parseSandboxConfig,
   buildSandboxProfileFromConfig,
   extractSandboxEnvFromConfigService,
   ClsiSandboxConfig,
-} from './services/sandbox/sandbox-config';
+} from './sandbox/sandbox.config';
 import { CompileLockService } from './services/compile-lock.service';
+import { SynctexService } from './services/synctex.service';
+import { WordCountService } from './services/wordcount.service';
+import { OutputService } from './services/output.service';
+import { ClsiMetrics } from './adapters/metrics.adapter';
 
 export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
 export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
-
-const inProcessClsiWorkers =
-  process.env.ENABLE_IN_PROCESS_WORKERS === 'true'
-    ? [ClsiCompileProcessor]
-    : [];
 
 @Module({
   imports: [
     AppCoreModule,
     DocstoreModule,
     FilestoreModule,
-    BullModule.registerQueue({
-      name: MANUSCRIPT_CLSI_QUEUE,
-    }),
+    HistoryModule,
   ],
   controllers: [ClsiController],
   providers: [
     RemoteClsiClientAdapter,
-    WorkspacePlannerService,
+    CompileSourceService,
     {
       provide: CLSI_SANDBOX_CONFIG,
       useFactory: (configService: ConfigService): ClsiSandboxConfig => {
@@ -69,9 +60,9 @@ const inProcessClsiWorkers =
       inject: [ConfigService],
     },
     {
-      provide: WorkspaceRepository,
+      provide: ClsiRepository,
       useFactory: (sandboxConfig: ClsiSandboxConfig) =>
-        new WorkspaceRepository(sandboxConfig.scratchDir),
+        new ClsiRepository(sandboxConfig.scratchDir),
       inject: [CLSI_SANDBOX_CONFIG],
     },
     {
@@ -111,22 +102,24 @@ const inProcessClsiWorkers =
       inject: [CLSI_SANDBOX_RUNNER, CLSI_SANDBOX_CONFIG],
     },
     {
-      provide: CompilePipeline,
+      provide: CompileService,
       useFactory: (
-        workspace: WorkspaceRepository,
+        workspace: ClsiRepository,
         latexmkEngine: LatexmkEngine,
-      ) => new CompilePipeline(workspace, latexmkEngine),
-      inject: [WorkspaceRepository, LatexmkEngine],
+      ) => new CompileService(workspace, latexmkEngine),
+      inject: [ClsiRepository, LatexmkEngine],
     },
+    ClsiMetrics,
     CompileLockService,
+    SynctexService,
+    WordCountService,
+    OutputService,
     ClsiService,
-    ...inProcessClsiWorkers,
   ],
   exports: [
     ClsiService,
     RemoteClsiClientAdapter,
-    WorkspacePlannerService,
-    BullModule,
+    CompileSourceService,
   ],
 })
 export class ClsiModule {}

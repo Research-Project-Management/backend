@@ -27,7 +27,7 @@ import { NodePathVo } from '@/modules/pages/structure/domain';
 import {
   ClsiService,
   type EditorLastBuildSummary,
-} from '@/modules/pages/clsi/services/clsi.service';
+} from '@/modules/pages/clsi/clsi.service';
 import type {
   BootstrapEditorParams,
   EditorBootstrapActiveDocDto,

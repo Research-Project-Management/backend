@@ -10,13 +10,7 @@ import {
   UploadSessionRecord,
   UploadSessionStatus,
 } from '@/modules/files';
-import {
-  FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
-  FILES_JOB_RECLAIM_ORPHAN_BLOBS,
-  FILES_JOB_RECONCILE_QUOTAS,
-  FILES_JOB_RECOVER_STALE_FINALIZING,
-  FILES_JOB_SWEEP_STAGING_BLOBS,
-} from '@/modules/files/files.constant';
+import { FILE_JOBS } from '@/modules/files/files.constant';
 import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
 import { FilesFacade } from '@/modules/files/files.facade';
 import { FilesController } from '@/modules/files/controllers/files.controller';
@@ -27,7 +21,7 @@ import { SessionRepository } from '@/modules/files/repositories/session.reposito
 import { BlobService } from '@/modules/files/services/blob.service';
 import { FilesUploadService } from '@/modules/files/services/upload.service';
 import { ThumbnailService } from '@/modules/files/services/thumbnail.service';
-import { FilesMaintenanceProcessor } from '@/modules/files/processors/files-maintenance.processor';
+import { CleanupProcessor } from '@/modules/files/processors/cleanup.processor';
 import type { IStorageAdapter } from '@/modules/files/types/adapter.type';
 
 function createMockAdapter(): jest.Mocked<IStorageAdapter> {
@@ -139,7 +133,7 @@ function createMockSessionRepo(): jest.Mocked<SessionRepository> {
 }
 
 describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
-  describe('FilesMaintenanceProcessor (Lifecycle & Job Dispatch)', () => {
+  describe('CleanupProcessor (Lifecycle & Job Dispatch)', () => {
     const originalBootstrapEnv = process.env.FILES_BOOTSTRAP_LIFECYCLE;
 
     afterEach(() => {
@@ -167,7 +161,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         upsertJobScheduler: jest.fn().mockResolvedValue({}),
       };
 
-      const processor = new FilesMaintenanceProcessor(
+      const processor = new CleanupProcessor(
         adapter,
         blobService,
         uploadService,
@@ -184,7 +178,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         'files-repeat-multipart-cleanup',
         { pattern: '0 */6 * * *' },
         {
-          name: FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
+          name: FILE_JOBS.CLEANUP_SESSIONS,
           opts: { removeOnComplete: 100, removeOnFail: 200 },
         },
       );
@@ -193,7 +187,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         'files-repeat-orphan-blob-gc',
         { pattern: '0 */2 * * *' },
         {
-          name: FILES_JOB_RECLAIM_ORPHAN_BLOBS,
+          name: FILE_JOBS.RECLAIM_BLOBS,
           opts: { removeOnComplete: 100, removeOnFail: 200 },
         },
       );
@@ -202,7 +196,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         'files-repeat-quota-reconcile',
         { pattern: '30 3 * * *' },
         {
-          name: FILES_JOB_RECONCILE_QUOTAS,
+          name: FILE_JOBS.RECONCILE_QUOTAS,
           opts: { removeOnComplete: 100, removeOnFail: 200 },
         },
       );
@@ -211,7 +205,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         'files-repeat-stale-finalizing-recovery',
         { pattern: '*/5 * * * *' },
         {
-          name: FILES_JOB_RECOVER_STALE_FINALIZING,
+          name: FILE_JOBS.RECOVER_STALE,
           opts: { removeOnComplete: 100, removeOnFail: 200 },
         },
       );
@@ -220,7 +214,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         'files-repeat-sweep-staging-blobs',
         { pattern: '*/10 * * * *' },
         {
-          name: FILES_JOB_SWEEP_STAGING_BLOBS,
+          name: FILE_JOBS.SWEEP_STAGING,
           opts: { removeOnComplete: 100, removeOnFail: 200 },
         },
       );
@@ -244,7 +238,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         upsertJobScheduler: jest.fn().mockResolvedValue({}),
       };
 
-      const processor = new FilesMaintenanceProcessor(
+      const processor = new CleanupProcessor(
         adapter,
         blobService,
         uploadService,
@@ -272,7 +266,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
         reconcileSpaceQuotas: jest.fn().mockResolvedValue(2),
       } as unknown as QuotaRepository;
 
-      const processor = new FilesMaintenanceProcessor(
+      const processor = new CleanupProcessor(
         adapter,
         mockBlobService,
         mockUploadService,
@@ -281,7 +275,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
 
       const sessionResult = await processor.process({
         id: 'job-mpu-1',
-        name: FILES_JOB_CLEANUP_EXPIRED_SESSIONS,
+        name: FILE_JOBS.CLEANUP_SESSIONS,
         data: {},
       } as Job<unknown>);
       expect(mockUploadService.cleanupExpiredSessions).toHaveBeenCalledWith(
@@ -291,7 +285,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
 
       const orphanResult = await processor.process({
         id: 'job-gc-1',
-        name: FILES_JOB_RECLAIM_ORPHAN_BLOBS,
+        name: FILE_JOBS.RECLAIM_BLOBS,
         data: {},
       } as Job<unknown>);
       expect(mockBlobService.reclaimOrphanBlobs).toHaveBeenCalledWith(200, {
@@ -302,7 +296,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
 
       const quotaResult = await processor.process({
         id: 'job-quota-1',
-        name: FILES_JOB_RECONCILE_QUOTAS,
+        name: FILE_JOBS.RECONCILE_QUOTAS,
         data: {},
       } as Job<unknown>);
       expect(mockQuotaRepo.reconcileSpaceQuotas).toHaveBeenCalledWith(200);
@@ -310,7 +304,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
 
       const staleResult = await processor.process({
         id: 'job-stale-1',
-        name: FILES_JOB_RECOVER_STALE_FINALIZING,
+        name: FILE_JOBS.RECOVER_STALE,
         data: {},
       } as Job<unknown>);
       expect(
@@ -320,7 +314,7 @@ describe('FilesModule Self-Contained Lifecycle, Quota & RAM Guard', () => {
 
       const sweepResult = await processor.process({
         id: 'job-sweep-1',
-        name: FILES_JOB_SWEEP_STAGING_BLOBS,
+        name: FILE_JOBS.SWEEP_STAGING,
         data: {},
       } as Job<unknown>);
       expect(

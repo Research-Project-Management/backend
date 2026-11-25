@@ -1,17 +1,19 @@
 /**
  * modules/bff/bff.module.ts
- * Root Backend-for-Frontend (BFF) module.
- *
- * Composes shared BFF infrastructure (BffCoreModule) with channel-specific
- * modules (WebBffModule today; plug in MobileBffModule when mobile launches).
+ * Single flat BFF module composing domain modules strictly 1-way.
  */
 
 import { Module } from '@nestjs/common';
-import { BffCoreModule } from './core/bff-core.module';
-import { WebBffModule } from './web/web-bff.module';
+import { ProjectModule } from '@/modules/project/project.module';
+import { ChatModule } from '@/modules/chat/chat.module';
+import { PagesModule } from '@/modules/pages/pages.module';
+import { BffCacheService } from './bff.cache';
+import { BffController } from './bff.controller';
+import { BffService } from './bff.service';
 
 @Module({
-  imports: [BffCoreModule, WebBffModule],
-  exports: [BffCoreModule, WebBffModule],
+  imports: [ProjectModule, ChatModule, PagesModule],
+  controllers: [BffController],
+  providers: [BffCacheService, BffService],
 })
 export class BffModule {}

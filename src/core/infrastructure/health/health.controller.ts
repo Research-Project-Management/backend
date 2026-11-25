@@ -7,6 +7,7 @@ import {
 } from '@nestjs/terminus';
 import { PrismaHealthIndicator } from './prisma.health';
 import { RedisCacheService } from '../redis/cache.service';
+import { QueueHealthService } from '../queue/queue.health';
 import {
   getDefaultResourceGovernor,
   SystemResourceGovernor,
@@ -23,6 +24,7 @@ export class HealthController {
     private readonly memory: MemoryHealthIndicator,
     @Optional() private readonly redisCache?: RedisCacheService,
     @Optional() resourceGovernor?: SystemResourceGovernor,
+    @Optional() private readonly queueHealth?: QueueHealthService,
   ) {
     this.governor = resourceGovernor ?? getDefaultResourceGovernor();
   }
@@ -69,21 +71,16 @@ export class HealthController {
         : { connected: false, error: 'Redis connection unavailable' };
     }
 
+    const queues = this.queueHealth
+      ? await this.queueHealth.getAllQueueMetrics()
+      : null;
+
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
       redis: redisStats,
       cache: this.redisCache?.getStats() ?? null,
-      queues: {
-        compilation: {
-          active: 0,
-          waiting: 0,
-          status: 'healthy',
-        },
-        ingestion: {
-          status: 'ready',
-        },
-      },
+      queues,
     };
   }
 }

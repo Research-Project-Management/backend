@@ -1,6 +1,6 @@
 /**
  * modules/pages/clsi/services/compile-lock.service.ts
- * Application Service: Overleaf-parity per-(projectId, userId) Compile Lock &
+ * Application Service: Overleaf-parity per-(spaceId, userId) Compile Lock &
  * Hardware-Adaptive Fail-Fast Concurrency Manager for LaTeX compilation in CLSI.
  */
 
@@ -23,7 +23,7 @@ import {
   CompileRateLimitExceededError,
   CompileSupersededError,
   TooManyCompileRequestsError,
-} from '../domain/compile-lock.errors';
+} from '../domain/errors';
 
 /**
  * Citation: Overleaf `services/clsi/app/js/LockManager.js` (lines 9, 53-80).
@@ -145,28 +145,28 @@ export function assessLiveCompileCapacity(
 /**
  * Citation: Overleaf `services/clsi/app/js/CompileManager.js` (lines 51-57):
  * ```js
- * function getCompileName(projectId, userId) {
+ * function getCompileName(spaceId, userId) {
  *   if (userId != null) {
- *     return `${projectId}-${userId}`
+ *     return `${spaceId}-${userId}`
  *   } else {
- *     return projectId
+ *     return spaceId
  *   }
  * }
  * ```
- * Scopes compilation locks and rate-limit keys per `(projectId, userId)` pair so two
+ * Scopes compilation locks and rate-limit keys per `(spaceId, userId)` pair so two
  * different users in the same project can compile independently without blocking or
  * cancelling each other's builds.
  */
-export function getCompileName(projectId: string, userId?: string): string {
+export function getCompileName(spaceId: string, userId?: string): string {
   if (userId != null && userId !== '') {
-    return `${projectId}-${userId}`;
+    return `${spaceId}-${userId}`;
   }
-  return projectId;
+  return spaceId;
 }
 
 export interface InFlightCompileSession {
   compileKey: string;
-  projectId: string;
+  spaceId: string;
   userId?: string;
   priority: CompilePriority;
   abortController: AbortController;
@@ -198,7 +198,7 @@ export class CompileLockService implements OnModuleDestroy {
   private readonly logger = new Logger(CompileLockService.name);
   /**
    * Citation: Overleaf `services/clsi/app/js/LockManager.js` (`const LOCKS = new Map()`, lines 11-51).
-   * Tracks active compilation locks per `(projectId, userId)`:
+   * Tracks active compilation locks per `(spaceId, userId)`:
    * - Overlapping requests for the same key are rejected immediately with `AlreadyCompilingError` (HTTP 423 Locked).
    * - Requests arriving when `locks.size >= compileConcurrencyLimit` (or live RAM headroom is exhausted)
    *   fail fast with `TooManyCompileRequestsError` (HTTP 503 Unavailable, `status: 'unavailable'`).
@@ -280,12 +280,12 @@ export class CompileLockService implements OnModuleDestroy {
    * }
    * ```
    */
-  private checkConcurrencyLimit(projectId: string): void {
+  private checkConcurrencyLimit(spaceId: string): void {
     this.pruneExpiredLocks();
     if (this.locks.size >= this.compileConcurrencyLimit) {
       throw this.toHttpException(
         new TooManyCompileRequestsError('too many concurrent compile requests'),
-        projectId,
+        spaceId,
       );
     }
 
@@ -296,13 +296,13 @@ export class CompileLockService implements OnModuleDestroy {
       const liveCapacity = assessLiveCompileCapacity();
       if (!liveCapacity.hasLiveMemoryHeadroom) {
         this.logger.warn(
-          `[LiveMemoryBackpressure] Shedding concurrent compile for "${projectId}" (active=${this.locks.size}, freeMemMB=${Math.round(liveCapacity.liveFreeMemoryBytes / (1024 * 1024))})`,
+          `[LiveMemoryBackpressure] Shedding concurrent compile for "${spaceId}" (active=${this.locks.size}, freeMemMB=${Math.round(liveCapacity.liveFreeMemoryBytes / (1024 * 1024))})`,
         );
         throw this.toHttpException(
           new TooManyCompileRequestsError(
             'too many concurrent compile requests',
           ),
-          projectId,
+          spaceId,
         );
       }
     }
@@ -310,11 +310,11 @@ export class CompileLockService implements OnModuleDestroy {
 
   /**
    * Citation: Overleaf `services/clsi/app/js/CompileManager.js` (`doCompileWithLock`, lines 65-76).
-   * Acquires the per-`(projectId, userId)` compile lock, enforces fail-fast concurrency and
+   * Acquires the per-`(spaceId, userId)` compile lock, enforces fail-fast concurrency and
    * live memory headroom, and executes `executeFn` immediately with zero waiting queue.
    */
   public async runWithLock<T>(
-    projectId: string,
+    spaceId: string,
     userId: string | undefined,
     realtimeService: RealtimeFacade | undefined,
     executeFn: (
@@ -324,9 +324,9 @@ export class CompileLockService implements OnModuleDestroy {
     options?: CompileLockOptions,
   ): Promise<T> {
     const priority: CompilePriority = options?.priority ?? 'manual';
-    const compileKey = getCompileName(projectId, userId);
+    const compileKey = getCompileName(spaceId, userId);
 
-    // 1. Per-(projectId, userId) lock check (Overleaf `services/clsi/app/js/CompileManager.js:51-76` &
+    // 1. Per-(spaceId, userId) lock check (Overleaf `services/clsi/app/js/CompileManager.js:51-76` &
     // `services/clsi/app/js/LockManager.js:21-30` & `CompileController.js:77-80, 234-246`):
     const currentLock = this.locks.get(compileKey);
     if (currentLock != null) {
@@ -346,7 +346,7 @@ export class CompileLockService implements OnModuleDestroy {
       } else {
         throw this.toHttpException(
           new AlreadyCompilingError('compile in progress'),
-          projectId,
+          spaceId,
         );
       }
     }
@@ -357,14 +357,14 @@ export class CompileLockService implements OnModuleDestroy {
     if (priority === 'auto' && activeCount >= this.autoShedThreshold) {
       throw this.toHttpException(
         new AutoCompileShedError(activeCount, this.autoShedThreshold),
-        projectId,
+        spaceId,
       );
     }
 
     // 3. Fail-fast server concurrency & live memory cap (Overleaf `services/clsi/app/js/LockManager.js:32, 39-51`):
-    this.checkConcurrencyLimit(projectId);
+    this.checkConcurrencyLimit(spaceId);
 
-    // 4. Per-(projectId, userId) rate limit check (Overleaf `CompileManager.mjs:280-284` `compile:${projectId}:${userId}`)
+    // 4. Per-(spaceId, userId) rate limit check (Overleaf `CompileManager.mjs:280-284` `compile:${spaceId}:${userId}`)
     this.checkRateLimit(compileKey);
 
     const now = Date.now();
@@ -375,7 +375,7 @@ export class CompileLockService implements OnModuleDestroy {
 
     const session: InFlightCompileSession = {
       compileKey,
-      projectId,
+      spaceId,
       userId,
       priority,
       abortController,
@@ -407,7 +407,7 @@ export class CompileLockService implements OnModuleDestroy {
       }
       const payload = pendingLogBuffer;
       pendingLogBuffer = '';
-      realtimeService?.broadcastCompileProgress(projectId, {
+      realtimeService?.broadcastCompileProgress(spaceId, {
         status: 'compiling',
         logs: [payload],
       });
@@ -415,7 +415,7 @@ export class CompileLockService implements OnModuleDestroy {
 
     try {
       if (abortController.signal.aborted) {
-        throw this.toHttpException(new CompileAbortedError(), projectId);
+        throw this.toHttpException(new CompileAbortedError(), spaceId);
       }
 
       const onLogChunk = (chunk: string) => {
@@ -431,7 +431,7 @@ export class CompileLockService implements OnModuleDestroy {
         }
       };
 
-      realtimeService?.broadcastCompileProgress(projectId, {
+      realtimeService?.broadcastCompileProgress(spaceId, {
         status: 'compiling',
         logs: ['[CLSI] Compilation started...'],
       });
@@ -449,12 +449,12 @@ export class CompileLockService implements OnModuleDestroy {
   /**
    * Citation: Overleaf `services/clsi/app/js/CompileManager.js` (`stopCompile`, lines 415-428)
    * & `services/web/app/src/Features/Compile/CompileController.mjs` (lines 598-604).
-   * Explicitly kills the active compilation process for `(projectId, userId)`.
-   * Because the lock key is `${projectId}-${userId}`, User B calling stopCompile cannot
+   * Explicitly kills the active compilation process for `(spaceId, userId)`.
+   * Because the lock key is `${spaceId}-${userId}`, User B calling stopCompile cannot
    * kill User A's active compilation.
    */
-  public cancel(projectId: string, userId?: string): boolean {
-    const compileKey = getCompileName(projectId, userId);
+  public cancel(spaceId: string, userId?: string): boolean {
+    const compileKey = getCompileName(spaceId, userId);
     const session = this.locks.get(compileKey);
     if (session) {
       session.abortController.abort();
@@ -465,8 +465,8 @@ export class CompileLockService implements OnModuleDestroy {
     return false;
   }
 
-  public isInFlight(projectId: string, userId?: string): boolean {
-    const lock = this.locks.get(getCompileName(projectId, userId));
+  public isInFlight(spaceId: string, userId?: string): boolean {
+    const lock = this.locks.get(getCompileName(spaceId, userId));
     return Boolean(lock && !lock.isExpired());
   }
 
@@ -485,7 +485,7 @@ export class CompileLockService implements OnModuleDestroy {
     }
   }
 
-  private toHttpException(err: unknown, projectId: string): Error {
+  private toHttpException(err: unknown, spaceId: string): Error {
     if (err instanceof AlreadyCompilingError) {
       // Citation: Overleaf `services/clsi/app/js/CompileController.js` (lines 77-80):
       // `if (error instanceof Errors.AlreadyCompilingError) { code = 423; status = 'compile-in-progress'; }`
@@ -502,7 +502,7 @@ export class CompileLockService implements OnModuleDestroy {
       // Citation: Overleaf `services/clsi/app/js/CompileController.js` (lines 97-101):
       // `error instanceof Errors.TooManyCompileRequestsError -> code = 503; status = 'unavailable'`
       this.logger.warn(
-        `[Backpressure] Exceeded compiler concurrency limit (${this.compileConcurrencyLimit}) – rejecting project "${projectId}"`,
+        `[Backpressure] Exceeded compiler concurrency limit (${this.compileConcurrencyLimit}) – rejecting project "${spaceId}"`,
       );
       return new HttpException(
         {

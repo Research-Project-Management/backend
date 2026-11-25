@@ -30,8 +30,8 @@ import {
 } from '@/modules/pages/history/history.repository';
 import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
 import { RestoreService } from '@/modules/pages/history/services/restore.service';
-import type { SnapshotCollectorAdapter } from '@/modules/pages/history/adapters/snapshot-collector.adapter';
-import type { SnapshotRestorerAdapter } from '@/modules/pages/history/adapters/snapshot-restorer.adapter';
+import type { SnapshotCollectorAdapter } from '@/modules/pages/history/adapters/collector.adapter';
+import type { SnapshotRestorerAdapter } from '@/modules/pages/history/adapters/restorer.adapter';
 import { TrackChange } from '@/modules/pages/review/domain/change.domain';
 import { LinePatcher } from '@/modules/pages/review/domain/patcher.domain';
 import {

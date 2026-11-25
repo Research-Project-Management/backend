@@ -26,7 +26,7 @@ import {
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { ClsiService } from '@/modules/pages/clsi/services/clsi.service';
+import { ClsiService } from '@/modules/pages/clsi/clsi.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
 
 const COLLECT_CONCURRENCY = 6;

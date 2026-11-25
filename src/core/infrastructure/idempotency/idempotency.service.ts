@@ -147,28 +147,29 @@ export class IdempotencyService {
     const expiresAt = new Date(Date.now() + this.DEFAULT_TTL_SEC * 1000);
     const spaceId = this.getSpaceId(userId, projectId);
 
-    // Save to DB atomically via upsert on (spaceId, idempotencyKey)
-    await this.prisma.idempotencyRecord.upsert({
-      where: {
-        spaceId_idempotencyKey: {
+    // Atomic INSERT on unique (spaceId, idempotencyKey) — prevents TOCTOU double-execution
+    try {
+      await this.prisma.idempotencyRecord.create({
+        data: {
           spaceId,
           idempotencyKey,
+          actorId: userId,
+          requestHash,
+          status: 'in_progress',
+          expiresAt,
         },
-      },
-      update: {
-        status: 'in_progress',
-        requestHash,
-        expiresAt,
-      },
-      create: {
-        spaceId,
-        idempotencyKey,
-        actorId: userId,
-        requestHash,
-        status: 'in_progress',
-        expiresAt,
-      },
-    });
+      });
+    } catch (err: unknown) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'Request with this idempotency key is already in progress',
+        );
+      }
+      throw err;
+    }
 
     // Save to Redis
     const redisKey = this.getRedisKey(idempotencyKey, userId, projectId);

@@ -5,10 +5,7 @@ import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@/core';
 import { Role } from '@/modules/project/access';
-import {
-  EditorBootstrapController,
-  EditorBootstrapService,
-} from '@/modules/pages/bootstrap';
+import { EditorBootstrapService } from '@/modules/pages/bootstrap';
 import { ClsiService } from '@/modules/pages/clsi/services/clsi.service';
 import { WorkspaceRepository } from '@/modules/pages/clsi/repositories/workspace.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
@@ -502,22 +499,6 @@ describe('EditorBootstrapService & ClsiService LastBuild Summary', () => {
         userId: USER_ID,
       }),
     ).rejects.toThrow(NotFoundException);
-  });
-
-  it('delegates HTTP request params and access context through EditorBootstrapController', async () => {
-    const controller = new EditorBootstrapController(service);
-    const res = await controller.getEditorBootstrap(
-      ROOT_DOC_ID,
-      undefined,
-      undefined,
-      'chapters/intro.tex',
-      USER_ID,
-      PROJECT_ID,
-      { role: Role.OWNER } as any,
-    );
-
-    expect(res.activeDoc.id).toBe(CHILD_DOC_ID);
-    expect(res.workspace.permissions.role).toBe('owner');
   });
 
   it('isolates VFS tree, symbols, page title, and CLSI scratch when multiple Pages coexist inside the same Space', async () => {

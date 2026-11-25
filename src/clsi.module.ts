@@ -31,7 +31,7 @@ import {
   AutoCompileShedError,
   CompileSupersededError,
   TooManyCompileRequestsError,
-} from './modules/pages/clsi/domain/compile-lock.errors';
+} from './modules/pages/clsi/domain/errors';
 import {
   assessLiveCompileCapacity,
   resolveHardwareCompileConcurrencyLimit,
@@ -39,27 +39,25 @@ import {
 import {
   CompilePageDto,
   ClsiWordCountDto,
-} from './modules/pages/clsi/dto/clsi.dto';
+} from './modules/pages/clsi/dto/compile.dto';
 import {
   ForwardSyncDto,
   ReverseSyncDto,
 } from './modules/pages/clsi/dto/synctex.dto';
+import { ClsiRepository } from './modules/pages/clsi/clsi.repository';
+import { DiskUsageCleaner } from './modules/pages/clsi/adapters/scratch-disk.adapter';
 import {
-  WorkspaceRepository,
-  DiskUsageCleaner,
   createZipStreamFromDisk,
   ZipDiskEntry,
-} from './modules/pages/clsi/repositories/workspace.repository';
-import {
-  CompilePipeline,
-  LocalProcessRunner,
-  LatexmkEngine,
-  ClsiHealthCheck,
-} from './modules/pages/clsi/services/compile-pipeline.service';
-import { CompileLogAnalyzer } from './modules/pages/clsi/domain/log-parser/compile-log.analyzer';
-import { SyncTexProcessor } from './modules/pages/clsi/domain/synctex.parser';
-import { TexWordCounter } from './modules/pages/clsi/domain/tex-word.counter';
-import { ClsiMetrics } from './modules/pages/clsi/domain/clsi.metrics';
+} from './modules/pages/clsi/services/output.service';
+import { CompileService } from './modules/pages/clsi/services/compile.service';
+import { LocalProcessRunner } from './modules/pages/clsi/sandbox/local.sandbox';
+import { LatexmkEngine } from './modules/pages/clsi/adapters/latexmk.adapter';
+import { ClsiHealthCheck } from './modules/pages/clsi/adapters/health.adapter';
+import { CompileLogParser } from './modules/pages/clsi/domain/log-parser/tex-log.parser';
+import { SynctexParser } from './modules/pages/clsi/domain/synctex.parser';
+import { TexWordCounter } from './modules/pages/clsi/domain/word-count.engine';
+import { ClsiMetrics } from './modules/pages/clsi/adapters/metrics.adapter';
 
 interface ClsiContainerInFlightSession {
   abortController: AbortController;
@@ -69,13 +67,13 @@ interface ClsiContainerInFlightSession {
 @Injectable()
 export class ClsiService implements OnModuleDestroy {
   private readonly logger = new Logger(ClsiService.name);
-  private readonly workspace: WorkspaceRepository;
-  private readonly pipeline: CompilePipeline;
-  private readonly synctexParser: SyncTexProcessor;
+  private readonly workspace: ClsiRepository;
+  private readonly pipeline: CompileService;
+  private readonly synctexParser: SynctexParser;
   private readonly wordCounter: TexWordCounter;
   private readonly diskUsageCleaner: DiskUsageCleaner;
   private readonly healthCheck: ClsiHealthCheck;
-  private readonly metrics: ClsiMetrics = ClsiMetrics.getInstance();
+  private readonly metrics = new ClsiMetrics();
   private readonly compileConcurrencyLimit: number;
   private readonly autoShedThreshold: number;
   private readonly supersedeGraceMs = 3000;
@@ -101,16 +99,16 @@ export class ClsiService implements OnModuleDestroy {
       Math.floor(this.compileConcurrencyLimit * 0.75),
     );
 
-    this.workspace = new WorkspaceRepository(scratchDir);
+    this.workspace = new ClsiRepository(scratchDir);
     const runner = new LocalProcessRunner();
     const latexmkEngine = new LatexmkEngine(runner, latexmkBin, 'pdflatex');
-    const logParser = new CompileLogAnalyzer();
+    const logParser = new CompileLogParser();
 
-    this.synctexParser = new SyncTexProcessor();
+    this.synctexParser = new SynctexParser();
     this.wordCounter = new TexWordCounter();
     this.diskUsageCleaner = new DiskUsageCleaner(scratchDir);
     this.healthCheck = new ClsiHealthCheck(runner, scratchDir);
-    this.pipeline = new CompilePipeline(
+    this.pipeline = new CompileService(
       this.workspace,
       latexmkEngine,
       logParser,
@@ -142,12 +140,12 @@ export class ClsiService implements OnModuleDestroy {
     }
   }
 
-  public cancelCompile(projectId: string): boolean {
-    const session = this.inFlightCompiles.get(projectId);
+  public cancelCompile(spaceId: string): boolean {
+    const session = this.inFlightCompiles.get(spaceId);
     if (session) {
       session.abortController.abort();
       this.logger.log(
-        `Cancelled in-flight compilation for project "${projectId}"`,
+        `Cancelled in-flight compilation for project "${spaceId}"`,
       );
       return true;
     }
@@ -155,14 +153,14 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async compile(dto: CompilePageDto) {
-    const projectId = dto.pageId || dto.spaceId || 'default';
+    const spaceId = dto.pageId || dto.spaceId || 'default';
     const mainFile = dto.mainFile || 'main.tex';
     const source = dto.source || '';
     const files = dto.files || {};
     const requestedEngine = dto.engine;
     const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
 
-    const existing = this.inFlightCompiles.get(projectId);
+    const existing = this.inFlightCompiles.get(spaceId);
     if (existing) {
       if (dto.forceClean) {
         existing.abortController.abort();
@@ -201,7 +199,7 @@ export class ClsiService implements OnModuleDestroy {
       abortController,
       settled,
     };
-    this.inFlightCompiles.set(projectId, session);
+    this.inFlightCompiles.set(spaceId, session);
 
     try {
       if (abortController.signal.aborted) {
@@ -209,19 +207,19 @@ export class ClsiService implements OnModuleDestroy {
       }
 
       if (dto.forceClean) {
-        await this.pipeline.runWithProjectLock(
-          projectId,
-          () => this.workspace.cleanScratch(projectId),
+        await this.pipeline.runWithWorkspaceLock(
+          spaceId,
+          () => this.workspace.cleanScratch(spaceId),
           abortController.signal,
         );
       }
 
       this.logger.log(
-        `Compiling project ${projectId} using engine ${requestedEngine || 'auto'}`,
+        `Compiling project ${spaceId} using engine ${requestedEngine || 'auto'}`,
       );
 
       const pipelineResult = await this.pipeline.execute({
-        projectId,
+        spaceId,
         mainFile,
         engine: requestedEngine,
         texLiveVersion: dto.texLiveVersion || '2025',
@@ -248,15 +246,15 @@ export class ClsiService implements OnModuleDestroy {
 
       return pipelineResult;
     } finally {
-      if (this.inFlightCompiles.get(projectId) === session) {
-        this.inFlightCompiles.delete(projectId);
+      if (this.inFlightCompiles.get(spaceId) === session) {
+        this.inFlightCompiles.delete(spaceId);
       }
       markSettled();
     }
   }
 
   private async loadSynctexContent(
-    projectId: string,
+    spaceId: string,
     inlineSynctexBase64?: string,
   ): Promise<string | null> {
     if (inlineSynctexBase64) {
@@ -266,7 +264,7 @@ export class ClsiService implements OnModuleDestroy {
 
     for (const filename of ['output.synctex.gz', 'output.synctex']) {
       try {
-        const buf = await this.workspace.readAuxFile(projectId, filename);
+        const buf = await this.workspace.readAuxFile(spaceId, filename);
         if (!buf) continue;
 
         const content = filename.endsWith('.gz')
@@ -282,16 +280,16 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async forwardSync(dto: ForwardSyncDto) {
-    const projectId = dto.pageId || dto.spaceId || 'default';
+    const spaceId = dto.pageId || dto.spaceId || 'default';
     const synctexContent = await this.loadSynctexContent(
-      projectId,
+      spaceId,
       dto.synctex,
     );
     if (!synctexContent) {
       return {
         success: false,
         error:
-          'SyncTeX data not available. Compile the manuscript first to generate SyncTeX mapping.',
+          'SyncTeX data not available. Compile the document first to generate SyncTeX mapping.',
       };
     }
 
@@ -313,16 +311,16 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async reverseSync(dto: ReverseSyncDto) {
-    const projectId = dto.pageId || dto.spaceId || 'default';
+    const spaceId = dto.pageId || dto.spaceId || 'default';
     const synctexContent = await this.loadSynctexContent(
-      projectId,
+      spaceId,
       dto.synctex,
     );
     if (!synctexContent) {
       return {
         success: false,
         error:
-          'SyncTeX data not available. Compile the manuscript first to generate SyncTeX mapping.',
+          'SyncTeX data not available. Compile the document first to generate SyncTeX mapping.',
       };
     }
 
@@ -387,17 +385,17 @@ export class ClsiService implements OnModuleDestroy {
     };
   }
 
-  public async listAuxFiles(projectId: string) {
-    const files = await this.workspace.listAuxFiles(projectId);
+  public async listAuxFiles(spaceId: string) {
+    const files = await this.workspace.listAuxFiles(spaceId);
     return { files };
   }
 
   public async downloadAuxFile(
-    projectId: string,
+    spaceId: string,
     filename: string,
     res: FastifyReply,
   ) {
-    const buffer = await this.workspace.readAuxFile(projectId, filename);
+    const buffer = await this.workspace.readAuxFile(spaceId, filename);
     if (!buffer) {
       throw new NotFoundException(`Artifact file ${filename} not found`);
     }
@@ -434,17 +432,17 @@ export class ClsiService implements OnModuleDestroy {
     return res.send(buffer);
   }
 
-  public async cleanProjectScratch(
-    projectId: string,
-  ): Promise<{ success: boolean; projectId: string }> {
-    await this.pipeline.runWithProjectLock(projectId, () =>
-      this.workspace.cleanScratch(projectId),
+  public async cleanWorkspaceScratch(
+    spaceId: string,
+  ): Promise<{ success: boolean; spaceId: string }> {
+    await this.pipeline.runWithWorkspaceLock(spaceId, () =>
+      this.workspace.cleanScratch(spaceId),
     );
-    return { success: true, projectId };
+    return { success: true, spaceId };
   }
 
-  public async downloadAllArtifactsZip(projectId: string, res: FastifyReply) {
-    const scratchDir = this.workspace.getScratchDir(projectId);
+  public async downloadAllArtifactsZip(spaceId: string, res: FastifyReply) {
+    const scratchDir = this.workspace.getScratchDir(spaceId);
     const diskEntries: ZipDiskEntry[] = [];
 
     const walk = async (currentDir: string, relDir: string) => {
@@ -485,14 +483,14 @@ export class ClsiService implements OnModuleDestroy {
 
     if (diskEntries.length === 0) {
       throw new NotFoundException(
-        `No output artifacts found for project ${projectId}`,
+        `No output artifacts found for project ${spaceId}`,
       );
     }
 
     const zipStream = createZipStreamFromDisk(diskEntries);
     res.header(
       'Content-Disposition',
-      `attachment; filename="project-${encodeURIComponent(projectId)}-artifacts.zip"`,
+      `attachment; filename="project-${encodeURIComponent(spaceId)}-artifacts.zip"`,
     );
     res.header('Content-Type', 'application/zip');
     return res.send(zipStream);
@@ -521,7 +519,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async cleanScratch() {
-    const staleStats = await this.diskUsageCleaner.cleanStaleProjects();
+    const staleStats = await this.diskUsageCleaner.cleanStaleWorkspaces();
     const quotaStats = await this.diskUsageCleaner.enforceDiskQuota();
     return { staleStats, quotaStats };
   }
@@ -535,7 +533,7 @@ export class ClsiController {
   @Post('compile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Compile LaTeX manuscript source to PDF',
+    summary: 'Compile LaTeX source to PDF',
   })
   @ApiResponse({
     status: 200,
@@ -545,13 +543,13 @@ export class ClsiController {
     return this.clsiService.compile(dto);
   }
 
-  @Post('cancel/:projectId')
+  @Post('cancel/:spaceId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cancel an ongoing compilation for a project',
   })
-  public cancelCompile(@Param('projectId') projectId: string) {
-    const cancelled = this.clsiService.cancelCompile(projectId);
+  public cancelCompile(@Param('spaceId') spaceId: string) {
+    const cancelled = this.clsiService.cancelCompile(spaceId);
     return { success: true, cancelled };
   }
 
@@ -583,39 +581,39 @@ export class ClsiController {
     return this.clsiService.reverseSync(dto);
   }
 
-  @Get('artifacts/:projectId')
+  @Get('artifacts/:spaceId')
   @ApiOperation({
     summary: 'List auxiliary build files generated by compilation',
   })
-  public async listAuxFiles(@Param('projectId') projectId: string) {
-    return this.clsiService.listAuxFiles(projectId);
+  public async listAuxFiles(@Param('spaceId') spaceId: string) {
+    return this.clsiService.listAuxFiles(spaceId);
   }
 
-  @Get('artifacts/:projectId/:filename')
+  @Get('artifacts/:spaceId/:filename')
   @ApiOperation({ summary: 'Download a specific auxiliary file' })
   public async downloadAuxFile(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Param('filename') filename: string,
     @Res() res: FastifyReply,
   ) {
-    return this.clsiService.downloadAuxFile(projectId, filename, res);
+    return this.clsiService.downloadAuxFile(spaceId, filename, res);
   }
 
-  @Delete('artifacts/:projectId')
-  @ApiOperation({ summary: 'Clean scratch workspace for a project or page' })
-  public async cleanProjectScratch(@Param('projectId') projectId: string) {
-    return this.clsiService.cleanProjectScratch(projectId);
+  @Delete('artifacts/:spaceId')
+  @ApiOperation({ summary: 'Clean scratch workspace for a space or page' })
+  public async cleanWorkspaceScratch(@Param('spaceId') spaceId: string) {
+    return this.clsiService.cleanWorkspaceScratch(spaceId);
   }
 
-  @Get('artifacts-zip/:projectId')
+  @Get('artifacts-zip/:spaceId')
   @ApiOperation({
     summary: 'Download all project output artifacts packaged as a ZIP archive',
   })
   public async downloadAllArtifactsZip(
-    @Param('projectId') projectId: string,
+    @Param('spaceId') spaceId: string,
     @Res() res: FastifyReply,
   ) {
-    return this.clsiService.downloadAllArtifactsZip(projectId, res);
+    return this.clsiService.downloadAllArtifactsZip(spaceId, res);
   }
 
   @Get('status')

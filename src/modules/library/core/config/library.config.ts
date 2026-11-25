@@ -1,5 +1,6 @@
 import { registerAs, ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
+import { QUEUES } from '@/core/infrastructure/queue/queue.config';
 import { getDefaultResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
 
 interface LibraryConfig {
@@ -104,7 +105,7 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
         process.env.OPENLIBRARY_API_URL || 'https://openlibrary.org/api/books',
     },
     outbox: {
-      queue: process.env.LIBRARY_OUTBOX_QUEUE || 'flux_library_outbox',
+      queue: process.env.LIBRARY_OUTBOX_QUEUE || QUEUES.LIB_OUTBOX,
       pollIntervalMs: Number(process.env.OUTBOX_POLL_INTERVAL_MS) || 2000,
       batchSize: Number(process.env.OUTBOX_BATCH_SIZE) || 50,
       maxRetries: Number(process.env.OUTBOX_MAX_RETRIES) || 5,
@@ -121,8 +122,7 @@ export const libraryConfig = registerAs('library', (): LibraryConfig => {
         process.env.LIBRARY_INGESTION_QUEUE_PRIORITY ||
         'flux_library_ingestion_priority',
       standardQueue:
-        process.env.LIBRARY_INGESTION_QUEUE_STANDARD ||
-        'flux_library_ingestion_standard',
+        process.env.LIBRARY_INGESTION_QUEUE_STANDARD || QUEUES.LIB_INGEST,
       captureQueue:
         process.env.LIBRARY_INGESTION_QUEUE_CAPTURE ||
         'flux_library_ingestion_capture',

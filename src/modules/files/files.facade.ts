@@ -10,10 +10,10 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Readable } from 'node:stream';
+import { QUEUES } from '@/core';
 import {
   DEFAULT_STORAGE_QUOTA_BYTES,
-  FILES_JOB_GENERATE_THUMBNAIL,
-  FILES_MEDIA_QUEUE,
+  FILE_JOBS,
   STORAGE_ADAPTER,
 } from './files.constant';
 import { ByteRange, StorageKey } from './domain/storage-vo';
@@ -82,7 +82,7 @@ export class FilesFacade implements IFilesPort {
     @Optional() private readonly thumbnailService?: ThumbnailService,
     @Optional() private readonly accessService?: FileAccessService,
     @Optional()
-    @InjectQueue(FILES_MEDIA_QUEUE)
+    @InjectQueue(QUEUES.FILE_MEDIA)
     private readonly mediaQueue?: Queue,
   ) {}
 
@@ -598,7 +598,7 @@ export class FilesFacade implements IFilesPort {
   async requestThumbnail(input: RequestThumbnailInput): Promise<boolean> {
     if (!input.fileId || !this.mediaQueue) return false;
     try {
-      await this.mediaQueue.add(FILES_JOB_GENERATE_THUMBNAIL, input, {
+      await this.mediaQueue.add(FILE_JOBS.THUMBNAIL, input, {
         jobId: `${input.kind}:${input.fileId}`,
         removeOnComplete: true,
         removeOnFail: 100,

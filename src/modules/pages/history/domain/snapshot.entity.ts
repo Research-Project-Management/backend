@@ -1,5 +1,5 @@
 /**
- * project-history/core/domain/entities/snapshot.entity.ts
+ * history/core/domain/entities/snapshot.entity.ts
  * Domain Aggregate Entity representing an immutable project snapshot at a specific version.
  */
 

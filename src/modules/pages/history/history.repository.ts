@@ -1,5 +1,5 @@
 /**
- * history/repositories/history.repository.ts
+ * history/history.repository.ts
  * Prisma Persistence Repository & Domain Mapper for 3NF History Schema
  * (HistoryBlob, PageSnapshot, PageSnapshotFile, PageSnapshotLabel).
  */

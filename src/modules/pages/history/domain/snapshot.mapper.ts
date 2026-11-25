@@ -1,5 +1,5 @@
 /**
- * project-history/domain/snapshot.mapper.ts
+ * history/domain/snapshot.mapper.ts
  * Pure, side-effect-free normalizer transforming any of the 3 database snapshot
  * `files` JSON shapes into a canonical `Map<string, FileSnapshotVo>`.
  */

@@ -5,7 +5,7 @@ import {
   VersionNotFoundException,
   DuplicateLabelException,
 } from '../domain/errors';
-import { VersionLabelDto } from '../dto/history.dto';
+import { VersionLabelDto } from '../dto/label.dto';
 
 @Injectable()
 export class LabelService {

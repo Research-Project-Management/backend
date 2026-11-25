@@ -1,5 +1,5 @@
 /**
- * history/controllers/history.controller.ts
+ * history/history.controller.ts
  * Canonical REST API Controller for Space/Project History, Snapshots, Diff & Labels.
  */
 
@@ -43,16 +43,16 @@ import { LabelService } from './services/label.service';
 import { RestoreService } from './services/restore.service';
 import {
   CreateSnapshotDto,
-  LabelVersionDto,
+  SnapshotDetailDto,
+  VersionListItemDto,
+} from './dto/snapshot.dto';
+import { LabelVersionDto, VersionLabelDto } from './dto/label.dto';
+import {
   RestoreVersionDto,
   RestoreSingleFileDto,
   RestoreSingleFileResponseDto,
-  DiffQueryDto,
-  DiffResponseDto,
-  SnapshotDetailDto,
-  VersionListItemDto,
-  VersionLabelDto,
-} from './dto/history.dto';
+} from './dto/restore.dto';
+import { DiffQueryDto, DiffResponseDto } from './dto/diff.dto';
 
 @ApiTags('Pages - History & Snapshots')
 @ApiBearerAuth('JWT-auth')

@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BullModule } from '@nestjs/bullmq';
-import { CoreModule, getBullMqConfig } from './core';
+import { CoreModule, getQueueConfig } from './core';
 import { IdentityModule } from './modules/identity/identity.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ActivityModule } from './modules/activity/activity.module';
@@ -31,7 +31,7 @@ import { AppController } from './app.controller';
     }),
     BullModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: getBullMqConfig,
+      useFactory: getQueueConfig,
     }),
     CoreModule,
     IdentityModule,

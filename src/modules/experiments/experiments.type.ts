@@ -1,19 +1,9 @@
 import { Readable } from 'node:stream';
 import type { CompletedPart } from '@/modules/files';
-import {
-  EXPERIMENTS_PORT,
-  EXPERIMENTS_PROCESSING_QUEUE,
-  EXPERIMENTS_JOB_PROCESS_FILE,
-  EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-} from './experiments.constant';
+import { EXPERIMENTS_PORT } from './experiments.constant';
 import { FileScope, ExperimentNode } from './domain/node.domain';
 
-export {
-  EXPERIMENTS_PORT,
-  EXPERIMENTS_PROCESSING_QUEUE,
-  EXPERIMENTS_JOB_PROCESS_FILE,
-  EXPERIMENTS_JOB_MAINTENANCE_TRASH,
-};
+export { EXPERIMENTS_PORT };
 
 export function getFileContentPath(fileId: string): string {
   return `/api/v1/experiments/files/${encodeURIComponent(fileId)}/content`;

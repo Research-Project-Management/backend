@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { HistoryRepository } from '../history.repository';
-import { SnapshotCollectorAdapter } from '../adapters/snapshot-collector.adapter';
+import { SnapshotCollectorAdapter } from '../adapters/collector.adapter';
 import { Snapshot } from '../domain/snapshot.entity';
 import { VersionLabel } from '../domain/label.entity';
 import {
@@ -17,8 +17,8 @@ import {
   CreateSnapshotDto,
   SnapshotDetailDto,
   VersionListItemDto,
-  VersionLabelDto,
-} from '../dto/history.dto';
+} from '../dto/snapshot.dto';
+import { VersionLabelDto } from '../dto/label.dto';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
 

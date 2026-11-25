@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -12,13 +12,12 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
 import * as path from 'path';
-import { DistributedLockService, RedisCacheService } from '@/core';
+import { DistributedLockService, QUEUES, RedisCacheService } from '@/core';
 import {
   DEFAULT_MULTIPART_TTL_HOURS,
   DEFAULT_PRESIGN_SIZE_BYTES,
   DEFAULT_STAGING_TTL_SECONDS,
-  FILES_FINALIZE_CAS_QUEUE,
-  FILES_JOB_PROMOTE_CAS,
+  FILE_JOBS,
   MAX_MULTIPART_PARTS,
   MAX_PART_PRESIGN_BATCH,
   MIN_MULTIPART_PART_SIZE_BYTES,
@@ -95,7 +94,7 @@ export class FilesUploadService {
     private readonly quotaRepo: QuotaRepository,
     private readonly sessionRepo: SessionRepository,
     @Optional()
-    @InjectQueue(FILES_FINALIZE_CAS_QUEUE)
+    @InjectQueue(QUEUES.FILE_CAS)
     private readonly finalizeCasQueue?: Queue,
     @Optional()
     private readonly redis?: RedisCacheService,
@@ -159,7 +158,7 @@ export class FilesUploadService {
   private async enqueueCasPromotion(data: PromoteCasJobData): Promise<void> {
     if (!this.finalizeCasQueue) return;
     try {
-      await this.finalizeCasQueue.add(FILES_JOB_PROMOTE_CAS, data, {
+      await this.finalizeCasQueue.add(FILE_JOBS.PROMOTE_CAS, data, {
         jobId: `promote-cas-${data.blobId}`,
         attempts: 5,
         backoff: { type: 'exponential', delay: 5000 },

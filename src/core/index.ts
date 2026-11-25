@@ -20,7 +20,8 @@ export * from './infrastructure/redis/invalidation.listener';
 export * from './infrastructure/redis/io.adapter';
 
 // Infrastructure - Queue
-export * from './infrastructure/queue/bullmq.config';
+export * from './infrastructure/queue/queue.config';
+export * from './infrastructure/queue/queue.health';
 
 // Infrastructure - Health
 export * from './infrastructure/health/health.module';

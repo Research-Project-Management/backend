@@ -1,5 +1,5 @@
 /**
- * project-history/domain/diff.engine.ts
+ * history/domain/diff.engine.ts
  * Pure, side-effect-free Myers LCS line-diff and intra-line word-diff engine
  * for comparing Manuscript Snapshots.
  */

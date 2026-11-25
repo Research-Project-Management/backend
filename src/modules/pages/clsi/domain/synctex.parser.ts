@@ -7,7 +7,7 @@
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
-import { ISyncTexProcessor, SyncPoint, ReverseSyncPoint } from './clsi.ports';
+import { SyncPoint, ReverseSyncPoint } from './ports';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const MAX_CACHE_ENTRIES = 6;
@@ -38,7 +38,7 @@ export interface ParsedSyncTexData {
   unit: number;
 }
 
-export class SyncTexProcessor implements ISyncTexProcessor {
+export class SynctexParser {
   private readonly lruCache = new Map<string, ParsedSyncTexData>();
   private lastRawRef: string | null = null;
   private lastParsedRef: ParsedSyncTexData | null = null;

@@ -863,7 +863,8 @@ export class ProjectResourceResolver {
 
       if (paramRes.provided && paramRes.isPersonal && currentUserId) {
         const url = request.url || request.raw?.url || '';
-        const isPagesRoute = url.includes('/pages');
+        const isPagesRoute =
+          url.includes('/pages') || url.includes('/editor-bootstrap');
         if (isPagesRoute) {
           synchronizeRequestScope(currentUserId, true);
           if (request.params && typeof request.params === 'object') {
@@ -1009,7 +1010,8 @@ export class ProjectResourceResolver {
 
       if (hasPersonalClientHint && currentUserId) {
         const url = request.url || request.raw?.url || '';
-        const isPagesRoute = url.includes('/pages');
+        const isPagesRoute =
+          url.includes('/pages') || url.includes('/editor-bootstrap');
         if (isPagesRoute) {
           synchronizeRequestScope(currentUserId, true);
           return {

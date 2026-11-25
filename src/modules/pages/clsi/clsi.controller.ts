@@ -27,8 +27,8 @@ import {
 } from '@/modules/project/access';
 import { FastifyReply } from 'fastify';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
-import { ClsiService } from './services/clsi.service';
-import { CompilePageDto, ClsiWordCountDto } from './dto/clsi.dto';
+import { ClsiService } from './clsi.service';
+import { CompilePageDto, ClsiWordCountDto } from './dto/compile.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 
 @ApiTags('Pages - CLSI')
@@ -51,7 +51,7 @@ export class ClsiController {
     );
   }
 
-  @Post(['compile', 'spaces/:spaceId/compile', 'pages/:pageId/compile'])
+  @Post('compile')
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('compile')
@@ -60,16 +60,11 @@ export class ClsiController {
   async compile(
     @Body() dto: CompilePageDto,
     @CurrentUser('id') userId: string,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId);
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace);
     if (authorizedSpaceId && !dto.spaceId) {
       dto.spaceId = authorizedSpaceId;
-    }
-    if (routePageId && !dto.pageId) {
-      dto.pageId = routePageId;
     }
     return this.clsiService.compile(dto, userId, authorizedSpaceId || undefined);
   }
@@ -91,11 +86,7 @@ export class ClsiController {
     return { success: true, cancelled };
   }
 
-  @Post([
-    'word-count',
-    'spaces/:spaceId/word-count',
-    'pages/:pageId/word-count',
-  ])
+  @Post('word-count')
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.REVIEWER)
   @UserRateLimit('compile')
@@ -103,16 +94,11 @@ export class ClsiController {
   @ApiOperation({ summary: 'Calculate document word count via TeXcount' })
   async wordCount(
     @Body() dto: ClsiWordCountDto,
-    @Param('spaceId') routeSpaceId?: string,
-    @Param('pageId') routePageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId);
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace);
     if (authorizedSpaceId && !dto.spaceId) {
       dto.spaceId = authorizedSpaceId;
-    }
-    if (routePageId && !dto.pageId) {
-      dto.pageId = routePageId;
     }
     return this.clsiService.getWordCount(dto, authorizedSpaceId || undefined);
   }
@@ -214,7 +200,7 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
     const spaceId = this.resolveSpaceId(resolvedSpace, routeSpaceId, routePageId);
-    return this.clsiService.cleanProjectScratch(spaceId, routePageId);
+    return this.clsiService.cleanScratch(spaceId, routePageId);
   }
 
   @Get('clsi/status')

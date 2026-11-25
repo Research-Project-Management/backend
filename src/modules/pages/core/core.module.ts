@@ -6,25 +6,22 @@
  * shared across all 14 pages submodules.
  */
 
-import { forwardRef, Global, Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { IdentityModule } from '@/modules/identity/identity.module';
-import { RealtimeModule } from '@/modules/realtime/realtime.module';
+import { RealtimeClientModule } from '@/modules/realtime/client/module';
 import { PagesConfigService } from './config/pages.config';
 import { WorkspaceCollectorService } from './services/workspace-collector.service';
 import { PageDomainEventBus } from './events/event-bus.service';
 import { UserResolverService } from './services/user-resolver.service';
-import {
-  IDistributedLockPort,
-  InMemoryDistributedLockAdapter,
-} from './ports/distributed-lock.port';
+import { IDistributedLockPort } from './ports/distributed-lock.port';
 import { RedisLockAdapter } from './adapters/redis-lock.adapter';
 
 import { CleanupListener } from './services/cleanup.listener';
 
 @Global()
 @Module({
-  imports: [PrismaModule, IdentityModule, forwardRef(() => RealtimeModule)],
+  imports: [PrismaModule, IdentityModule, RealtimeClientModule],
   providers: [
     PagesConfigService,
     WorkspaceCollectorService,
@@ -44,7 +41,7 @@ import { CleanupListener } from './services/cleanup.listener';
     UserResolverService,
     IDistributedLockPort,
     RedisLockAdapter,
-    forwardRef(() => RealtimeModule),
+    RealtimeClientModule,
   ],
 })
 export class PagesCoreModule {}

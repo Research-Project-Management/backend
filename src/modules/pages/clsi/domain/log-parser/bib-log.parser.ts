@@ -4,8 +4,8 @@
  * Zero I/O, zero NestJS imports.
  */
 
-import { DiagnosticItem, DiagnosticSeverityVo } from './diagnostic-item.entity';
-import type { ErrorExplainerLike } from './error-knowledge-base';
+import { DiagnosticItem, DiagnosticSeverityVo } from './diagnostic.model';
+import type { ErrorExplainerLike } from './error.catalog';
 
 const DEFAULT_MAX_BIB_ENTRIES = 100;
 
