@@ -10,6 +10,17 @@ import { UnsafePathException } from './errors';
 
 export class SafePath {
   /**
+   * Normalizes a relative path into clean POSIX form without leading `./` or `/`.
+   */
+  public static normalizeRelPath(rawPath: string): string {
+    return (rawPath || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^(\.\/)+/, '')
+      .replace(/^\/+/, '');
+  }
+
+  /**
    * Sanitizes and validates a relative path.
    * Rejects absolute paths, UNC paths, drive letters, null bytes, and traversal beyond root.
    */

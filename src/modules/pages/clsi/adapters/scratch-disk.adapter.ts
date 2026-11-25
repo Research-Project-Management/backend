@@ -10,6 +10,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
 import { DiscoveredOutputFile } from '../domain/ports';
 
@@ -157,15 +158,61 @@ interface ProjectDirInfo {
   isLocked: boolean;
 }
 
-export class DiskUsageCleaner {
+export class DiskUsageCleaner implements OnModuleInit, OnModuleDestroy {
   private static readonly DEFAULT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   private static readonly DEFAULT_MAX_BYTES = 5 * 1024 * 1024 * 1024;
   private static readonly DEFAULT_TARGET_BYTES = 3 * 1024 * 1024 * 1024;
+  public static readonly DEFAULT_GC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+  private readonly logger = new Logger(DiskUsageCleaner.name);
+  private gcTimer: NodeJS.Timeout | null = null;
+  private gcInFlight = false;
 
   constructor(
-    private readonly baseScratchDir: string = process.env.CLSI_SCRATCH_DIR ||
-      path.join(os.tmpdir(), 'clsi-scratch'),
+    private readonly baseScratchDir: string = path.join(
+      os.tmpdir(),
+      'clsi-scratch',
+    ),
+    private readonly gcIntervalMs: number = 0,
   ) {}
+
+  public onModuleInit(): void {
+    if (!Number.isFinite(this.gcIntervalMs) || this.gcIntervalMs <= 0) return;
+
+    this.gcTimer = setInterval(() => {
+      if (this.gcInFlight) return;
+      this.gcInFlight = true;
+      void Promise.all([
+        this.cleanStaleWorkspaces(),
+        this.enforceDiskQuota(),
+      ])
+        .then(([stale, quota]) => {
+          const totalCleaned =
+            stale.cleanedWorkspaces + quota.cleanedWorkspaces;
+          if (totalCleaned > 0) {
+            this.logger.log(
+              `Scheduled scratch GC cleaned ${totalCleaned} workspace(s), freed ${stale.freedBytes + quota.freedBytes} bytes.`,
+            );
+          }
+        })
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Scheduled scratch GC failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        })
+        .finally(() => {
+          this.gcInFlight = false;
+        });
+    }, this.gcIntervalMs);
+    this.gcTimer.unref();
+  }
+
+  public onModuleDestroy(): void {
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+      this.gcTimer = null;
+    }
+  }
 
   public async cleanStaleWorkspaces(
     options?: DiskUsageOptions,

@@ -6,6 +6,7 @@ import {
   ProcessExecutionResult,
 } from '../domain/ports';
 import { LocalProcessRunner } from './local.sandbox';
+import { resolveTexLiveImage } from './sandbox.config';
 import { getSafeHostEnv } from '../../core/config/pages.config';
 import { SandboxUnavailableException } from '../domain/errors';
 import {
@@ -131,7 +132,7 @@ export class DockerSandboxRunner implements ISandboxRunner {
       '-w',
       '/compile',
       ...envArgs,
-      this.dockerImage,
+      resolveTexLiveImage(options.texLiveVersion, this.dockerImage),
       command,
       ...args,
     ];

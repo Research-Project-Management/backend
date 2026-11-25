@@ -10,10 +10,12 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import {
+  AuxFileInfo,
+  BuildStateRecord,
+  CachedCompileArtifacts,
   IWorkspaceManager,
   WorkspaceFile,
   WorkspaceSyncStats,
-  AuxFileInfo,
 } from './domain/ports';
 import { SafePath } from './domain/path.policy';
 import { mapWithConcurrency } from '@/core/utils/concurrency.util';
@@ -452,6 +454,84 @@ export class ClsiRepository implements IWorkspaceManager {
       return await fs.readFile(safePath);
     } catch {
       return null;
+    }
+  }
+
+  public async readBuildState(
+    spaceId: string,
+  ): Promise<BuildStateRecord | null> {
+    const buildStatePath = path.join(
+      this.getScratchDir(spaceId),
+      '.clsi-build-state.json',
+    );
+    try {
+      const raw = await fs.readFile(buildStatePath, 'utf8');
+      return JSON.parse(raw) as BuildStateRecord;
+    } catch {
+      return null;
+    }
+  }
+
+  public async writeBuildState(
+    spaceId: string,
+    state: BuildStateRecord,
+  ): Promise<void> {
+    const buildStatePath = path.join(
+      this.getScratchDir(spaceId),
+      '.clsi-build-state.json',
+    );
+    try {
+      await fs.writeFile(buildStatePath, JSON.stringify(state), 'utf8');
+    } catch {
+      // Build state cache write failure is non-fatal
+    }
+  }
+
+  public async writeCachedArtifacts(
+    spaceId: string,
+    artifacts: CachedCompileArtifacts,
+  ): Promise<void> {
+    try {
+      const scratchDir = await this.ensureScratch(spaceId);
+      const writes: Promise<void>[] = [];
+      if (artifacts.pdf) {
+        writes.push(
+          fs.writeFile(
+            path.join(scratchDir, 'output.pdf'),
+            Buffer.from(artifacts.pdf, 'base64'),
+          ),
+        );
+      }
+      if (artifacts.synctex) {
+        const synctexBuf = Buffer.from(artifacts.synctex, 'base64');
+        const isGzip =
+          synctexBuf.length >= 2 &&
+          synctexBuf[0] === 0x1f &&
+          synctexBuf[1] === 0x8b;
+        writes.push(
+          fs.writeFile(
+            path.join(
+              scratchDir,
+              isGzip ? 'output.synctex.gz' : 'output.synctex',
+            ),
+            synctexBuf,
+          ),
+        );
+      }
+      if (artifacts.logs) {
+        writes.push(
+          fs.writeFile(
+            path.join(scratchDir, 'output.log'),
+            artifacts.logs,
+            'utf8',
+          ),
+        );
+      }
+      if (writes.length > 0) {
+        await Promise.allSettled(writes);
+      }
+    } catch {
+      // Best-effort artifact sync to scratch
     }
   }
 }

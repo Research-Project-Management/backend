@@ -34,6 +34,7 @@ import {
   createUnchangedDiskPlaceholder,
 } from '../clsi.repository';
 import { SafePath } from '../domain/path.policy';
+import { BoundedLruCache } from '../domain/lru-cache';
 
 export interface HydrateFilesOptions {
   /**
@@ -53,10 +54,10 @@ export class CompileSourceService {
    * only queries PostgreSQL (`SELECT lines FROM page_docs`) for the `O(Delta D)` documents whose
    * revision token (`d:${id}:${rev}:${updatedAt}:${sizeBytes}`) actually changed since the last build.
    */
-  private readonly docContentCache = new Map<
+  private readonly docContentCache = new BoundedLruCache<
     string,
     { token: string; content: string }
-  >();
+  >(CompileSourceService.MAX_CACHED_DOCS);
   private static readonly MAX_CACHED_DOCS = 2000;
   private static readonly MAX_CACHED_DOC_BYTES = 512 * 1024;
 
@@ -267,9 +268,6 @@ export class CompileSourceService {
     if (!entry || entry.token !== expectedToken) {
       return undefined;
     }
-    // Refresh LRU order
-    this.docContentCache.delete(cacheKey);
-    this.docContentCache.set(cacheKey, entry);
     return entry.content;
   }
 
@@ -284,16 +282,6 @@ export class CompileSourceService {
         CompileSourceService.MAX_CACHED_DOC_BYTES
     ) {
       return;
-    }
-    if (this.docContentCache.has(cacheKey)) {
-      this.docContentCache.delete(cacheKey);
-    } else if (
-      this.docContentCache.size >= CompileSourceService.MAX_CACHED_DOCS
-    ) {
-      const oldestKey = this.docContentCache.keys().next().value;
-      if (oldestKey) {
-        this.docContentCache.delete(oldestKey);
-      }
     }
     this.docContentCache.set(cacheKey, { token, content });
   }
@@ -442,11 +430,7 @@ export class CompileSourceService {
         const pathByFileId = new Map<string, string>();
         for (const n of fileNodes) {
           if (n.fileId) {
-            const clean = (n.path || n.name || '')
-              .trim()
-              .replace(/\\/g, '/')
-              .replace(/^(\.\/)+/, '')
-              .replace(/^\/+/, '');
+            const clean = SafePath.normalizeRelPath(n.path || n.name || '');
             if (clean) pathByFileId.set(n.fileId, clean);
           }
         }
@@ -471,12 +455,7 @@ export class CompileSourceService {
 
         await mapWithConcurrency(binaryFiles, 8, async (bf) => {
           const relPath =
-            pathByFileId.get(bf.id) ||
-            bf.name
-              .trim()
-              .replace(/\\/g, '/')
-              .replace(/^(\.\/)+/, '')
-              .replace(/^\/+/, '');
+            pathByFileId.get(bf.id) || SafePath.normalizeRelPath(bf.name);
           if (!relPath || out[relPath] !== undefined) return;
 
           // Disk-cache hit optimization: if workspace already has the exact asset on disk

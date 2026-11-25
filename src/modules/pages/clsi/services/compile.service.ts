@@ -10,12 +10,15 @@ import * as path from 'path';
 import { BadRequestException, Logger } from '@nestjs/common';
 import {
   BibLogInput,
+  BuildStateRecord,
   CompileLogMeta,
   CompileOutcome,
   CompileValidationIssue,
   DiagnosticsSummary,
+  EngineRunResult,
   IWorkspaceManager,
   WorkspaceFile,
+  WorkspaceSyncStats,
   ILatexEngine,
   CompilerDiagnostic,
   DiscoveredOutputFile,
@@ -38,15 +41,86 @@ import {
   MAX_BIB_LOG_BYTES,
   readBoundedLogFile,
   boundInlineLogText,
-} from './output.service';
+} from '../utils/bounded-log.util';
 
-export interface BuildStateRecord {
-  success: boolean;
-  mainFile: string;
-  engine: string;
-  draft: boolean;
-  timestamp: number;
-}
+export type { BuildStateRecord };
+
+const CompileResults = {
+  success(params: {
+    pdf: string;
+    synctex?: string;
+    logs: string;
+    logMeta?: CompileLogMeta;
+    diagnostics?: CompilerDiagnostic[];
+    diagnosticsSummary?: DiagnosticsSummary;
+    outputFiles?: DiscoveredOutputFile[];
+    durationMs: number;
+  }): CompilePipelineResult {
+    return {
+      success: true,
+      status: 'success',
+      outcome: 'success',
+      pdf: params.pdf,
+      synctex: params.synctex || undefined,
+      logs: params.logs,
+      logMeta: params.logMeta,
+      diagnostics:
+        params.diagnostics && params.diagnostics.length > 0
+          ? params.diagnostics
+          : undefined,
+      diagnosticsSummary: params.diagnosticsSummary,
+      outputFiles: params.outputFiles,
+      durationMs: params.durationMs,
+    };
+  },
+
+  failure(params: {
+    outcome: CompileOutcome;
+    error: string;
+    logs: string;
+    durationMs: number;
+    pdf?: string;
+    synctex?: string;
+    logMeta?: CompileLogMeta;
+    diagnostics?: CompilerDiagnostic[];
+    diagnosticsSummary?: DiagnosticsSummary;
+    outputFiles?: DiscoveredOutputFile[];
+    validationIssues?: CompileValidationIssue[];
+    timedOut?: boolean;
+  }): CompilePipelineResult {
+    return {
+      success: false,
+      status: 'failure',
+      outcome: params.outcome,
+      error: params.error,
+      logs: params.logs,
+      durationMs: params.durationMs,
+      ...(params.pdf ? { pdf: params.pdf } : {}),
+      ...(params.synctex ? { synctex: params.synctex } : {}),
+      ...(params.logMeta ? { logMeta: params.logMeta } : {}),
+      ...(params.diagnostics !== undefined
+        ? { diagnostics: params.diagnostics }
+        : {}),
+      ...(params.diagnosticsSummary
+        ? { diagnosticsSummary: params.diagnosticsSummary }
+        : {}),
+      ...(params.outputFiles ? { outputFiles: params.outputFiles } : {}),
+      ...(params.validationIssues
+        ? { validationIssues: params.validationIssues }
+        : {}),
+      ...(params.timedOut !== undefined ? { timedOut: params.timedOut } : {}),
+    };
+  },
+
+  terminated(durationMs: number): CompilePipelineResult {
+    return CompileResults.failure({
+      outcome: 'terminated',
+      error: 'Compilation superseded or cancelled',
+      logs: '',
+      durationMs,
+    });
+  },
+};
 
 export interface CompilePipelineRequest {
   spaceId?: string;
@@ -128,16 +202,139 @@ export class CompileService {
     dto: CompilePipelineRequest,
   ): Promise<CompilePipelineResult> {
     const startTime = Date.now();
-    const spaceId =
-      (dto as { spaceId?: string }).spaceId ||
-      dto.spaceId ||
-      'default-project';
-    const cleanRelPath = (p: string) =>
-      p
-        .trim()
-        .replace(/\\/g, '/')
-        .replace(/^(\.\/)+/, '')
-        .replace(/^\/+/, '');
+    const prepared = this.prepareInputs(dto);
+
+    if (dto.signal?.aborted) {
+      return CompileResults.terminated(0);
+    }
+
+    if (prepared.workspaceFiles.length === 0) {
+      const msg = `Main TeX document "${prepared.mainFile}" is missing or empty.`;
+      return CompileResults.failure({
+        outcome: 'validation-problems',
+        error: msg,
+        logs: '',
+        diagnostics: [],
+        validationIssues: [
+          {
+            code: 'mainFile',
+            mainFile: prepared.mainFile,
+            availableTexFiles: [],
+            message: msg,
+          },
+        ],
+        durationMs: Date.now() - startTime,
+      });
+    }
+
+    const scratchDir = this.workspace.getScratchDir(prepared.spaceId);
+
+    try {
+      return await this.scratchLock.runWithLock(
+        prepared.spaceId,
+        scratchDir,
+        async () => {
+          const syncStats = await this.workspace.syncFiles(
+            prepared.spaceId,
+            prepared.workspaceFiles,
+          );
+          const prevBuildState = await this.workspace.readBuildState(
+            prepared.spaceId,
+          );
+
+          const cached = await this.tryDiskCacheHit({
+            dto,
+            prepared,
+            scratchDir,
+            syncStats,
+            prevBuildState,
+            startTime,
+          });
+          if (cached) return cached;
+
+          const shouldForceLatexmk = await this.prepareScratchConfig({
+            dto,
+            prepared,
+            scratchDir,
+            syncStats,
+            prevBuildState,
+          });
+
+          const resolvedRunner = await this.resolveAvailableEngine(
+            prepared.resolvedEngine,
+          );
+          if (!resolvedRunner) {
+            const errorMsg =
+              'No supported TeX engine (latexmk/pdflatex) was found in PATH or sandbox runner. Please install TeX Live (latexmk), or configure CLSI_URL / Docker runner.';
+            return CompileResults.failure({
+              outcome: 'clsi-unavailable',
+              error: errorMsg,
+              logs: errorMsg,
+              diagnostics: [],
+              durationMs: Date.now() - startTime,
+            });
+          }
+
+          const timeoutMs = dto.timeoutMs || 240000;
+          const stopOnFirstError = dto.stopOnFirstError ?? false;
+          const engineResult = await resolvedRunner.engineToUse.compile(
+            {
+              cwd: scratchDir,
+              mainFile: prepared.mainFile,
+              timeoutMs,
+              stopOnFirstError,
+              draft: dto.draft ?? false,
+              syntaxOnly: dto.syntaxOnly ?? false,
+              force: shouldForceLatexmk,
+              compilerOverride: resolvedRunner.compilerFlag,
+              texLiveVersion: dto.texLiveVersion,
+              signal: dto.signal,
+              onLogChunk: dto.onLogChunk,
+            },
+            resolvedRunner.compilerFlag,
+          );
+
+          if (dto.signal?.aborted) {
+            return CompileResults.terminated(Date.now() - startTime);
+          }
+
+          return await this.resolveOutcome({
+            dto,
+            prepared,
+            scratchDir,
+            engineResult,
+            timeoutMs,
+            stopOnFirstError,
+            durationMs: Date.now() - startTime,
+          });
+        },
+        { signal: dto.signal },
+      );
+    } catch (err: unknown) {
+      const isAborted =
+        Boolean(dto.signal?.aborted) ||
+        (err as { name?: string })?.name === 'AbortError';
+      const message = err instanceof Error ? err.message : String(err);
+      if (isAborted) {
+        return CompileResults.terminated(Date.now() - startTime);
+      }
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error(
+        `CompileService execution error for space ${prepared.spaceId}: ${message}`,
+        stack,
+      );
+      return CompileResults.failure({
+        outcome: 'failure',
+        error: message || 'Compilation execution failed',
+        logs: message || 'Compilation execution failed',
+        durationMs: Date.now() - startTime,
+      });
+    }
+  }
+
+  private prepareInputs(dto: CompilePipelineRequest) {
+    const spaceId = dto.spaceId || 'default-space';
+    const cleanRelPath = SafePath.normalizeRelPath;
 
     let mainFile = dto.mainFile ? cleanRelPath(dto.mainFile) : '';
     if (
@@ -211,16 +408,14 @@ export class CompileService {
     }
 
     const workspaceFiles: WorkspaceFile[] = [];
-
     if (mainSource) {
-      workspaceFiles.push({
-        path: mainFile,
-        content: mainSource,
-      });
+      workspaceFiles.push({ path: mainFile, content: mainSource });
     }
 
     const isForbiddenConfigFile = (relPath: string): boolean => {
-      const base = path.posix.basename(relPath.replace(/\\/g, '/')).toLowerCase();
+      const base = path.posix
+        .basename(relPath.replace(/\\/g, '/'))
+        .toLowerCase();
       return base === 'latexmkrc' || base === '.latexmkrc';
     };
 
@@ -228,359 +423,247 @@ export class CompileService {
       for (const [filePath, content] of Object.entries(dto.files)) {
         const cleanPath = cleanRelPath(filePath);
         if (cleanPath === mainFile || isForbiddenConfigFile(cleanPath)) continue;
-        workspaceFiles.push({
-          path: cleanPath,
-          content,
-        });
+        workspaceFiles.push({ path: cleanPath, content });
       }
     }
 
-    if (dto.signal?.aborted) {
-      return {
-        success: false,
-        status: 'failure',
-        outcome: 'terminated',
-        error: 'Compilation superseded or cancelled',
-        logs: '',
-        durationMs: 0,
-      };
-    }
+    return {
+      spaceId,
+      mainFile,
+      mainSource,
+      resolvedEngine,
+      engineDetect,
+      shellEscapeAdvisories,
+      workspaceFiles,
+      inputFiles: workspaceFiles.map((f) => f.path),
+    };
+  }
 
-    if (workspaceFiles.length === 0) {
-      const msg = `Main TeX document "${mainFile}" is missing or empty.`;
-      return {
-        success: false,
-        status: 'failure',
-        outcome: 'validation-problems',
-        error: msg,
-        logs: '',
-        diagnostics: [],
-        validationIssues: [
-          {
-            code: 'mainFile',
-            mainFile,
-            availableTexFiles: [],
-            message: msg,
-          },
-        ],
-        durationMs: Date.now() - startTime,
-      };
-    }
+  private async tryDiskCacheHit(params: {
+    dto: CompilePipelineRequest;
+    prepared: ReturnType<CompileService['prepareInputs']>;
+    scratchDir: string;
+    syncStats: WorkspaceSyncStats;
+    prevBuildState: BuildStateRecord | null;
+    startTime: number;
+  }): Promise<CompilePipelineResult | null> {
+    const { dto, prepared, scratchDir, syncStats, prevBuildState, startTime } =
+      params;
 
-    const scratchDir = this.workspace.getScratchDir(spaceId);
-    const inputFiles = workspaceFiles.map((f) => f.path);
+    if (
+      syncStats.written !== 0 ||
+      syncStats.deleted !== 0 ||
+      dto.syntaxOnly ||
+      dto.force ||
+      prevBuildState?.success !== true ||
+      prevBuildState.mainFile !== prepared.mainFile ||
+      prevBuildState.engine !== prepared.resolvedEngine ||
+      prevBuildState.draft !== (dto.draft ?? false)
+    ) {
+      return null;
+    }
 
     try {
-      return await this.scratchLock.runWithLock(
-        spaceId,
+      const pdfStat = await fs.stat(path.join(scratchDir, 'output.pdf'));
+      if (pdfStat.size <= 0) return null;
+
+      const harvested = await this.harvestCompileArtifacts({
         scratchDir,
-        async () => {
-          const syncStats = await this.workspace.syncFiles(
-            spaceId,
-            workspaceFiles,
-          );
+        spaceId: prepared.spaceId,
+        mainFile: prepared.mainFile,
+        inputFiles: prepared.inputFiles,
+        stopOnFirstError: dto.stopOnFirstError ?? false,
+        fallbackLogs: '[CLSI Cache] Build up to date: workspace unchanged.',
+      });
 
-          const pdfPath = path.join(scratchDir, 'output.pdf');
-          const buildStatePath = path.join(
-            scratchDir,
-            '.clsi-build-state.json',
-          );
+      if (!harvested.pdfBase64) return null;
 
-          let prevBuildState: BuildStateRecord | null = null;
-          try {
-            const stateRaw = await fs.readFile(buildStatePath, 'utf8');
-            prevBuildState = JSON.parse(stateRaw) as BuildStateRecord;
-          } catch {
-            prevBuildState = null;
-          }
-
-          if (
-            syncStats.written === 0 &&
-            syncStats.deleted === 0 &&
-            !dto.syntaxOnly &&
-            !dto.force &&
-            prevBuildState?.success === true &&
-            prevBuildState.mainFile === mainFile &&
-            prevBuildState.engine === resolvedEngine &&
-            prevBuildState.draft === (dto.draft ?? false)
-          ) {
-            try {
-              const pdfStat = await fs.stat(pdfPath);
-              if (pdfStat.size > 0) {
-                const harvested = await this.harvestCompileArtifacts({
-                  scratchDir,
-                  spaceId,
-                  mainFile,
-                  inputFiles,
-                  stopOnFirstError: dto.stopOnFirstError ?? false,
-                  fallbackLogs:
-                    '[CLSI Cache] Build up to date: workspace unchanged.',
-                });
-
-                if (harvested.pdfBase64) {
-                  dto.onLogChunk?.(
-                    '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
-                  );
-
-                  return {
-                    success: true,
-                    status: 'success',
-                    outcome: 'success',
-                    pdf: harvested.pdfBase64,
-                    synctex: harvested.synctexBase64 || undefined,
-                    logs: harvested.logs,
-                    logMeta: harvested.logMeta,
-                    diagnostics:
-                      harvested.diagnostics.length > 0
-                        ? harvested.diagnostics
-                        : undefined,
-                    diagnosticsSummary: harvested.summary,
-                    outputFiles: harvested.discoveredFiles,
-                    durationMs: Date.now() - startTime,
-                  };
-                }
-              }
-            } catch {
-              // Cache miss or missing file: proceed to standard compile
-            }
-          }
-
-          if (
-            prevBuildState &&
-            (prevBuildState.engine !== resolvedEngine ||
-              prevBuildState.mainFile !== mainFile)
-          ) {
-            await this.workspace.cleanAuxBuildCache?.(spaceId);
-          }
-
-          const shouldForceLatexmk = Boolean(
-            dto.force ||
-            dto.syntaxOnly ||
-            !prevBuildState?.success ||
-            prevBuildState.engine !== resolvedEngine ||
-            prevBuildState.mainFile !== mainFile ||
-            prevBuildState.draft !== (dto.draft ?? false) ||
-            (syncStats.written === 0 && syncStats.deleted === 0),
-          );
-
-          await this.workspace.purgeExtraneousFiles(spaceId, inputFiles);
-
-          const bibBackend = await BibBackendDetector.detect(
-            mainSource,
-            scratchDir,
-            engineDetect.bibProgramHint,
-          );
-          const userLatexmkFile = workspaceFiles.find(
-            (f) => f.path === '.latexmkrc' || f.path === 'latexmkrc',
-          );
-
-          await BibBackendDetector.writeLatexmkrc(
-            scratchDir,
-            {
-              engine: resolvedEngine,
-              bibBackend,
-              shellEscape: false,
-            },
-            userLatexmkFile?.content
-              ? Buffer.isBuffer(userLatexmkFile.content)
-                ? userLatexmkFile.content.toString('utf8')
-                : String(userLatexmkFile.content)
-              : undefined,
-          );
-
-          const resolvedRunner =
-            await this.resolveAvailableEngine(resolvedEngine);
-          if (!resolvedRunner) {
-            const errorMsg =
-              'No supported TeX engine (latexmk/pdflatex) was found in PATH or sandbox runner. Please install TeX Live (latexmk), or configure CLSI_URL / Docker runner.';
-            return {
-              success: false,
-              status: 'failure',
-              outcome: 'clsi-unavailable',
-              error: errorMsg,
-              logs: errorMsg,
-              diagnostics: [],
-              durationMs: Date.now() - startTime,
-            };
-          }
-
-          const { engineToUse, compilerFlag } = resolvedRunner;
-          const timeoutMs = dto.timeoutMs || 240000;
-          const stopOnFirstError = dto.stopOnFirstError ?? false;
-
-          const engineResult = await engineToUse.compile(
-            {
-              cwd: scratchDir,
-              mainFile,
-              timeoutMs,
-              stopOnFirstError,
-              draft: dto.draft ?? false,
-              syntaxOnly: dto.syntaxOnly ?? false,
-              force: shouldForceLatexmk,
-              compilerOverride: compilerFlag,
-              signal: dto.signal,
-              onLogChunk: dto.onLogChunk,
-            },
-            compilerFlag,
-          );
-
-          if (dto.signal?.aborted) {
-            return {
-              success: false,
-              status: 'failure',
-              outcome: 'terminated',
-              error: 'Compilation superseded or cancelled',
-              logs: '',
-              durationMs: Date.now() - startTime,
-            };
-          }
-
-          const durationMs = Date.now() - startTime;
-          let fallbackLogs = engineResult.stdout || '';
-          if (engineResult.stderr) {
-            fallbackLogs += `\n${engineResult.stderr}`;
-          }
-
-          const harvested = await this.harvestCompileArtifacts({
-            scratchDir,
-            spaceId,
-            mainFile,
-            inputFiles,
-            stopOnFirstError,
-            fallbackLogs,
-            shellEscapeAdvisories,
-          });
-
-          const writeBuildState = async (success: boolean) => {
-            try {
-              await fs.writeFile(
-                buildStatePath,
-                JSON.stringify({
-                  success,
-                  mainFile,
-                  engine: resolvedEngine,
-                  draft: dto.draft ?? false,
-                  timestamp: Date.now(),
-                } satisfies BuildStateRecord),
-                'utf8',
-              );
-            } catch {
-              // Build state cache write failure is non-fatal
-            }
-          };
-
-          if (engineResult.pdfGenerated && harvested.pdfBase64) {
-            const hasErrors = harvested.summary.totalErrors > 0;
-            await writeBuildState(!hasErrors);
-
-            if (hasErrors) {
-              return {
-                success: false,
-                status: 'failure',
-                outcome:
-                  stopOnFirstError && engineResult.exitCode !== 0
-                    ? 'stopped-on-first-error'
-                    : 'failure',
-                error:
-                  harvested.diagnostics.find((d) => d.severity === 'error')
-                    ?.message || 'LaTeX compilation completed with errors',
-                pdf: harvested.pdfBase64,
-                synctex: harvested.synctexBase64 || undefined,
-                logs: harvested.logs,
-                logMeta: harvested.logMeta,
-                diagnostics: harvested.diagnostics,
-                diagnosticsSummary: harvested.summary,
-                outputFiles: harvested.discoveredFiles,
-                durationMs,
-              };
-            }
-
-            return {
-              success: true,
-              status: 'success',
-              outcome: 'success',
-              pdf: harvested.pdfBase64,
-              synctex: harvested.synctexBase64 || undefined,
-              logs: harvested.logs,
-              logMeta: harvested.logMeta,
-              diagnostics:
-                harvested.diagnostics.length > 0
-                  ? harvested.diagnostics
-                  : undefined,
-              diagnosticsSummary: harvested.summary,
-              outputFiles: harvested.discoveredFiles,
-              durationMs,
-            };
-          }
-
-          const outcome: CompileOutcome = engineResult.timedOut
-            ? 'timedout'
-            : (engineResult as { aborted?: boolean }).aborted ||
-                dto.signal?.aborted
-              ? 'terminated'
-              : stopOnFirstError && engineResult.exitCode !== 0
-                ? 'stopped-on-first-error'
-                : 'failure';
-
-          if (outcome !== 'terminated') {
-            await writeBuildState(false);
-          }
-
-          return {
-            success: false,
-            status: 'failure',
-            outcome,
-            error:
-              harvested.diagnostics.find((d) => d.severity === 'error')
-                ?.message ||
-              (outcome === 'timedout'
-                ? `Compilation timed out after ${timeoutMs}ms`
-                : 'LaTeX compilation failed to produce a PDF'),
-            pdf: harvested.pdfBase64 || undefined,
-            synctex: harvested.synctexBase64 || undefined,
-            logs: harvested.logs,
-            logMeta: harvested.logMeta,
-            diagnostics:
-              harvested.diagnostics.length > 0
-                ? harvested.diagnostics
-                : undefined,
-            diagnosticsSummary: harvested.summary,
-            outputFiles: harvested.discoveredFiles,
-            durationMs,
-            timedOut: engineResult.timedOut,
-          };
-        },
-        { signal: dto.signal },
+      dto.onLogChunk?.(
+        '[CLSI Cache] Build up to date: 0 source files modified. Returning cached output.',
       );
-    } catch (err: unknown) {
-      const isAborted =
-        Boolean(dto.signal?.aborted) ||
-        (err as { name?: string })?.name === 'AbortError';
-      const message = err instanceof Error ? err.message : String(err);
-      if (isAborted) {
-        return {
-          success: false,
-          status: 'failure',
-          outcome: 'terminated',
-          error: 'Compilation superseded or cancelled',
-          logs: '',
-          durationMs: Date.now() - startTime,
-        };
-      }
-      const stack = err instanceof Error ? err.stack : undefined;
-      this.logger.error(
-        `CompileService execution error for project ${spaceId}: ${message}`,
-        stack,
-      );
-      return {
-        success: false,
-        status: 'failure',
-        outcome: 'failure',
-        error: message || 'Compilation execution failed',
-        logs: message || 'Compilation execution failed',
+
+      return CompileResults.success({
+        pdf: harvested.pdfBase64,
+        synctex: harvested.synctexBase64,
+        logs: harvested.logs,
+        logMeta: harvested.logMeta,
+        diagnostics: harvested.diagnostics,
+        diagnosticsSummary: harvested.summary,
+        outputFiles: harvested.discoveredFiles,
         durationMs: Date.now() - startTime,
-      };
+      });
+    } catch {
+      return null;
     }
+  }
+
+  private async prepareScratchConfig(params: {
+    dto: CompilePipelineRequest;
+    prepared: ReturnType<CompileService['prepareInputs']>;
+    scratchDir: string;
+    syncStats: WorkspaceSyncStats;
+    prevBuildState: BuildStateRecord | null;
+  }): Promise<boolean> {
+    const { dto, prepared, scratchDir, syncStats, prevBuildState } = params;
+
+    if (
+      prevBuildState &&
+      (prevBuildState.engine !== prepared.resolvedEngine ||
+        prevBuildState.mainFile !== prepared.mainFile)
+    ) {
+      await this.workspace.cleanAuxBuildCache(prepared.spaceId);
+    }
+
+    const shouldForceLatexmk = Boolean(
+      dto.force ||
+        dto.syntaxOnly ||
+        !prevBuildState?.success ||
+        prevBuildState.engine !== prepared.resolvedEngine ||
+        prevBuildState.mainFile !== prepared.mainFile ||
+        prevBuildState.draft !== (dto.draft ?? false) ||
+        (syncStats.written === 0 && syncStats.deleted === 0),
+    );
+
+    await this.workspace.purgeExtraneousFiles(
+      prepared.spaceId,
+      prepared.inputFiles,
+    );
+
+    const bibBackend = await BibBackendDetector.detect(
+      prepared.mainSource,
+      scratchDir,
+      prepared.engineDetect.bibProgramHint,
+    );
+    const userLatexmkFile = prepared.workspaceFiles.find(
+      (f) => f.path === '.latexmkrc' || f.path === 'latexmkrc',
+    );
+
+    await BibBackendDetector.writeLatexmkrc(
+      scratchDir,
+      {
+        engine: prepared.resolvedEngine,
+        bibBackend,
+        shellEscape: false,
+      },
+      userLatexmkFile?.content
+        ? Buffer.isBuffer(userLatexmkFile.content)
+          ? userLatexmkFile.content.toString('utf8')
+          : String(userLatexmkFile.content)
+        : undefined,
+    );
+
+    return shouldForceLatexmk;
+  }
+
+  private async resolveOutcome(params: {
+    dto: CompilePipelineRequest;
+    prepared: ReturnType<CompileService['prepareInputs']>;
+    scratchDir: string;
+    engineResult: EngineRunResult;
+    timeoutMs: number;
+    stopOnFirstError: boolean;
+    durationMs: number;
+  }): Promise<CompilePipelineResult> {
+    const {
+      dto,
+      prepared,
+      scratchDir,
+      engineResult,
+      timeoutMs,
+      stopOnFirstError,
+      durationMs,
+    } = params;
+
+    let fallbackLogs = engineResult.stdout || '';
+    if (engineResult.stderr) {
+      fallbackLogs += `\n${engineResult.stderr}`;
+    }
+
+    const harvested = await this.harvestCompileArtifacts({
+      scratchDir,
+      spaceId: prepared.spaceId,
+      mainFile: prepared.mainFile,
+      inputFiles: prepared.inputFiles,
+      stopOnFirstError,
+      fallbackLogs,
+      shellEscapeAdvisories: prepared.shellEscapeAdvisories,
+    });
+
+    const persistBuildState = (success: boolean) =>
+      this.workspace.writeBuildState(prepared.spaceId, {
+        success,
+        mainFile: prepared.mainFile,
+        engine: prepared.resolvedEngine,
+        draft: dto.draft ?? false,
+        timestamp: Date.now(),
+      });
+
+    if (engineResult.pdfGenerated && harvested.pdfBase64) {
+      const hasErrors = harvested.summary.totalErrors > 0;
+      await persistBuildState(!hasErrors);
+
+      if (hasErrors) {
+        return CompileResults.failure({
+          outcome:
+            stopOnFirstError && engineResult.exitCode !== 0
+              ? 'stopped-on-first-error'
+              : 'failure',
+          error:
+            harvested.diagnostics.find((d) => d.severity === 'error')
+              ?.message || 'LaTeX compilation completed with errors',
+          pdf: harvested.pdfBase64,
+          synctex: harvested.synctexBase64,
+          logs: harvested.logs,
+          logMeta: harvested.logMeta,
+          diagnostics: harvested.diagnostics,
+          diagnosticsSummary: harvested.summary,
+          outputFiles: harvested.discoveredFiles,
+          durationMs,
+        });
+      }
+
+      return CompileResults.success({
+        pdf: harvested.pdfBase64,
+        synctex: harvested.synctexBase64,
+        logs: harvested.logs,
+        logMeta: harvested.logMeta,
+        diagnostics: harvested.diagnostics,
+        diagnosticsSummary: harvested.summary,
+        outputFiles: harvested.discoveredFiles,
+        durationMs,
+      });
+    }
+
+    const outcome: CompileOutcome = engineResult.timedOut
+      ? 'timedout'
+      : (engineResult as { aborted?: boolean }).aborted || dto.signal?.aborted
+        ? 'terminated'
+        : stopOnFirstError && engineResult.exitCode !== 0
+          ? 'stopped-on-first-error'
+          : 'failure';
+
+    if (outcome !== 'terminated') {
+      await persistBuildState(false);
+    }
+
+    return CompileResults.failure({
+      outcome,
+      error:
+        harvested.diagnostics.find((d) => d.severity === 'error')?.message ||
+        (outcome === 'timedout'
+          ? `Compilation timed out after ${timeoutMs}ms`
+          : 'LaTeX compilation failed to produce a PDF'),
+      pdf: harvested.pdfBase64,
+      synctex: harvested.synctexBase64,
+      logs: harvested.logs,
+      logMeta: harvested.logMeta,
+      diagnostics:
+        harvested.diagnostics.length > 0 ? harvested.diagnostics : undefined,
+      diagnosticsSummary: harvested.summary,
+      outputFiles: harvested.discoveredFiles,
+      durationMs,
+      timedOut: engineResult.timedOut,
+    });
   }
 
   /**

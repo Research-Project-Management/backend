@@ -13,6 +13,7 @@ import {
   ISandboxRunner,
 } from '../domain/ports';
 import { SandboxPolicyViolationException } from '../domain/errors';
+import { SafePath } from '../domain/path.policy';
 
 export function hasControlChar(str: string): boolean {
   for (let i = 0; i < str.length; i++) {
@@ -23,11 +24,7 @@ export function hasControlChar(str: string): boolean {
 }
 
 export function assertSafeMainFile(mainFile: string): string {
-  const clean = (mainFile || '')
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^(\.\/)+/, '')
-    .replace(/^\/+/, '');
+  const clean = SafePath.normalizeRelPath(mainFile);
   if (
     !clean ||
     clean.startsWith('-') ||
@@ -167,6 +164,7 @@ export class LatexmkEngine implements ILatexEngine {
       onLogChunk: options.onLogChunk,
       env: envWithInputs,
       openinAny: compiler === 'lualatex' ? 'r' : 'p',
+      texLiveVersion: options.texLiveVersion,
     });
 
     const durationMs = Date.now() - startTime;

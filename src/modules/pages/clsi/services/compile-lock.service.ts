@@ -13,7 +13,6 @@ import {
   Optional,
 } from '@nestjs/common';
 import { getDefaultResourceGovernor } from '@/core/infrastructure/resource/system-resource-governor';
-import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import {
   AlreadyCompilingError,
   AutoCompileShedError,
@@ -180,12 +179,15 @@ export interface InFlightCompileSession {
 export interface CompileLockOptions {
   priority?: CompilePriority;
   forceClean?: boolean;
+  onLogFlush?: (logs: string[]) => void;
+  externalSignal?: AbortSignal;
 }
 
 export interface CompileLockConfig {
   maxCompilesPerMinute?: number;
   minIntervalBetweenCompilesMs?: number;
   maxConcurrentCompiles?: number;
+  isRemoteProxy?: boolean;
   supersedeGraceMs?: number;
   lockTimeoutMs?: number;
   autoShedThreshold?: number;
@@ -225,11 +227,9 @@ export class CompileLockService implements OnModuleDestroy {
     this.logChunkFlushIntervalMs = config?.logChunkFlushIntervalMs ?? 300;
     this.maxLogChunkBytes = config?.maxLogChunkBytes ?? 4096;
 
-    const envConcurrency = Number(process.env.CLSI_MAX_CONCURRENT_COMPILES);
-    const defaultConcurrency =
-      Number.isFinite(envConcurrency) && envConcurrency >= 1
-        ? Math.floor(envConcurrency)
-        : resolveHardwareCompileConcurrencyLimit();
+    const defaultConcurrency = resolveHardwareCompileConcurrencyLimit({
+      isRemoteProxy: config?.isRemoteProxy,
+    });
 
     this.compileConcurrencyLimit = Math.max(
       1,
@@ -316,7 +316,6 @@ export class CompileLockService implements OnModuleDestroy {
   public async runWithLock<T>(
     spaceId: string,
     userId: string | undefined,
-    realtimeService: RealtimeFacade | undefined,
     executeFn: (
       signal: AbortSignal,
       onLogChunk: (chunk: string) => void,
@@ -369,6 +368,17 @@ export class CompileLockService implements OnModuleDestroy {
 
     const now = Date.now();
     const abortController = new AbortController();
+    const externalSignal = options?.externalSignal;
+    const onExternalAbort = () => abortController.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener('abort', onExternalAbort, {
+          once: true,
+        });
+      }
+    }
     let markSettled!: () => void;
     const settled = new Promise<void>((resolve) => (markSettled = resolve));
     const expiresAt = now + this.lockTimeoutMs;
@@ -407,10 +417,7 @@ export class CompileLockService implements OnModuleDestroy {
       }
       const payload = pendingLogBuffer;
       pendingLogBuffer = '';
-      realtimeService?.broadcastCompileProgress(spaceId, {
-        status: 'compiling',
-        logs: [payload],
-      });
+      options?.onLogFlush?.([payload]);
     };
 
     try {
@@ -431,13 +438,13 @@ export class CompileLockService implements OnModuleDestroy {
         }
       };
 
-      realtimeService?.broadcastCompileProgress(spaceId, {
-        status: 'compiling',
-        logs: ['[CLSI] Compilation started...'],
-      });
+      options?.onLogFlush?.(['[CLSI] Compilation started...']);
 
       return await executeFn(abortController.signal, onLogChunk);
     } finally {
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', onExternalAbort);
+      }
       clearFlushTimer();
       if (this.locks.get(compileKey) === session) {
         this.locks.delete(compileKey);

@@ -9,6 +9,7 @@
  *  - GET  ${CLSI_URL}/status
  */
 
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CompilePipelineResult } from '../services/compile.service';
@@ -30,67 +31,173 @@ export interface RemoteCompileRequest {
   signal?: AbortSignal;
 }
 
+type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+interface NodeCircuitState {
+  state: CircuitState;
+  consecutiveFailures: number;
+  openUntil: number;
+  halfOpenProbeInFlight: boolean;
+}
+
 @Injectable()
 export class RemoteClsiClientAdapter {
   private readonly logger = new Logger(RemoteClsiClientAdapter.name);
-  private remoteClsiBackoffUntil = 0;
+  private readonly circuits = new Map<string, NodeCircuitState>();
+
+  private static readonly FAILURE_THRESHOLD = 2;
+  private static readonly BASE_BACKOFF_MS = 5_000;
+  private static readonly MAX_BACKOFF_MS = 60_000;
 
   constructor(@Optional() private readonly configService?: ConfigService) {}
 
-  private getRemoteUrl(): string | null {
-    const raw = (
+  private getOrCreateCircuit(baseUrl: string): NodeCircuitState {
+    let circuit = this.circuits.get(baseUrl);
+    if (!circuit) {
+      circuit = {
+        state: 'CLOSED',
+        consecutiveFailures: 0,
+        openUntil: 0,
+        halfOpenProbeInFlight: false,
+      };
+      this.circuits.set(baseUrl, circuit);
+    }
+    return circuit;
+  }
+
+  private getRemoteUrls(): string[] {
+    const rawList = (
+      this.configService?.get<string>('CLSI_URLS') ||
+      process.env.CLSI_URLS ||
+      ''
+    ).trim();
+    if (rawList) {
+      const urls = rawList
+        .split(',')
+        .map((u) => u.trim().replace(/\/+$/, ''))
+        .filter(Boolean);
+      if (urls.length > 0) return urls;
+    }
+    const single = (
       this.configService?.get<string>('CLSI_URL') ||
       process.env.CLSI_URL ||
       ''
     )
       .trim()
       .replace(/\/+$/, '');
-    return raw || null;
+    return single ? [single] : [];
   }
 
-  public getBaseUrl(): string | null {
-    return this.getRemoteUrl();
+  /**
+   * Deterministic FNV-1a sticky ordering: primary replica first, followed by
+   * remaining replicas in ring order for automatic failover when primary is OPEN.
+   */
+  private orderCandidateUrls(routingKey?: string): string[] {
+    const urls = this.getRemoteUrls();
+    if (urls.length <= 1 || !routingKey) return urls;
+
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < routingKey.length; i++) {
+      hash ^= routingKey.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    const startIdx = (hash >>> 0) % urls.length;
+    return [...urls.slice(startIdx), ...urls.slice(0, startIdx)];
+  }
+
+  public getBaseUrl(routingKey?: string): string | null {
+    return this.orderCandidateUrls(routingKey)[0] ?? null;
   }
 
   public isEnabled(): boolean {
-    return Boolean(this.getRemoteUrl());
+    return this.getRemoteUrls().length > 0;
   }
 
   private async runWithRemoteCircuitBreaker<T>(
     action: (baseUrl: string) => Promise<T | null>,
-    options: { bypassBackoff?: boolean; signal?: AbortSignal } = {},
+    options: {
+      bypassBackoff?: boolean;
+      signal?: AbortSignal;
+      routingKey?: string;
+    } = {},
   ): Promise<T | null> {
-    const baseUrl = this.getRemoteUrl();
-    if (!baseUrl) {
+    const candidates = this.orderCandidateUrls(options.routingKey);
+    if (candidates.length === 0) {
       return null;
     }
 
-    if (!options.bypassBackoff && Date.now() < this.remoteClsiBackoffUntil) {
-      return null;
-    }
+    for (const baseUrl of candidates) {
+      const circuit = this.getOrCreateCircuit(baseUrl);
+      let isHalfOpenProbe = false;
 
-    try {
-      const result = await action(baseUrl);
-      if (result !== null) {
-        this.remoteClsiBackoffUntil = 0;
-      }
-      return result;
-    } catch (err: unknown) {
-      if (
-        (err as { name?: string })?.name === 'AbortError' ||
-        options.signal?.aborted ||
-        err instanceof RemoteClsiClientError
-      ) {
-        throw err;
-      }
-      this.logger.warn(
-        `Remote CLSI (${baseUrl}) unreachable: ${(err as Error)?.message}`,
-      );
       if (!options.bypassBackoff) {
-        this.remoteClsiBackoffUntil = Date.now() + 10_000;
+        if (circuit.state === 'OPEN') {
+          if (Date.now() < circuit.openUntil) {
+            continue;
+          }
+          // Cooldown expired: transition to HALF_OPEN and allow exactly 1 probe
+          circuit.state = 'HALF_OPEN';
+          circuit.halfOpenProbeInFlight = false;
+        }
+
+        if (circuit.state === 'HALF_OPEN') {
+          if (circuit.halfOpenProbeInFlight) {
+            continue;
+          }
+          circuit.halfOpenProbeInFlight = true;
+          isHalfOpenProbe = true;
+        }
       }
-      return null;
+
+      try {
+        const result = await action(baseUrl);
+        if (result !== null) {
+          circuit.state = 'CLOSED';
+          circuit.consecutiveFailures = 0;
+          circuit.openUntil = 0;
+          return result;
+        }
+        return null;
+      } catch (err: unknown) {
+        if (
+          (err as { name?: string })?.name === 'AbortError' ||
+          options.signal?.aborted ||
+          err instanceof RemoteClsiClientError
+        ) {
+          throw err;
+        }
+        this.logger.warn(
+          `Remote CLSI (${baseUrl}) unreachable: ${(err as Error)?.message}`,
+        );
+        if (!options.bypassBackoff) {
+          circuit.consecutiveFailures++;
+          if (
+            isHalfOpenProbe ||
+            circuit.consecutiveFailures >=
+              RemoteClsiClientAdapter.FAILURE_THRESHOLD
+          ) {
+            const exponent = Math.max(
+              0,
+              circuit.consecutiveFailures -
+                RemoteClsiClientAdapter.FAILURE_THRESHOLD,
+            );
+            const backoffMs = Math.min(
+              RemoteClsiClientAdapter.BASE_BACKOFF_MS * Math.pow(2, exponent),
+              RemoteClsiClientAdapter.MAX_BACKOFF_MS,
+            );
+            circuit.state = 'OPEN';
+            circuit.openUntil = Date.now() + backoffMs;
+          }
+        }
+        // Fail over to next healthy replica if available
+      } finally {
+        if (isHalfOpenProbe) {
+          circuit.halfOpenProbeInFlight = false;
+        }
+      }
     }
+
+    return null;
   }
 
   private async postRemoteJson<TResponse>(
@@ -101,6 +208,7 @@ export class RemoteClsiClientAdapter {
       bypassBackoff?: boolean;
       propagateClientErrors?: boolean;
       signal?: AbortSignal;
+      routingKey?: string;
     } = {},
   ): Promise<TResponse | null> {
     return this.runWithRemoteCircuitBreaker(async (baseUrl) => {
@@ -112,7 +220,10 @@ export class RemoteClsiClientAdapter {
 
       const res = await fetch(`${baseUrl}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': randomUUID(),
+        },
         body: JSON.stringify(payload),
         signal: combinedSignal,
       });
@@ -216,6 +327,7 @@ export class RemoteClsiClientAdapter {
         : String(val);
     }
 
+    const routingKey = pageId || dto.pageId || spaceId || dto.spaceId;
     const result = await this.postRemoteJson<CompilePipelineResult>(
       '/compile',
       {
@@ -237,6 +349,7 @@ export class RemoteClsiClientAdapter {
         timeoutMs: effectiveTimeoutMs + 5000,
         propagateClientErrors: true,
         signal,
+        routingKey,
       },
     );
 
@@ -251,18 +364,24 @@ export class RemoteClsiClientAdapter {
     result?: SyncPoint;
     error?: string;
   } | null> {
+    const routingKey =
+      resolvedContext?.pageId ?? dto.pageId ?? resolvedContext?.spaceId ?? dto.spaceId;
     const data = await this.postRemoteJson<{
       success?: boolean;
       result?: SyncPoint;
       error?: string;
-    }>('/synctex/forward', {
-      spaceId: resolvedContext?.spaceId ?? dto.spaceId,
-      pageId: resolvedContext?.pageId ?? dto.pageId,
-      file: dto.file,
-      line: dto.line,
-      column: dto.column,
-      synctex: dto.synctex,
-    });
+    }>(
+      '/synctex/forward',
+      {
+        spaceId: resolvedContext?.spaceId ?? dto.spaceId,
+        pageId: resolvedContext?.pageId ?? dto.pageId,
+        file: dto.file,
+        line: dto.line,
+        column: dto.column,
+        synctex: dto.synctex,
+      },
+      { routingKey },
+    );
 
     if (data && typeof data.success === 'boolean') {
       return {
@@ -282,18 +401,24 @@ export class RemoteClsiClientAdapter {
     result?: ReverseSyncPoint;
     error?: string;
   } | null> {
+    const routingKey =
+      resolvedContext?.pageId ?? dto.pageId ?? resolvedContext?.spaceId ?? dto.spaceId;
     const data = await this.postRemoteJson<{
       success?: boolean;
       result?: ReverseSyncPoint;
       error?: string;
-    }>('/synctex/reverse', {
-      spaceId: resolvedContext?.spaceId ?? dto.spaceId,
-      pageId: resolvedContext?.pageId ?? dto.pageId,
-      page: dto.page,
-      x: dto.x,
-      y: dto.y,
-      synctex: dto.synctex,
-    });
+    }>(
+      '/synctex/reverse',
+      {
+        spaceId: resolvedContext?.spaceId ?? dto.spaceId,
+        pageId: resolvedContext?.pageId ?? dto.pageId,
+        page: dto.page,
+        x: dto.x,
+        y: dto.y,
+        synctex: dto.synctex,
+      },
+      { routingKey },
+    );
 
     if (data && typeof data.success === 'boolean') {
       return {
@@ -309,48 +434,60 @@ export class RemoteClsiClientAdapter {
     scratchId: string,
     filename: string,
   ): Promise<Buffer | null> {
-    return this.runWithRemoteCircuitBreaker(async (baseUrl) => {
-      const res = await fetch(
-        `${baseUrl}/artifacts/${encodeURIComponent(scratchId)}/${encodeURIComponent(filename)}`,
-        {
-          method: 'GET',
-          signal: AbortSignal.timeout(15000),
-        },
-      );
-      if (!res.ok) return null;
-      const arr = await res.arrayBuffer();
-      return Buffer.from(arr);
-    });
+    return this.runWithRemoteCircuitBreaker(
+      async (baseUrl) => {
+        const res = await fetch(
+          `${baseUrl}/artifacts/${encodeURIComponent(scratchId)}/${encodeURIComponent(filename)}`,
+          {
+            method: 'GET',
+            headers: { 'X-Request-Id': randomUUID() },
+            signal: AbortSignal.timeout(15000),
+          },
+        );
+        if (!res.ok) return null;
+        const arr = await res.arrayBuffer();
+        return Buffer.from(arr);
+      },
+      { routingKey: scratchId },
+    );
   }
 
   public async tryRemoteListAuxFiles(
     scratchId: string,
   ): Promise<AuxFileInfo[] | null> {
-    return this.runWithRemoteCircuitBreaker(async (baseUrl) => {
-      const res = await fetch(
-        `${baseUrl}/artifacts/${encodeURIComponent(scratchId)}`,
-        {
-          method: 'GET',
-          signal: AbortSignal.timeout(8000),
-        },
-      );
-      if (!res.ok) return null;
-      const data = (await res.json()) as { files?: AuxFileInfo[] };
-      return Array.isArray(data.files) ? data.files : null;
-    });
+    return this.runWithRemoteCircuitBreaker(
+      async (baseUrl) => {
+        const res = await fetch(
+          `${baseUrl}/artifacts/${encodeURIComponent(scratchId)}`,
+          {
+            method: 'GET',
+            headers: { 'X-Request-Id': randomUUID() },
+            signal: AbortSignal.timeout(8000),
+          },
+        );
+        if (!res.ok) return null;
+        const data = (await res.json()) as { files?: AuxFileInfo[] };
+        return Array.isArray(data.files) ? data.files : null;
+      },
+      { routingKey: scratchId },
+    );
   }
 
   public async tryRemoteCleanScratch(scratchId: string): Promise<boolean> {
-    const result = await this.runWithRemoteCircuitBreaker(async (baseUrl) => {
-      const res = await fetch(
-        `${baseUrl}/artifacts/${encodeURIComponent(scratchId)}`,
-        {
-          method: 'DELETE',
-          signal: AbortSignal.timeout(8000),
-        },
-      );
-      return res.ok ? true : null;
-    });
+    const result = await this.runWithRemoteCircuitBreaker(
+      async (baseUrl) => {
+        const res = await fetch(
+          `${baseUrl}/artifacts/${encodeURIComponent(scratchId)}`,
+          {
+            method: 'DELETE',
+            headers: { 'X-Request-Id': randomUUID() },
+            signal: AbortSignal.timeout(8000),
+          },
+        );
+        return res.ok ? true : null;
+      },
+      { routingKey: scratchId },
+    );
     return Boolean(result);
   }
 }

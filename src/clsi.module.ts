@@ -10,6 +10,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Injectable,
@@ -528,6 +529,8 @@ export class ClsiService implements OnModuleDestroy {
 @ApiTags('CLSI Compilation Engine')
 @Controller()
 export class ClsiController {
+  private readonly logger = new Logger(ClsiController.name);
+
   constructor(private readonly clsiService: ClsiService) {}
 
   @Post('compile')
@@ -539,8 +542,19 @@ export class ClsiController {
     status: 200,
     description: 'Compilation finished (success or compiler error with logs)',
   })
-  public async compile(@Body() dto: CompilePageDto) {
-    return this.clsiService.compile(dto);
+  public async compile(
+    @Body() dto: CompilePageDto,
+    @Headers('x-request-id') requestId?: string,
+  ) {
+    const reqTag = requestId ? `[req:${requestId}] ` : '';
+    try {
+      return await this.clsiService.compile(dto);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `${reqTag}Compile failed for ${dto.pageId || dto.spaceId || 'adhoc'}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw err;
+    }
   }
 
   @Post('cancel/:spaceId')

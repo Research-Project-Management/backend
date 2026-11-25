@@ -228,6 +228,7 @@ export class Watchdog {
     this.timeoutTimer = setTimeout(() => {
       this.terminate('TIMEOUT');
     }, this.timeoutMs);
+    this.timeoutTimer.unref();
   }
 
   public disarm(): void {
@@ -267,5 +268,6 @@ export class Watchdog {
     this.killTimer = setTimeout(() => {
       killProcessGroup(pid, true);
     }, this.gracePeriodMs);
+    this.killTimer.unref();
   }
 }

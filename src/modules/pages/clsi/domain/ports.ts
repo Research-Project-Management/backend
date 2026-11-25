@@ -163,6 +163,7 @@ export interface EngineRunOptions {
   force?: boolean;
   shellEscape?: boolean;
   compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex';
+  texLiveVersion?: string;
   signal?: AbortSignal;
   onLogChunk?: (chunk: string) => void;
   env?: Record<string, string>;
@@ -198,6 +199,7 @@ export interface ProcessExecutionOptions {
   profile?: SandboxProfile;
   runId?: string;
   openinAny?: 'p' | 'r';
+  texLiveVersion?: string;
 }
 
 export interface ProcessExecutionResult {
@@ -232,6 +234,20 @@ export interface AuxFileInfo {
   ext: string;
 }
 
+export interface BuildStateRecord {
+  success: boolean;
+  mainFile: string;
+  engine: string;
+  draft: boolean;
+  timestamp: number;
+}
+
+export interface CachedCompileArtifacts {
+  pdf?: string;
+  synctex?: string;
+  logs?: string;
+}
+
 export interface IWorkspaceManager {
   getScratchDir(spaceId: string): string;
   ensureScratch(spaceId: string): Promise<string>;
@@ -240,9 +256,15 @@ export interface IWorkspaceManager {
     files: WorkspaceFile[],
   ): Promise<WorkspaceSyncStats>;
   cleanScratch(spaceId: string): Promise<void>;
-  cleanAuxBuildCache?(spaceId: string): Promise<void>;
+  cleanAuxBuildCache(spaceId: string): Promise<void>;
   purgeExtraneousFiles(spaceId: string, inputFiles: string[]): Promise<void>;
   listAuxFiles(spaceId: string): Promise<AuxFileInfo[]>;
   readAuxFile(spaceId: string, filename: string): Promise<Buffer | null>;
   readArtifact(spaceId: string, filename: string): Promise<Buffer | null>;
+  readBuildState(spaceId: string): Promise<BuildStateRecord | null>;
+  writeBuildState(spaceId: string, state: BuildStateRecord): Promise<void>;
+  writeCachedArtifacts(
+    spaceId: string,
+    artifacts: CachedCompileArtifacts,
+  ): Promise<void>;
 }

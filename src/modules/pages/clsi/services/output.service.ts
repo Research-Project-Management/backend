@@ -5,7 +5,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
 import { CompilerDiagnostic } from '../domain/ports';
 import { ClsiRepository } from '../clsi.repository';
@@ -13,81 +13,20 @@ import { Readable } from 'node:stream';
 import { createZipStream, ZipEntry } from '../../core/utils/zip-builder';
 import { CompileLogParser } from '../domain/log-parser/tex-log.parser';
 import { CompilePipelineResult } from './compile.service';
-import { RemoteClsiClientAdapter } from '../adapters/remote-clsi.adapter';
-
-export const MAX_PARSE_LOG_BYTES = 1024 * 1024;
-export const MAX_BIB_LOG_BYTES = 256 * 1024;
-export const MAX_INLINE_LOG_BYTES = 256 * 1024;
-
-export async function readBoundedLogFile(
-  filePath: string,
-  maxBytes: number = MAX_PARSE_LOG_BYTES,
-  headBytes: number = Math.min(256 * 1024, Math.floor(maxBytes / 4)),
-): Promise<{ content: string; sizeBytes: number; truncated: boolean } | null> {
-  try {
-    const stat = await fs.lstat(filePath);
-    if (stat.isSymbolicLink() || !stat.isFile()) return null;
-    const sizeBytes = stat.size;
-    if (sizeBytes === 0) {
-      return { content: '', sizeBytes: 0, truncated: false };
-    }
-    if (sizeBytes <= maxBytes) {
-      const buffer = await fs.readFile(filePath);
-      return { content: buffer.toString('utf8'), sizeBytes, truncated: false };
-    }
-
-    const headSize = Math.min(headBytes, maxBytes);
-    const tailSize = Math.max(0, maxBytes - headSize);
-    const omittedBytes = Math.max(0, sizeBytes - headSize - tailSize);
-    const handle = await fs.open(filePath, 'r');
-    try {
-      const head = Buffer.alloc(headSize);
-      if (headSize > 0) {
-        await handle.read(head, 0, headSize, 0);
-      }
-      const tail = Buffer.alloc(tailSize);
-      if (tailSize > 0) {
-        await handle.read(tail, 0, tailSize, sizeBytes - tailSize);
-      }
-      const marker = `\n... [truncated ${omittedBytes} bytes of ${sizeBytes}-byte log] ...\n`;
-      return {
-        content: `${head.toString('utf8')}${marker}${tail.toString('utf8')}`,
-        sizeBytes,
-        truncated: true,
-      };
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return null;
-  }
-}
-
-export function boundInlineLogText(
-  rawText: string,
-  totalFileSizeBytes?: number,
-  maxBytes: number = MAX_INLINE_LOG_BYTES,
-): { text: string; sizeBytes: number; truncated: boolean } {
-  const byteLength = Buffer.byteLength(rawText || '', 'utf8');
-  const sizeBytes = Math.max(byteLength, totalFileSizeBytes ?? 0);
-  if (byteLength <= maxBytes) {
-    return {
-      text: rawText || '',
-      sizeBytes,
-      truncated: Boolean(totalFileSizeBytes && totalFileSizeBytes > byteLength),
-    };
-  }
-  const buffer = Buffer.from(rawText, 'utf8');
-  const headSize = Math.min(64 * 1024, Math.floor(maxBytes / 4));
-  const tailSize = Math.max(0, maxBytes - headSize);
-  const omittedBytes = Math.max(0, sizeBytes - headSize - tailSize);
-  const marker = `\n... [truncated ${omittedBytes} bytes — download full output.log for complete details] ...\n`;
-  return {
-    text: `${buffer.subarray(0, headSize).toString('utf8')}${marker}${buffer.subarray(buffer.length - tailSize).toString('utf8')}`,
-    sizeBytes,
-    truncated: true,
-  };
-}
+import { ClsiRuntimeAdapter } from '../adapters/clsi-runtime.adapter';
+export {
+  MAX_PARSE_LOG_BYTES,
+  MAX_BIB_LOG_BYTES,
+  MAX_INLINE_LOG_BYTES,
+  readBoundedLogFile,
+  boundInlineLogText,
+} from '../utils/bounded-log.util';
+import {
+  MAX_PARSE_LOG_BYTES,
+  MAX_INLINE_LOG_BYTES,
+  readBoundedLogFile,
+  boundInlineLogText,
+} from '../utils/bounded-log.util';
 
 
 export interface EditorLastBuildSummary {
@@ -98,64 +37,18 @@ export interface EditorLastBuildSummary {
   diagnostics: CompilerDiagnostic[];
 }
 
-export async function syncCachedArtifactsToScratch(
-  workspace: ClsiRepository,
-  spaceId: string,
-  result: CompilePipelineResult,
-): Promise<void> {
-  try {
-    const scratchDir = await workspace.ensureScratch(spaceId);
-    const writes: Promise<void>[] = [];
-    if (result.pdf) {
-      writes.push(
-        fs.writeFile(
-          path.join(scratchDir, 'output.pdf'),
-          Buffer.from(result.pdf, 'base64'),
-        ),
-      );
-    }
-    if (result.synctex) {
-      const synctexBuf = Buffer.from(result.synctex, 'base64');
-      const isGzip =
-        synctexBuf.length >= 2 &&
-        synctexBuf[0] === 0x1f &&
-        synctexBuf[1] === 0x8b;
-      writes.push(
-        fs.writeFile(
-          path.join(
-            scratchDir,
-            isGzip ? 'output.synctex.gz' : 'output.synctex',
-          ),
-          synctexBuf,
-        ),
-      );
-    }
-    if (result.logs) {
-      writes.push(
-        fs.writeFile(path.join(scratchDir, 'output.log'), result.logs, 'utf8'),
-      );
-    }
-    if (writes.length > 0) {
-      await Promise.allSettled(writes);
-    }
-  } catch {
-    // Non-blocking artifact sync to local workspace scratch
-  }
-}
-
 export async function downloadAuxFile(
   workspace: ClsiRepository,
   spaceId: string,
   filename: string,
   res: FastifyReply,
   pageId?: string,
-  remoteClient?: RemoteClsiClientAdapter,
+  runtime?: ClsiRuntimeAdapter,
 ) {
   const scratchId = pageId || spaceId;
-  let buffer = await workspace.readAuxFile(scratchId, filename);
-  if (!buffer && remoteClient?.isEnabled()) {
-    buffer = await remoteClient.tryRemoteDownloadArtifact(scratchId, filename);
-  }
+  const buffer = runtime
+    ? await runtime.readAuxFile(scratchId, filename, true)
+    : await workspace.readAuxFile(scratchId, filename);
   if (!buffer) {
     throw new NotFoundException(`Artifact file ${filename} not found`);
   }
@@ -260,9 +153,7 @@ export async function getLastBuildSummary(
   }
 
   const pdfArtifactUrl = hasPdf
-    ? pageId
-      ? `/api/v1/pages/pages/${encodeURIComponent(pageId)}/artifacts/output.pdf`
-      : `/api/v1/pages/spaces/${encodeURIComponent(spaceId)}/artifacts/output.pdf`
+    ? `/api/v1/pages/clsi/pages/${encodeURIComponent(scratchId)}/artifacts/output.pdf`
     : null;
 
   return {
@@ -357,9 +248,7 @@ export async function formatCompileResultForClient(params: {
     await statScratchArtifacts(scratchDir);
 
   const basePrefix = !isAdhoc
-    ? pageId
-      ? `/api/v1/pages/pages/${encodeURIComponent(pageId)}/artifacts`
-      : `/api/v1/pages/spaces/${encodeURIComponent(spaceId)}/artifacts`
+    ? `/api/v1/pages/clsi/pages/${encodeURIComponent(pageId || scratchWorkspaceId)}/artifacts`
     : undefined;
   const version = Date.now();
   const hasLogOnDisk = isValidFile(logStat);
@@ -476,14 +365,15 @@ export class OutputService {
 
   constructor(
     private readonly workspace: ClsiRepository,
-    private readonly remoteClient: RemoteClsiClientAdapter,
+    @Inject(forwardRef(() => ClsiRuntimeAdapter))
+    private readonly runtime: ClsiRuntimeAdapter,
   ) {}
 
   public async syncCachedArtifactsToScratch(
     spaceId: string,
     result: CompilePipelineResult,
   ): Promise<void> {
-    return syncCachedArtifactsToScratch(this.workspace, spaceId, result);
+    return this.workspace.writeCachedArtifacts(spaceId, result);
   }
 
   public async downloadAuxFile(
@@ -498,7 +388,7 @@ export class OutputService {
       filename,
       res,
       pageId,
-      this.remoteClient,
+      this.runtime,
     );
   }
 

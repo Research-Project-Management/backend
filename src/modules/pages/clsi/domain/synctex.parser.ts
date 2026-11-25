@@ -8,6 +8,7 @@ import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
 import { SyncPoint, ReverseSyncPoint } from './ports';
+import { BoundedLruCache } from './lru-cache';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const MAX_CACHE_ENTRIES = 6;
@@ -39,7 +40,9 @@ export interface ParsedSyncTexData {
 }
 
 export class SynctexParser {
-  private readonly lruCache = new Map<string, ParsedSyncTexData>();
+  private readonly lruCache = new BoundedLruCache<string, ParsedSyncTexData>(
+    MAX_CACHE_ENTRIES,
+  );
   private lastRawRef: string | null = null;
   private lastParsedRef: ParsedSyncTexData | null = null;
 
@@ -192,12 +195,6 @@ export class SynctexParser {
       unit,
     };
 
-    if (this.lruCache.size >= MAX_CACHE_ENTRIES) {
-      const oldestKey = this.lruCache.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.lruCache.delete(oldestKey);
-      }
-    }
     this.lruCache.set(cacheKey, parsed);
     this.lastRawRef = synctexText;
     this.lastParsedRef = parsed;

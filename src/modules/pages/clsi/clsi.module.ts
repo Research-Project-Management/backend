@@ -34,6 +34,7 @@ import { SynctexService } from './services/synctex.service';
 import { WordCountService } from './services/wordcount.service';
 import { OutputService } from './services/output.service';
 import { ClsiMetrics } from './adapters/metrics.adapter';
+import { ClsiRuntimeAdapter } from './adapters/clsi-runtime.adapter';
 
 export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
 export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
@@ -91,9 +92,22 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
     },
     {
       provide: DiskUsageCleaner,
-      useFactory: (sandboxConfig: ClsiSandboxConfig) =>
-        new DiskUsageCleaner(sandboxConfig.scratchDir),
-      inject: [CLSI_SANDBOX_CONFIG],
+      useFactory: (
+        sandboxConfig: ClsiSandboxConfig,
+        configService: ConfigService,
+      ) => {
+        const isTest = configService.get<string>('NODE_ENV') === 'test';
+        const rawInterval = configService.get<string>(
+          'CLSI_SCRATCH_GC_INTERVAL_MS',
+        );
+        const gcIntervalMs = isTest
+          ? 0
+          : rawInterval !== undefined
+            ? Number(rawInterval)
+            : DiskUsageCleaner.DEFAULT_GC_INTERVAL_MS;
+        return new DiskUsageCleaner(sandboxConfig.scratchDir, gcIntervalMs);
+      },
+      inject: [CLSI_SANDBOX_CONFIG, ConfigService],
     },
     {
       provide: ClsiHealthCheck,
@@ -110,7 +124,25 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
       inject: [ClsiRepository, LatexmkEngine],
     },
     ClsiMetrics,
-    CompileLockService,
+    ClsiRuntimeAdapter,
+    {
+      provide: CompileLockService,
+      useFactory: (configService: ConfigService) => {
+        const rawMax = Number(
+          configService.get<string>('CLSI_MAX_CONCURRENT_COMPILES'),
+        );
+        const isRemoteProxy = Boolean(
+          (configService.get<string>('CLSI_URL') || '').trim(),
+        );
+        return new CompileLockService({
+          ...(Number.isFinite(rawMax) && rawMax >= 1
+            ? { maxConcurrentCompiles: Math.floor(rawMax) }
+            : {}),
+          isRemoteProxy,
+        });
+      },
+      inject: [ConfigService],
+    },
     SynctexService,
     WordCountService,
     OutputService,

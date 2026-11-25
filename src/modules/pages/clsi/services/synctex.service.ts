@@ -10,7 +10,8 @@ import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
 import { ReverseSyncPoint, SyncPoint } from '../domain/ports';
 import { ClsiRepository } from '../clsi.repository';
 import { SynctexParser } from '../domain/synctex.parser';
-import { RemoteClsiClientAdapter } from '../adapters/remote-clsi.adapter';
+import { BoundedLruCache } from '../domain/lru-cache';
+import { ClsiRuntimeAdapter } from '../adapters/clsi-runtime.adapter';
 import { CompileSourceService } from './compile-source.service';
 
 interface SynctexDiskCacheEntry {
@@ -22,11 +23,14 @@ interface SynctexDiskCacheEntry {
 @Injectable()
 export class SynctexService {
   private readonly synctexParser = new SynctexParser();
-  private readonly synctexDiskCache = new Map<string, SynctexDiskCacheEntry>();
+  private readonly synctexDiskCache = new BoundedLruCache<
+    string,
+    SynctexDiskCacheEntry
+  >(16);
 
   constructor(
     private readonly workspace: ClsiRepository,
-    private readonly remoteClient: RemoteClsiClientAdapter,
+    private readonly runtime: ClsiRuntimeAdapter,
     private readonly compileSource: CompileSourceService,
   ) {}
 
@@ -62,10 +66,6 @@ export class SynctexService {
           ? await this.synctexParser.decompress(buf)
           : buf.toString('utf8');
         if (content) {
-          if (this.synctexDiskCache.size >= 16) {
-            const oldestKey = this.synctexDiskCache.keys().next().value;
-            if (oldestKey) this.synctexDiskCache.delete(oldestKey);
-          }
           this.synctexDiskCache.set(cacheKey, {
             mtimeMs: stat.mtimeMs,
             size: stat.size,
@@ -96,7 +96,7 @@ export class SynctexService {
       );
     const scratchId = pageId || spaceId;
 
-    const remoteRes = await this.remoteClient.tryRemoteForwardSync(dto, {
+    const remoteRes = await this.runtime.tryRemoteForwardSync(dto, {
       spaceId,
       pageId,
     });
@@ -146,7 +146,7 @@ export class SynctexService {
       );
     const scratchId = pageId || spaceId;
 
-    const remoteRes = await this.remoteClient.tryRemoteReverseSync(dto, {
+    const remoteRes = await this.runtime.tryRemoteReverseSync(dto, {
       spaceId,
       pageId,
     });

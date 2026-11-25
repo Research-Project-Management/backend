@@ -34,10 +34,18 @@ export class ClsiMetrics {
   private timeouts = 0;
   private totalPdfBytes = 0;
 
+  private static readonly DURATION_BUCKETS_SEC = [
+    0.5, 1, 2, 5, 10, 30, 60, 120, 240,
+  ] as const;
+
   private durationsByEngine = new Map<
     string,
     { count: number; totalMs: number; minMs: number; maxMs: number }
   >();
+  private readonly durationBucketCounts = new Array<number>(
+    ClsiMetrics.DURATION_BUCKETS_SEC.length,
+  ).fill(0);
+  private totalDurationSeconds = 0;
 
   public record(sample: CompileMetricSample): void {
     this.totalCompiles++;
@@ -76,6 +84,14 @@ export class ClsiMetrics {
     existing.maxMs = Math.max(existing.maxMs, sample.durationMs);
 
     this.durationsByEngine.set(engineKey, existing);
+
+    const durationSec = Math.max(0, sample.durationMs / 1000);
+    this.totalDurationSeconds += durationSec;
+    for (let i = 0; i < ClsiMetrics.DURATION_BUCKETS_SEC.length; i++) {
+      if (durationSec <= ClsiMetrics.DURATION_BUCKETS_SEC[i]) {
+        this.durationBucketCounts[i]++;
+      }
+    }
   }
 
   public getSummary() {
@@ -128,6 +144,16 @@ export class ClsiMetrics {
       '# HELP clsi_pdf_output_bytes_total Total size in bytes of generated PDFs',
       '# TYPE clsi_pdf_output_bytes_total counter',
       `clsi_pdf_output_bytes_total ${this.totalPdfBytes}`,
+      '',
+      '# HELP clsi_compile_duration_seconds Compilation duration histogram in seconds',
+      '# TYPE clsi_compile_duration_seconds histogram',
+      ...ClsiMetrics.DURATION_BUCKETS_SEC.map(
+        (le, idx) =>
+          `clsi_compile_duration_seconds_bucket{le="${le}"} ${this.durationBucketCounts[idx]}`,
+      ),
+      `clsi_compile_duration_seconds_bucket{le="+Inf"} ${this.totalCompiles}`,
+      `clsi_compile_duration_seconds_sum ${this.totalDurationSeconds.toFixed(3)}`,
+      `clsi_compile_duration_seconds_count ${this.totalCompiles}`,
     ];
 
     for (const [engine, stats] of this.durationsByEngine.entries()) {

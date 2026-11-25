@@ -23,7 +23,6 @@ import {
 } from './dto/compile.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 import { WordCountStats } from './domain/ports';
-import { ClsiRepository } from './clsi.repository';
 import {
   DiskUsageCleaner,
   DiskUsageOptions,
@@ -32,16 +31,12 @@ import {
   PlannedFileSet,
   validatePlannedFileSet,
 } from './domain/file-set.planner';
-import {
-  CompileService,
-  CompilePipelineResult,
-  enrichUnreachableRemoteFailure,
-} from './services/compile.service';
-import { ClsiHealthCheck } from './adapters/health.adapter';
+import { BoundedLruCache } from './domain/lru-cache';
+import { CompilePipelineResult } from './services/compile.service';
 import { CompileLockService } from './services/compile-lock.service';
 import { ClsiMetrics } from './adapters/metrics.adapter';
+import { ClsiRuntimeAdapter } from './adapters/clsi-runtime.adapter';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
-import { RemoteClsiClientAdapter } from './adapters/remote-clsi.adapter';
 import { CompileSourceService } from './services/compile-source.service';
 import { SynctexService } from './services/synctex.service';
 import { WordCountService } from './services/wordcount.service';
@@ -56,15 +51,18 @@ export type { EditorLastBuildSummary };
 @Injectable()
 export class ClsiService implements OnModuleDestroy {
   private readonly logger = new Logger(ClsiService.name);
-  private readonly lastAutoSnapshotTimes = new Map<string, number>();
+  private readonly lastAutoSnapshotTimes = new BoundedLruCache<string, number>(
+    1000,
+  );
+  private readonly inFlightCompiles = new Map<
+    string,
+    Promise<ClsiCompileResult>
+  >();
 
   constructor(
-    private readonly remoteClient: RemoteClsiClientAdapter,
+    private readonly runtime: ClsiRuntimeAdapter,
     private readonly compileSource: CompileSourceService,
-    private readonly workspace: ClsiRepository,
     private readonly diskUsageCleaner: DiskUsageCleaner,
-    private readonly healthCheck: ClsiHealthCheck,
-    private readonly pipeline: CompileService,
     private readonly compileLock: CompileLockService,
     private readonly metrics: ClsiMetrics,
     private readonly synctexService: SynctexService,
@@ -76,7 +74,8 @@ export class ClsiService implements OnModuleDestroy {
   ) {}
 
   public onModuleDestroy(): void {
-    this.compileLock.onModuleDestroy();
+    this.lastAutoSnapshotTimes.clear();
+    this.inFlightCompiles.clear();
   }
 
   private hashSource(source: string): string {
@@ -90,6 +89,7 @@ export class ClsiService implements OnModuleDestroy {
     dto: CompilePageDto,
     userId?: string,
     authorizedSpaceId?: string,
+    externalSignal?: AbortSignal,
   ): Promise<ClsiCompileResult> {
     const requestedEngine = dto.engine;
     const texLiveVersion = dto.texLiveVersion || '2025';
@@ -111,7 +111,6 @@ export class ClsiService implements OnModuleDestroy {
     return await this.compileLock.runWithLock(
       scratchWorkspaceId,
       userId,
-      this.realtimeService,
       async (signal, onLogChunk) => {
         if (
           this.realtimeService &&
@@ -173,7 +172,14 @@ export class ClsiService implements OnModuleDestroy {
 
         if (cacheable && this.cache) {
           const cacheLookupStart = Date.now();
-          const cached = await this.cache.get<ClsiCompileResult>(cacheKey);
+          const cached = await this.cache
+            .get<ClsiCompileResult>(cacheKey)
+            .catch((err: unknown) => {
+              this.logger.warn(
+                `CLSI Redis cache read failed (degrading to live compile): ${err instanceof Error ? err.message : String(err)}`,
+              );
+              return null;
+            });
           if (
             cached &&
             cached.success &&
@@ -203,7 +209,21 @@ export class ClsiService implements OnModuleDestroy {
           }
         }
 
-        return await this.runScheduledCompile({
+        if (cacheable) {
+          const existingInFlight = this.inFlightCompiles.get(cacheKey);
+          if (existingInFlight) {
+            const coalesced = await existingInFlight;
+            return await this.outputService.formatCompileResultForClient({
+              result: coalesced,
+              responseMode: dto.responseMode,
+              spaceId: effectiveSpaceId,
+              pageId: targetPageId,
+              scratchWorkspaceId,
+            });
+          }
+        }
+
+        const compilePromise = this.runScheduledCompile({
           spaceId: effectiveSpaceId,
           plan,
           dto,
@@ -218,10 +238,34 @@ export class ClsiService implements OnModuleDestroy {
           scratchWorkspaceId,
           targetPageId,
         });
+
+        if (cacheable) {
+          this.inFlightCompiles.set(cacheKey, compilePromise);
+          try {
+            return await compilePromise;
+          } finally {
+            if (this.inFlightCompiles.get(cacheKey) === compilePromise) {
+              this.inFlightCompiles.delete(cacheKey);
+            }
+          }
+        }
+
+        return await compilePromise;
       },
       {
         priority: dto.priority ?? 'manual',
         ...(dto.forceClean ? { forceClean: true } : {}),
+        ...(externalSignal ? { externalSignal } : {}),
+        ...(this.realtimeService && !effectiveSpaceId.startsWith('adhoc-')
+          ? {
+              onLogFlush: (logs: string[]) => {
+                this.realtimeService?.broadcastCompileProgress(
+                  effectiveSpaceId,
+                  { status: 'compiling', logs },
+                );
+              },
+            }
+          : {}),
       },
     );
   }
@@ -260,11 +304,7 @@ export class ClsiService implements OnModuleDestroy {
     const dbSpaceId = spaceId.startsWith('adhoc-') ? 'default' : spaceId;
 
     if (dto.forceClean) {
-      await this.pipeline.runWithWorkspaceLock(
-        scratchWorkspaceId,
-        () => this.workspace.cleanScratch(scratchWorkspaceId),
-        signal,
-      );
+      await this.runtime.cleanScratch(scratchWorkspaceId, signal);
     }
 
     const mergedFiles = await this.compileSource.hydrateFiles(
@@ -272,7 +312,7 @@ export class ClsiService implements OnModuleDestroy {
       plan,
       scratchWorkspaceId,
       {
-        deltaOnlyOnDisk: !this.remoteClient.isEnabled() && !dto.forceClean,
+        deltaOnlyOnDisk: !this.runtime.isRemoteEnabled() && !dto.forceClean,
       },
     );
     const rawMain = mergedFiles[mainFile] ?? dto.source ?? '';
@@ -280,50 +320,21 @@ export class ClsiService implements OnModuleDestroy {
       ? rawMain.toString('utf8')
       : rawMain;
 
-    const remoteResult = await this.remoteClient.tryRemoteClsiCompile({
-      spaceId: spaceId,
-      pageId: targetPageId ?? scratchWorkspaceId,
+    const finalResult = await this.runtime.compile({
+      spaceId,
+      targetPageId,
+      scratchWorkspaceId,
       mainFile,
       source,
       mergedFiles,
       dto,
       engine,
+      texLiveVersion,
+      effectiveTimeoutMs,
       cacheKey,
       signal,
+      onLogChunk,
     });
-
-    if (remoteResult) {
-      await this.outputService.syncCachedArtifactsToScratch(
-        scratchWorkspaceId,
-        remoteResult,
-      );
-    }
-
-    const pipelineResult: CompilePipelineResult =
-      remoteResult ??
-      (await this.pipeline.execute({
-        spaceId: scratchWorkspaceId,
-        mainFile,
-        engine,
-        texLiveVersion,
-        draft: dto.draft,
-        syntaxOnly: dto.syntaxOnly,
-        stopOnFirstError: dto.stopOnFirstError ?? false,
-        timeoutMs: effectiveTimeoutMs,
-        source,
-        files: mergedFiles,
-        signal,
-        onLogChunk,
-      }));
-
-    let finalResult = pipelineResult;
-    if (!remoteResult && this.remoteClient.isEnabled()) {
-      finalResult = enrichUnreachableRemoteFailure({
-        pipelineResult,
-        mainFile,
-        remoteUrl: this.remoteClient.getBaseUrl(),
-      });
-    }
 
     this.metrics.record({
       engine: metricEngine,
@@ -343,7 +354,11 @@ export class ClsiService implements OnModuleDestroy {
       finalResult.pdf &&
       finalResult.pdf.length <= 2 * 1024 * 1024
     ) {
-      await this.cache.set(cacheKey, finalResult, 300);
+      void this.cache.set(cacheKey, finalResult, 300).catch((err: unknown) => {
+        this.logger.warn(
+          `CLSI Redis cache write failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
 
     const formatted = await this.outputService.formatCompileResultForClient({
@@ -355,63 +370,93 @@ export class ClsiService implements OnModuleDestroy {
     });
 
     if (!spaceId.startsWith('adhoc-')) {
-      const summary = finalResult.diagnosticsSummary
-        ? {
-            totalErrors: finalResult.diagnosticsSummary.totalErrors,
-            totalWarnings: finalResult.diagnosticsSummary.totalWarnings,
-            totalBadboxes: finalResult.diagnosticsSummary.totalBadboxes,
-          }
-        : undefined;
-      const summaryLine = finalResult.success
-        ? `[CLSI] Compilation succeeded in ${finalResult.durationMs}ms`
-        : `[CLSI] Compilation failed: ${finalResult.error || 'See compiler logs'}`;
-
-      const pdfUrl =
-        formatted.success && 'pdfArtifactUrl' in formatted
-          ? formatted.pdfArtifactUrl
-          : undefined;
-      const logArtifactUrl = formatted.logMeta?.logArtifactUrl;
-
-      this.realtimeService?.broadcastCompileProgress(spaceId, {
-        status: finalResult.success ? 'success' : 'failed',
-        logs: [summaryLine],
-        ...(pdfUrl ? { pdfUrl } : {}),
-        ...(summary ? { summary } : {}),
-        ...(logArtifactUrl ? { logArtifactUrl } : {}),
+      this.dispatchPostCompileEffects({
+        spaceId,
+        scratchWorkspaceId,
+        dtoPageId: dto.pageId,
+        metricEngine,
+        userId,
+        finalResult,
+        formatted,
       });
-
-      if (finalResult.success && this.snapshotService && spaceId !== 'default') {
-        const snapshotPageId =
-          scratchWorkspaceId !== spaceId ? scratchWorkspaceId : dto.pageId;
-        const snapshotKey = `${spaceId}:${snapshotPageId || 'root'}`;
-        const lastAt = this.lastAutoSnapshotTimes.get(snapshotKey) || 0;
-        if (Date.now() - lastAt >= 30_000) {
-          this.lastAutoSnapshotTimes.set(snapshotKey, Date.now());
-          if (this.lastAutoSnapshotTimes.size > 1000) {
-            const oldestKey = this.lastAutoSnapshotTimes.keys().next().value;
-            if (oldestKey) this.lastAutoSnapshotTimes.delete(oldestKey);
-          }
-          await this.snapshotService
-            .createSnapshot(
-              spaceId,
-              {
-                summary: `Compilation milestone (${metricEngine})`,
-                isAutomatic: true,
-                pageId: snapshotPageId,
-              },
-              userId ?? null,
-              snapshotPageId,
-            )
-            .catch((err: unknown) => {
-              this.logger.debug(
-                `Post-compile auto-snapshot skipped for ${spaceId}: ${err}`,
-              );
-            });
-        }
-      }
     }
 
     return formatted;
+  }
+
+  /**
+   * Non-blocking post-compile side-effect hook: decouples the critical PDF response path
+   * from realtime progress broadcasts and throttled automatic History checkpoints.
+   */
+  private dispatchPostCompileEffects(params: {
+    spaceId: string;
+    scratchWorkspaceId: string;
+    dtoPageId?: string;
+    metricEngine: string;
+    userId?: string;
+    finalResult: CompilePipelineResult;
+    formatted: CompilePipelineResult;
+  }): void {
+    const {
+      spaceId,
+      scratchWorkspaceId,
+      dtoPageId,
+      metricEngine,
+      userId,
+      finalResult,
+      formatted,
+    } = params;
+
+    const summary = finalResult.diagnosticsSummary
+      ? {
+          totalErrors: finalResult.diagnosticsSummary.totalErrors,
+          totalWarnings: finalResult.diagnosticsSummary.totalWarnings,
+          totalBadboxes: finalResult.diagnosticsSummary.totalBadboxes,
+        }
+      : undefined;
+    const summaryLine = finalResult.success
+      ? `[CLSI] Compilation succeeded in ${finalResult.durationMs}ms`
+      : `[CLSI] Compilation failed: ${finalResult.error || 'See compiler logs'}`;
+
+    const pdfUrl =
+      formatted.success && 'pdfArtifactUrl' in formatted
+        ? formatted.pdfArtifactUrl
+        : undefined;
+    const logArtifactUrl = formatted.logMeta?.logArtifactUrl;
+
+    this.realtimeService?.broadcastCompileProgress(spaceId, {
+      status: finalResult.success ? 'success' : 'failed',
+      logs: [summaryLine],
+      ...(pdfUrl ? { pdfUrl } : {}),
+      ...(summary ? { summary } : {}),
+      ...(logArtifactUrl ? { logArtifactUrl } : {}),
+    });
+
+    if (finalResult.success && this.snapshotService && spaceId !== 'default') {
+      const snapshotPageId =
+        scratchWorkspaceId !== spaceId ? scratchWorkspaceId : dtoPageId;
+      const snapshotKey = `${spaceId}:${snapshotPageId || 'root'}`;
+      const lastAt = this.lastAutoSnapshotTimes.get(snapshotKey) || 0;
+      if (Date.now() - lastAt >= 30_000) {
+        this.lastAutoSnapshotTimes.set(snapshotKey, Date.now());
+        void this.snapshotService
+          .createSnapshot(
+            spaceId,
+            {
+              summary: `Compilation milestone (${metricEngine})`,
+              isAutomatic: true,
+              pageId: snapshotPageId,
+            },
+            userId ?? null,
+            snapshotPageId,
+          )
+          .catch((err: unknown) => {
+            this.logger.debug(
+              `Post-compile auto-snapshot skipped for ${spaceId}: ${err}`,
+            );
+          });
+      }
+    }
   }
 
   public cancelCompile(spaceId: string, userId?: string): boolean {
@@ -439,10 +484,7 @@ export class ClsiService implements OnModuleDestroy {
 
   public async listAuxFiles(spaceId: string, pageId?: string) {
     const scratchId = pageId || spaceId;
-    let files = await this.workspace.listAuxFiles(scratchId);
-    if (files.length === 0 && this.remoteClient.isEnabled()) {
-      files = (await this.remoteClient.tryRemoteListAuxFiles(scratchId)) ?? [];
-    }
+    const files = await this.runtime.listAuxFiles(scratchId);
     return { files };
   }
 
@@ -466,7 +508,7 @@ export class ClsiService implements OnModuleDestroy {
     pageId?: string,
   ): Promise<Buffer | null> {
     const scratchId = pageId || spaceId;
-    return await this.workspace.readAuxFile(scratchId, filename);
+    return await this.runtime.readAuxFile(scratchId, filename);
   }
 
   public async getLastBuildSummary(
@@ -482,27 +524,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async getHealthReport() {
-    if (this.remoteClient.isEnabled()) {
-      const remoteHealth = await this.remoteClient.tryRemoteHealthCheck();
-      if (remoteHealth !== null) {
-        return {
-          ...remoteHealth,
-          remote: {
-            url: this.remoteClient.getBaseUrl(),
-            reachable: true,
-          },
-        };
-      }
-      const localReport = await this.healthCheck.checkHealth();
-      return {
-        ...localReport,
-        remote: {
-          url: this.remoteClient.getBaseUrl(),
-          reachable: false,
-        },
-      };
-    }
-    return this.healthCheck.checkHealth();
+    return this.runtime.getHealthReport();
   }
 
   public getMetricsSummary() {
@@ -526,14 +548,7 @@ export class ClsiService implements OnModuleDestroy {
     pageId?: string,
   ): Promise<{ success: boolean; spaceId: string }> {
     const scratchId = pageId || spaceId;
-    await Promise.all([
-      this.pipeline.runWithWorkspaceLock(scratchId, () =>
-        this.workspace.cleanScratch(scratchId),
-      ),
-      this.remoteClient.isEnabled()
-        ? this.remoteClient.tryRemoteCleanScratch(scratchId).catch(() => false)
-        : Promise.resolve(false),
-    ]);
+    await this.runtime.cleanScratch(scratchId);
     return { success: true, spaceId: scratchId };
   }
 

@@ -172,8 +172,7 @@ export interface ErrorExplainerLike {
   getByCode(code: string): ErrorExplanationVo | null;
 }
 
-const LATEX_KB_BASE_URL =
-  process.env.LATEX_KB_BASE_URL || 'https://latexref.xyz/dev/latex2e.html';
+const LATEX_KB_BASE_URL = 'https://latexref.xyz/dev/latex2e.html';
 
 export class LatexErrorCatalog implements ErrorExplainerLike {
   private readonly rules: RuleDefinition[] = [

@@ -7,12 +7,12 @@ import { resolveLaneRedisUrl } from '../redis/client.factory';
  * CLSI compiles synchronously over HTTP (flux_clsi) and does NOT use BullMQ.
  */
 export const QUEUES = {
-  AI_INDEX: 'ai:index',
-  FILE_CAS: 'file:cas',
-  FILE_MEDIA: 'file:media',
-  FILE_CLEANUP: 'file:cleanup',
-  LIB_INGEST: 'lib:ingest',
-  LIB_OUTBOX: 'lib:outbox',
+  AI_INDEX: 'ai-index',
+  FILE_CAS: 'file-cas',
+  FILE_MEDIA: 'file-media',
+  FILE_CLEANUP: 'file-cleanup',
+  LIB_INGEST: 'lib-ingest',
+  LIB_OUTBOX: 'lib-outbox',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
