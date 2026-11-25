@@ -17,7 +17,7 @@ import { CompilationPayload, WorkspaceFile } from '@/modules/pages/core';
 import { filterRecordsByPageScope } from '@/modules/pages/core/page-scope.helper';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { BibtexParser } from '@/modules/pages/citations/domain/bibtex-parser.domain';
+import { BibtexParser } from '@/modules/pages/citations/domain/bibtex.domain';
 
 export interface ProjectSymbolLabelDto {
   key: string;

@@ -1,5 +1,5 @@
-import { ResilientIdentifierResolver } from '@/modules/pages/citations/services/resilient-identifier-resolver.service';
-import { IdentifierVo } from '@/modules/pages/citations/domain/identifier.domain';
+import { ResilientIdentifierResolver } from '@/modules/pages/citations/services/resolver.service';
+import { IdentifierVo } from '@/modules/pages/citations/domain/value-objects.domain';
 import { BibEntry } from '@/modules/pages/citations/domain/bib-entry.domain';
 import { IIdentifierResolverPort } from '@/modules/pages/citations/domain/citations.ports';
 import { CitationsRepository } from '@/modules/pages/citations/repositories/citations.repository';

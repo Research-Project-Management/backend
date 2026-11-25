@@ -29,8 +29,8 @@ export class CitationKeyVo {
   public static sanitize(input: string): string {
     return input
       .trim()
-      .replace(/Ä‘/g, 'd')
-      .replace(/Ä/g, 'D')
+      .replace(/\u0111/g, 'd')
+      .replace(/\u0110/g, 'D')
       .normalize('NFKD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[\s/\\{},~#%&$]+/g, '_')

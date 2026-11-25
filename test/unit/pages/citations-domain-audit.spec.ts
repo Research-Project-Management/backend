@@ -1,6 +1,8 @@
-import { BibtexParser } from '@/modules/pages/citations/domain/bibtex-parser.domain';
-import { AuthorListVo } from '@/modules/pages/citations/domain/author-list.domain';
-import { CitationKeyVo } from '@/modules/pages/citations/domain/citation-key.domain';
+import { BibtexParser } from '@/modules/pages/citations/domain/bibtex.domain';
+import {
+  AuthorListVo,
+  CitationKeyVo,
+} from '@/modules/pages/citations/domain/value-objects.domain';
 import { BibEntry } from '@/modules/pages/citations/domain/bib-entry.domain';
 
 describe('Pages Citations Domain - Algorithm & Correctness Audit Fixes', () => {

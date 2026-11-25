@@ -1,9 +1,13 @@
-import { CitationIndexService } from '@/modules/pages/citations/services/citation-index.service';
-import { CitationSyncQueueService } from '@/modules/pages/citations/services/citation-sync-queue.service';
-import { CitationMetricsService } from '@/modules/pages/citations/services/citation-metrics.service';
-import { BibtexParser } from '@/modules/pages/citations/domain/bibtex-parser.domain';
-import { BibliographyFile } from '@/modules/pages/citations/domain/bibliography-file.domain';
-import { BibEntry } from '@/modules/pages/citations/domain/bib-entry.domain';
+import {
+  CitationIndexService,
+  CitationMetricsService,
+} from '@/modules/pages/citations/services/index.service';
+import { CitationSyncQueueService } from '@/modules/pages/citations/services/sync.service';
+import { BibtexParser } from '@/modules/pages/citations/domain/bibtex.domain';
+import {
+  BibEntry,
+  BibliographyFile,
+} from '@/modules/pages/citations/domain/bib-entry.domain';
 import type { CitationsRepository } from '@/modules/pages/citations/repositories/citations.repository';
 import type { RedisCacheService } from '@/core';
 import type { Queue } from 'bullmq';

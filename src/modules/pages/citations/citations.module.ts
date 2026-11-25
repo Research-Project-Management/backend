@@ -13,18 +13,22 @@ import { LibraryModule } from '@/modules/library';
 
 import { CitationsController } from './citations.controller';
 import { CitationsService } from './services/citations.service';
-import { CitationIndexService } from './services/citation-index.service';
-import { CitationMetricsService } from './services/citation-metrics.service';
+import {
+  CitationIndexService,
+  CitationMetricsService,
+} from './services/index.service';
 import {
   CITATION_SYNC_QUEUE,
   CitationSyncQueueService,
-} from './services/citation-sync-queue.service';
-import { IdentifierResolver } from './services/identifier-resolver.service';
-import { ResilientIdentifierResolver } from './services/resilient-identifier-resolver.service';
-import { LibrarySyncAdapter } from './services/library-sync.service';
+  LibrarySyncAdapter,
+} from './services/sync.service';
+import {
+  IdentifierResolver,
+  ResilientIdentifierResolver,
+} from './services/resolver.service';
 import { CitationsRepository } from './repositories/citations.repository';
-import { BibtexParser } from './domain/bibtex-parser.domain';
-import { CitationSyncProcessor } from './processors/citation-sync.processor';
+import { BibtexParser } from './domain/bibtex.domain';
+import { CitationSyncProcessor } from './processors/sync.processor';
 import { RedisCacheService } from '@/core';
 
 const inProcessCitationWorkers =
