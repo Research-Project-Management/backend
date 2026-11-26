@@ -34,7 +34,7 @@ import {
   extractMultipartSingleFile,
   MAX_DIRECT_UPLOAD_BYTES,
   MAX_PUBLIC_UPLOAD_BYTES,
-} from './files-http.helper';
+} from './http.helper';
 
 @ApiTags('Files')
 @ApiBearerAuth('JWT-auth')

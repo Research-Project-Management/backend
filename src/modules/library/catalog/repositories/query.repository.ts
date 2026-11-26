@@ -16,7 +16,8 @@ import {
   ItemSummary,
   ItemDetail,
 } from '@/modules/library/core/types/bibliographic.types';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import { ItemFilterOptions } from './notes.repository';
 import {
   ItemMatchQueryRepository,

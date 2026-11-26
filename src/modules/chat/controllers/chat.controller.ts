@@ -29,7 +29,7 @@ import {
   PresignChatAttachmentDto,
   CompleteChatAttachmentDto,
 } from '../dto/chat.dto';
-import { extractMultipartSingleFile } from '@/modules/files/controllers/files-http.helper';
+import { extractMultipartSingleFile } from '@/modules/files/controllers/http.helper';
 import { MAX_CHAT_FILE_BYTES } from '../chat.constant';
 
 @ApiTags('Chat')

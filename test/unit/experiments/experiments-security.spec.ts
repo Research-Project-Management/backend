@@ -1,4 +1,4 @@
-import { sanitizeFilename, isDangerousInlineMime } from '@/modules/files';
+import { sanitizeFilename, isDangerousInlineMime } from '@/modules/files/domain/files.policy';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import {
   isBlockedExtension,

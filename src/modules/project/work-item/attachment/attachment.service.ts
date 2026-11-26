@@ -9,7 +9,8 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { FastifyRequest } from 'fastify';
 import { AttachmentRepository } from './attachment.repository';
-import { FILES_PORT, IFilesPort, getFileContentPath } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { IFilesPort, getFileContentPath } from '@/modules/files/types/files.type';
 
 import { PrismaService, RedisCacheService, isUuid } from '@/core';
 import {

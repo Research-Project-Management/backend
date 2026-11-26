@@ -1,6 +1,6 @@
 import { UrlMetadataScraperService } from '@/modules/library/ingestion/services/url-metadata-scraper.service';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
-import { IFilesPort } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
 import { IExtractionFacade } from '@/modules/library/extraction/services/reference-matcher.service';
 
 describe('UrlMetadataScraperService', () => {

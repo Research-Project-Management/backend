@@ -34,7 +34,8 @@ import {
 } from '@/modules/library/extraction/domain/attachments.domain';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { FILES_PORT, IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { IFilesPort } from '@/modules/files/types/files.type';
 import type {
   RenameAttachmentDto,
   BatchRenameAttachmentsDto,

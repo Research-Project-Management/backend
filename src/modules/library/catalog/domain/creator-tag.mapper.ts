@@ -29,7 +29,7 @@ import {
   CreateItemData,
   CreatorCreditInput,
 } from '@/modules/library/core/types/bibliographic.types';
-import { getFileContentPath } from '@/modules/files';
+import { getFileContentPath } from '@/modules/files/types/files.type';
 
 export interface ResolvedTag {
   id: string;

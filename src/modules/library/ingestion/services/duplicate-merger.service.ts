@@ -29,7 +29,8 @@ import { MergeDuplicatesDto } from '@/modules/library/ingestion/dto/curation.dto
 import { PrismaMergeAuditTrail } from '@/modules/library/ingestion/types/ingestion.types';
 import { UserId, ProjectId } from '@/modules/library/core';
 import { asMetaObject } from '@/modules/library/ingestion/domain/duplicate-clustering.domain';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 
 import {
   ContributorShape,

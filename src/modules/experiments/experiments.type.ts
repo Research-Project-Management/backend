@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import type { CompletedPart } from '@/modules/files';
+import type { CompletedPart } from '@/modules/files/types/adapter.type';
 import { EXPERIMENTS_PORT } from './experiments.constant';
 import { FileScope, ExperimentNode } from './domain/node.domain';
 

@@ -89,6 +89,15 @@ export class PrismaService
     });
   }
 
+  getPoolStats() {
+    if (!this.pool) return null;
+    return {
+      totalCount: this.pool.totalCount,
+      idleCount: this.pool.idleCount,
+      waitingCount: this.pool.waitingCount,
+    };
+  }
+
   async onModuleInit() {
     try {
       await this.$connect();

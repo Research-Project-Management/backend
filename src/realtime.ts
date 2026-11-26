@@ -32,6 +32,7 @@ import {
   resolveLaneRedisUrl,
 } from './core';
 import { setupCors } from './core/http/setup/cors.setup';
+import { resolveTrustProxyConfig } from './core/http/setup/trust-proxy.setup';
 import { REALTIME_NAMESPACES, RealtimeConfigService } from './modules/realtime';
 import { RealtimeServiceAppModule } from './realtime.module';
 
@@ -55,16 +56,7 @@ process.on('uncaughtException', (error: Error) => {
 async function bootstrap(): Promise<void> {
   const logger = LoggerService.getInstance('RealtimeBootstrap');
 
-  const maxProxyHops = process.env.TRUST_PROXY_HOPS
-    ? parseInt(process.env.TRUST_PROXY_HOPS, 10)
-    : 1;
-
-  const trustProxyConfig =
-    process.env.TRUST_PROXY === 'false'
-      ? false
-      : process.env.TRUST_PROXY && process.env.TRUST_PROXY !== 'true'
-        ? process.env.TRUST_PROXY
-        : (_address: string, hop: number) => hop <= maxProxyHops;
+  const trustProxyConfig = resolveTrustProxyConfig();
 
   const app = await NestFactory.create<NestFastifyApplication>(
     RealtimeServiceAppModule,

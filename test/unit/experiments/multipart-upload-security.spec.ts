@@ -1,10 +1,5 @@
-import {
-  BlobStatus,
-  FilesFacade,
-  StorageBlobRecord,
-  UploadSessionRecord,
-  UploadSessionStatus,
-} from '@/modules/files';
+import { BlobStatus, StorageBlobRecord, UploadSessionRecord, UploadSessionStatus } from '@/modules/files/types/files.type';
+import { FilesFacade } from '@/modules/files/files.facade';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';

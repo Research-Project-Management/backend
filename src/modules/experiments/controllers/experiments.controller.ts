@@ -16,11 +16,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
-import {
-  DEFAULT_STORAGE_QUOTA_BYTES,
-  FILES_PORT,
-  type IFilesPort,
-} from '@/modules/files';
+import { DEFAULT_STORAGE_QUOTA_BYTES, FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { ExperimentsService } from '../services/experiments.service';
 import { TrashService } from '../services/trash.service';
 import { FileScope, ExperimentNode } from '../domain/node.domain';

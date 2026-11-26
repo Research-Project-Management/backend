@@ -8,7 +8,7 @@ import {
 import * as crypto from 'crypto';
 import { Readable } from 'node:stream';
 import { GC_CLAIM_LEASE_MINUTES, STORAGE_ADAPTER } from '../files.constant';
-import { ContentHash, StorageKey } from '../domain/storage-vo';
+import { ContentHash, StorageKey } from '../domain/storage.vo';
 import { BlobRepository } from '../repositories/blob.repository';
 import { IStorageAdapter } from '../types/adapter.type';
 import {

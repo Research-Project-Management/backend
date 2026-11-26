@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { BlobStatus, StorageBlobRecord } from '@/modules/files';
+import { BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import { FilesFacade } from '@/modules/files/files.facade';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';

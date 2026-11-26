@@ -1,9 +1,6 @@
-import {
-  BlobStatus,
-  DEFAULT_STORAGE_QUOTA_BYTES,
-  FilesFacade,
-  StorageBlobRecord,
-} from '@/modules/files';
+import { BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
+import { DEFAULT_STORAGE_QUOTA_BYTES } from '@/modules/files/files.constant';
+import { FilesFacade } from '@/modules/files/files.facade';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';

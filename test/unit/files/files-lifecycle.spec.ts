@@ -1,17 +1,10 @@
 import { Readable } from 'node:stream';
 import type { Job, Queue } from 'bullmq';
 import { PutBucketLifecycleConfigurationCommand } from '@aws-sdk/client-s3';
-import {
-  BlobStatus,
-  DEFAULT_STORAGE_QUOTA_BYTES,
-  MAX_PDF_THUMBNAIL_BYTES,
-  StorageBlobRecord,
-  StorageQuotaRecord,
-  UploadSessionRecord,
-  UploadSessionStatus,
-} from '@/modules/files';
+import { BlobStatus, StorageBlobRecord, StorageQuotaRecord, UploadSessionRecord, UploadSessionStatus } from '@/modules/files/types/files.type';
+import { DEFAULT_STORAGE_QUOTA_BYTES, MAX_PDF_THUMBNAIL_BYTES } from '@/modules/files/files.constant';
 import { FILE_JOBS } from '@/modules/files/files.constant';
-import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage.vo';
 import { FilesFacade } from '@/modules/files/files.facade';
 import { FilesController } from '@/modules/files/controllers/files.controller';
 import { S3StorageAdapter } from '@/modules/files/adapters/s3.adapter';

@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { FILES_PORT, type IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { NodeRepository } from '../repositories/node.repository';
 import { VersionRepository } from '../repositories/version.repository';
 import { ExperimentNode } from '../domain/node.domain';

@@ -33,6 +33,7 @@ import {
 } from './core';
 import { setupFastifyPlugins } from './core/http/setup/plugins.setup';
 import { setupCors } from './core/http/setup/cors.setup';
+import { resolveTrustProxyConfig } from './core/http/setup/trust-proxy.setup';
 import { setupSwagger } from './core/http/setup/swagger.setup';
 import { AppModule } from './app.module';
 
@@ -57,16 +58,7 @@ process.on('uncaughtException', (error: Error) => {
 async function bootstrap() {
   const logger = LoggerService.getInstance('Bootstrap');
 
-  const maxProxyHops = process.env.TRUST_PROXY_HOPS
-    ? parseInt(process.env.TRUST_PROXY_HOPS, 10)
-    : 1;
-
-  const trustProxyConfig =
-    process.env.TRUST_PROXY === 'false'
-      ? false
-      : process.env.TRUST_PROXY && process.env.TRUST_PROXY !== 'true'
-        ? process.env.TRUST_PROXY
-        : (_address: string, hop: number) => hop <= maxProxyHops;
+  const trustProxyConfig = resolveTrustProxyConfig();
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,

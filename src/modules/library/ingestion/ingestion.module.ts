@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { CoreModule, shouldRunWorkerConsumers } from '@/core';
 import { LibraryCoreModule } from '@/modules/library/core/core.module';
-import { FilesModule } from '@/modules/files';
+import { FilesModule } from '@/modules/files/files.module';
 import { BullModule } from '@nestjs/bullmq';
 import {
   LIBRARY_INGESTION_QUEUE_STANDARD,
@@ -24,7 +24,8 @@ import { PipelineBatchExecutor } from './services/pipeline-batch.service';
 import { MetadataResolverService } from './services/metadata-resolver.service';
 import { IngestionRunReporterService } from './services/ingestion-saga.service';
 import { IngestionSagaOrchestrator } from './services/ingestion-saga.service';
-import { QueueService, IngestionQueueConsumer } from './services/queue.service';
+import { QueueService } from './services/queue.service';
+import { IngestionQueueConsumer } from './services/ingest.processor';
 import { UrlCaptureService } from './services/url-capture.service';
 import { FeedRetrievalService } from './services/feed-retrieval.service';
 import { UrlMetadataScraperService } from './services/url-metadata-scraper.service';
@@ -39,10 +40,7 @@ import {
   QualityService,
   IngestionVerifierService,
 } from './services/ingestion-verifier.service';
-import {
-  IngestionFacade,
-  INGESTION_FACADE,
-} from './services/ingestion.facade';
+import { IngestionFacade, INGESTION_FACADE } from './services/ingestion.facade';
 import { RetractionDatabaseService } from './services/retraction-database.service';
 import { RetractionSyncService } from './services/retraction.service';
 import { RetractionSeederService } from './services/retraction-seeder.service';

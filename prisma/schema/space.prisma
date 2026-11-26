@@ -21,7 +21,7 @@ model Space {
 
   // Pages Domain Relations
   pages             Page[]
-  customWords       CustomDictionaryWord[]
+  spellingWords     SpellingWord[]
 
   // Library Domain Relations
   libraryItems         LibraryItem[]

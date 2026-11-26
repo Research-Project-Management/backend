@@ -19,7 +19,8 @@ import {
   resolveSpaceId,
   syncItemDenormalizedCountsInClient,
 } from '@/modules/library/core';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import {
   CreateItemData,
   UpdateItemData,

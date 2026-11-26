@@ -6,6 +6,7 @@ import {
   MemoryHealthIndicator,
 } from '@nestjs/terminus';
 import { PrismaHealthIndicator } from './prisma.health';
+import { PrismaService } from '../database/prisma.service';
 import { RedisCacheService } from '../redis/cache.service';
 import { QueueHealthService } from '../queue/queue.health';
 import {
@@ -25,6 +26,7 @@ export class HealthController {
     @Optional() private readonly redisCache?: RedisCacheService,
     @Optional() resourceGovernor?: SystemResourceGovernor,
     @Optional() private readonly queueHealth?: QueueHealthService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     this.governor = resourceGovernor ?? getDefaultResourceGovernor();
   }
@@ -78,6 +80,7 @@ export class HealthController {
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
+      dbPool: this.prisma?.getPoolStats() ?? null,
       redis: redisStats,
       cache: this.redisCache?.getStats() ?? null,
       queues,

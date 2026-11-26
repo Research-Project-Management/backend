@@ -41,7 +41,8 @@ import {
 import { PipelineSideEffectsService } from './pipeline-side-effects.service';
 import { PipelineBatchExecutor } from './pipeline-batch.service';
 import { UrlCaptureService } from './url-capture.service';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 
 import {
   resolveScope,

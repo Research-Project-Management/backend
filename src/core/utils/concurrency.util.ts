@@ -53,3 +53,30 @@ export async function mapSettledWithConcurrency<T, R>(
     }
   });
 }
+
+/**
+ * Coalesces concurrent async executions sharing the same key into a single
+ * in-flight promise (O(1) lookup, always cleans up on resolve or reject).
+ */
+export class Singleflight {
+  private readonly inFlight = new Map<string, Promise<unknown>>();
+
+  get size(): number {
+    return this.inFlight.size;
+  }
+
+  async run<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const existing = this.inFlight.get(key) as Promise<T> | undefined;
+    if (existing) {
+      return existing;
+    }
+
+    const promise = fn();
+    this.inFlight.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inFlight.delete(key);
+    }
+  }
+}

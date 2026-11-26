@@ -12,15 +12,15 @@ describe('Queue Configuration & Registry', () => {
       get: (key: string) => values[key],
     }) as unknown as ConfigService;
 
-  it('registers all 6 active Flux queues using domain:action naming', () => {
+  it('registers all 6 active Flux queues using domain-action naming', () => {
     expect(QUEUE_NAMES).toHaveLength(6);
     expect(QUEUES).toEqual({
-      AI_INDEX: 'ai:index',
-      FILE_CAS: 'file:cas',
-      FILE_MEDIA: 'file:media',
-      FILE_CLEANUP: 'file:cleanup',
-      LIB_INGEST: 'lib:ingest',
-      LIB_OUTBOX: 'lib:outbox',
+      AI_INDEX: 'ai-index',
+      FILE_CAS: 'file-cas',
+      FILE_MEDIA: 'file-media',
+      FILE_CLEANUP: 'file-cleanup',
+      LIB_INGEST: 'lib-ingest',
+      LIB_OUTBOX: 'lib-outbox',
     });
   });
 

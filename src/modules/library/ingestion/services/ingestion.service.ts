@@ -33,7 +33,8 @@ import {
   gzipAsync,
 } from '@/modules/library/core';
 import { createHash, randomUUID } from 'crypto';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import {
   METADATA_PORT,
   MetadataPort,

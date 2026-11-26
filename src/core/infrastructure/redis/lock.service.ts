@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { getErrorMessage } from '../../utils/error.util';
 import { RedisCacheService } from './cache.service';
@@ -31,7 +31,7 @@ export class DistributedLockService {
     end
   `;
 
-  constructor(private readonly redisCache: RedisCacheService) {}
+  constructor(@Optional() private readonly redisCache?: RedisCacheService) {}
 
   private toLockKey(resource: string): string {
     return resource.startsWith('lock:') ? resource : `lock:${resource}`;
@@ -47,7 +47,7 @@ export class DistributedLockService {
   ): Promise<string | null> {
     const token = crypto.randomUUID();
     const lockKey = this.toLockKey(resource);
-    const client = this.redisCache.isReady()
+    const client = this.redisCache?.isReady()
       ? this.redisCache.getClient()
       : null;
 
@@ -94,7 +94,7 @@ export class DistributedLockService {
    */
   public async releaseLock(resource: string, token: string): Promise<boolean> {
     const lockKey = this.toLockKey(resource);
-    const client = this.redisCache.isReady()
+    const client = this.redisCache?.isReady()
       ? this.redisCache.getClient()
       : null;
 
@@ -128,7 +128,7 @@ export class DistributedLockService {
     ttlMs: number = 30000,
   ): Promise<boolean> {
     const lockKey = this.toLockKey(resource);
-    const client = this.redisCache.isReady()
+    const client = this.redisCache?.isReady()
       ? this.redisCache.getClient()
       : null;
 

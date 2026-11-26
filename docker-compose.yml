@@ -111,6 +111,11 @@ services:
       CLSI_URL: http://flux_clsi:3013
       CLSI_SANDBOX_MODE: remote
       CLSI_SCRATCH_DIR: /tmp/clsi-scratch
+      CLSI_SCRATCH_GC_INTERVAL_MS: "${BE_SCRATCH_GC_INTERVAL_MS:-0}"
+      CLSI_COMPILE_TIMEOUT_MS: "${CLSI_COMPILE_TIMEOUT_MS:-90000}"
+      CLSI_AUTO_COMPILE_TIMEOUT_MS: "${CLSI_AUTO_COMPILE_TIMEOUT_MS:-30000}"
+      CLSI_DRAFT_COMPILE_TIMEOUT_MS: "${CLSI_DRAFT_COMPILE_TIMEOUT_MS:-45000}"
+      CLSI_SYNTAX_COMPILE_TIMEOUT_MS: "${CLSI_SYNTAX_COMPILE_TIMEOUT_MS:-20000}"
       CLIENT_URL: ${CLIENT_URL}
       ORIGINS: ${ORIGINS}
       TRUSTED_EXTRACTION_ENABLED: "true"
@@ -157,8 +162,6 @@ services:
     container_name: flux_backend_worker
     restart: unless-stopped
     command: ["node", "dist/worker.js"]
-    volumes:
-      - flux_clsi_scratch:/tmp/clsi-scratch
     env_file:
       - .env
     environment:
@@ -169,9 +172,6 @@ services:
       REDIS_CACHE_URL: "redis://redis:6379"
       REDIS_REALTIME_URL: "redis://redis:6379"
       REDIS_QUEUE_URL: "redis://redis:6379"
-      CLSI_URL: http://flux_clsi:3013
-      CLSI_SANDBOX_MODE: remote
-      CLSI_SCRATCH_DIR: /tmp/clsi-scratch
       SKIP_MIGRATIONS: "true"
       REALTIME_SERVICE_URL: http://flux_realtime:3014
       REALTIME_INTERNAL_API_KEY: "${REALTIME_INTERNAL_API_KEY:-}"
@@ -195,6 +195,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "${WORKER_CPU_LIMIT:-0.75}"
           memory: ${WORKER_MEM_LIMIT:-768M}
         reservations:
           memory: 128M
@@ -229,9 +230,22 @@ services:
       PORT: 3013
       CLSI_PORT: 3013
       CLSI_SCRATCH_DIR: /tmp/clsi-scratch
+      CLSI_MAX_CONCURRENT_COMPILES: "${CLSI_MAX_CONCURRENT_COMPILES:-2}"
+      CLSI_SCRATCH_GC_INTERVAL_MS: "${CLSI_SCRATCH_GC_INTERVAL_MS:-3600000}"
+      CLSI_COMPILE_TIMEOUT_MS: "${CLSI_COMPILE_TIMEOUT_MS:-90000}"
+      CLSI_AUTO_COMPILE_TIMEOUT_MS: "${CLSI_AUTO_COMPILE_TIMEOUT_MS:-30000}"
+      CLSI_DRAFT_COMPILE_TIMEOUT_MS: "${CLSI_DRAFT_COMPILE_TIMEOUT_MS:-45000}"
+      CLSI_SYNTAX_COMPILE_TIMEOUT_MS: "${CLSI_SYNTAX_COMPILE_TIMEOUT_MS:-20000}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3013/status || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
         limits:
+          cpus: "${CLSI_CPU_LIMIT:-1.0}"
           memory: ${CLSI_MEM_LIMIT:-1024M}
         reservations:
           memory: 256M

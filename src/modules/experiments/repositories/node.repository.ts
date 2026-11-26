@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@/core';
 import { FileNode as PrismaFile, Prisma } from '@prisma/client';
-import { isValidUuid } from '@/modules/files';
+import { isValidUuid } from '@/modules/files/domain/files.policy';
 import { ListExperimentsFilter, SharedNodeItem } from '../experiments.type';
 import {
   FileScope,

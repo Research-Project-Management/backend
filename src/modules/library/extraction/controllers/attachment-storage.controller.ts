@@ -22,7 +22,9 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard, CurrentUser } from '@/modules/identity/auth';
 import { ProjectAccessGuard, ProjectRoles } from '@/modules/project/access';
-import { FilesBatchPartUrlsDto, IFilesPort, FILES_PORT } from '@/modules/files';
+import { FilesBatchPartUrlsDto } from '@/modules/files/files.dto';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import { AttachmentsService } from '@/modules/library/extraction/services/attachments.service';
 import {
   PresignUploadDto,

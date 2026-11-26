@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ConflictException,
   Logger,
@@ -18,7 +18,7 @@ import {
   STALE_FINALIZING_LEASE_MINUTES,
   STAGING_SWEEP_MIN_AGE_MINUTES,
 } from '../files.constant';
-import { StorageKey } from '../domain/storage-vo';
+import { StorageKey } from '../domain/storage.vo';
 import { resolveTargetSpaceId } from '../domain/files.policy';
 import { BlobRepository } from '../repositories/blob.repository';
 import { QuotaRepository } from '../repositories/quota.repository';

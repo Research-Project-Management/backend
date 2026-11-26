@@ -16,10 +16,10 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { Readable } from 'node:stream';
 import { BypassEnvelope } from '@/core';
 import { STORAGE_ADAPTER } from '../files.constant';
-import { ByteRange } from '../domain/storage-vo';
+import { ByteRange } from '../domain/storage.vo';
 import { IStorageAdapter } from '../types/adapter.type';
 import { LocalStorageAdapter } from '../adapters/local.adapter';
-import { applyBinaryHeaders } from './files-http.helper';
+import { applyBinaryHeaders } from './http.helper';
 
 @ApiTags('Files')
 @Controller('api/v1/files')

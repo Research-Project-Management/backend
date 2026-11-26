@@ -58,7 +58,12 @@ import { ClsiHealthCheck } from './modules/pages/clsi/adapters/health.adapter';
 import { CompileLogParser } from './modules/pages/clsi/domain/log-parser/tex-log.parser';
 import { SynctexParser } from './modules/pages/clsi/domain/synctex.parser';
 import { TexWordCounter } from './modules/pages/clsi/domain/word-count.engine';
+import { TexcountCliAdapter } from './modules/pages/clsi/adapters/texcount.adapter';
 import { ClsiMetrics } from './modules/pages/clsi/adapters/metrics.adapter';
+import {
+  resolveCompileTimeout,
+  resolveCompileTimeoutLimits,
+} from './modules/pages/clsi/domain/compile.policy';
 
 interface ClsiContainerInFlightSession {
   abortController: AbortController;
@@ -72,6 +77,7 @@ export class ClsiService implements OnModuleDestroy {
   private readonly pipeline: CompileService;
   private readonly synctexParser: SynctexParser;
   private readonly wordCounter: TexWordCounter;
+  private readonly texcountCli: TexcountCliAdapter;
   private readonly diskUsageCleaner: DiskUsageCleaner;
   private readonly healthCheck: ClsiHealthCheck;
   private readonly metrics = new ClsiMetrics();
@@ -107,6 +113,7 @@ export class ClsiService implements OnModuleDestroy {
 
     this.synctexParser = new SynctexParser();
     this.wordCounter = new TexWordCounter();
+    this.texcountCli = new TexcountCliAdapter();
     this.diskUsageCleaner = new DiskUsageCleaner(scratchDir);
     this.healthCheck = new ClsiHealthCheck(runner, scratchDir);
     this.pipeline = new CompileService(
@@ -159,7 +166,15 @@ export class ClsiService implements OnModuleDestroy {
     const source = dto.source || '';
     const files = dto.files || {};
     const requestedEngine = dto.engine;
-    const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
+    const effectiveTimeoutMs = resolveCompileTimeout(
+      {
+        requestedMs: dto.timeoutMs,
+        priority: dto.priority,
+        draft: dto.draft,
+        syntaxOnly: dto.syntaxOnly,
+      },
+      resolveCompileTimeoutLimits(process.env),
+    );
 
     const existing = this.inFlightCompiles.get(spaceId);
     if (existing) {
@@ -342,12 +357,21 @@ export class ClsiService implements OnModuleDestroy {
     return { success: true, result: point };
   }
 
-  public getWordCount(dto: ClsiWordCountDto) {
+  public async getWordCount(dto: ClsiWordCountDto) {
     if (dto.files && Object.keys(dto.files).length > 0 && !dto.source) {
+      const rootFile = dto.filename || 'main.tex';
+      const cliStats = await this.texcountCli.countFiles({
+        files: dto.files,
+        rootFile,
+        includeBib: dto.includeBib,
+      });
+      if (cliStats) {
+        return { success: true, stats: cliStats };
+      }
       return {
         success: true,
         stats: this.wordCounter.countProject(dto.files, {
-          rootFile: dto.filename || 'main.tex',
+          rootFile,
           includeBib: dto.includeBib,
         }),
       };
@@ -376,13 +400,21 @@ export class ClsiService implements OnModuleDestroy {
       };
     }
 
+    const filename = dto.filename || 'document.tex';
+    const cliStats = await this.texcountCli.countFiles({
+      files: { [filename]: dto.source },
+      rootFile: filename,
+      includeBib: dto.includeBib,
+    });
+    if (cliStats) {
+      return { success: true, stats: cliStats };
+    }
+
     return {
       success: true,
-      stats: this.wordCounter.count(
-        dto.source,
-        dto.filename || 'document.tex',
-        { includeBib: dto.includeBib },
-      ),
+      stats: this.wordCounter.count(dto.source, filename, {
+        includeBib: dto.includeBib,
+      }),
     };
   }
 

@@ -5,7 +5,8 @@ import {
   DomainEventEnvelope,
   extractFileIdFromUrl,
 } from '@/modules/library/core';
-import { FILES_PORT, IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { IFilesPort } from '@/modules/files/types/files.type';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
 

@@ -7,11 +7,8 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
-import {
-  FILES_PORT,
-  type FileActorContext,
-  type IFilesPort,
-} from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type FileActorContext, type IFilesPort } from '@/modules/files/types/files.type';
 import {
   CompleteMultipartInput,
   CompleteMultipartOutput,

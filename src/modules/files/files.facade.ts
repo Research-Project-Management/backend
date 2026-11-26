@@ -16,7 +16,7 @@ import {
   FILE_JOBS,
   STORAGE_ADAPTER,
 } from './files.constant';
-import { ByteRange, StorageKey } from './domain/storage-vo';
+import { ByteRange, StorageKey } from './domain/storage.vo';
 import {
   classifyObjectKey,
   cleanUuid,

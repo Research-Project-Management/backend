@@ -8,13 +8,9 @@ import {
   ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
-import {
-  BlobStatus,
-  DEFAULT_STORAGE_QUOTA_BYTES,
-  StorageBlobRecord,
-  StorageQuotaRecord,
-} from '@/modules/files';
-import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { BlobStatus, StorageBlobRecord, StorageQuotaRecord } from '@/modules/files/types/files.type';
+import { DEFAULT_STORAGE_QUOTA_BYTES } from '@/modules/files/files.constant';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage.vo';
 import { FilesFacade } from '@/modules/files/files.facade';
 import { FilesController } from '@/modules/files/controllers/files.controller';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';

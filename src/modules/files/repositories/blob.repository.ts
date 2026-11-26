@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { FileBlob as PrismaBlob } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { ContentHash, StorageKey } from '../domain/storage-vo';
+import { ContentHash, StorageKey } from '../domain/storage.vo';
 import {
   AttachBlobRefInput,
   BlobRefRecord,

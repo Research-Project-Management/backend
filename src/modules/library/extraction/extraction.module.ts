@@ -5,7 +5,7 @@ import {
   IOutboxRegistry,
   OUTBOX_REGISTRY_PORT,
 } from '@/modules/library/core';
-import { FilesModule } from '@/modules/files';
+import { FilesModule } from '@/modules/files/files.module';
 
 // Presentation
 import { AttachmentController } from './controllers/attachments.controller';

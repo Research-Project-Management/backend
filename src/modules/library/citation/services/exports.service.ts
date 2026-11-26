@@ -27,7 +27,8 @@ import {
   resolveExportFormatStrategy,
   formatItemsAsBibtex,
 } from '@/modules/library/citation/domain/export-format.mapper';
-import { FILES_PORT, IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { IFilesPort } from '@/modules/files/types/files.type';
 import {
   extractItemCitationAliases,
   resolveEmittedCitationEntries,

@@ -17,7 +17,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Public, CurrentUser, JwtAuthGuard } from '@/modules/identity/auth';
-import { isDangerousInlineMime } from '@/modules/files';
+import { isDangerousInlineMime } from '@/modules/files/domain/files.policy';
 import { FileDownloadedEvent } from '../domain/experiments.event';
 import { StreamService } from '../services/stream.service';
 

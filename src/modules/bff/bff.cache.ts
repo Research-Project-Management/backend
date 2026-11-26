@@ -9,7 +9,7 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, Singleflight } from '@/core';
 
 export const BFF_CACHE_TTL_SECONDS = {
   workspaceShell: 20,
@@ -44,7 +44,7 @@ export interface BffDomainChangeEvent {
 @Injectable()
 export class BffCacheService {
   private readonly logger = new Logger(BffCacheService.name);
-  private readonly inFlight = new Map<string, Promise<unknown>>();
+  private readonly singleflight = new Singleflight();
 
   constructor(@Optional() private readonly cache?: RedisCacheService) {}
 
@@ -67,14 +67,7 @@ export class BffCacheService {
       }
     }
 
-    if (!bypassRead) {
-      const existing = this.inFlight.get(key) as Promise<T> | undefined;
-      if (existing) {
-        return { value: await existing, cacheHit: false };
-      }
-    }
-
-    const execution = (async (): Promise<T> => {
+    const executeAndWrite = async (): Promise<T> => {
       const { value, cacheable } = await compute();
       if (cacheable && ttlSeconds > 0 && this.cache) {
         try {
@@ -85,23 +78,17 @@ export class BffCacheService {
         }
       }
       return value;
-    })();
+    };
 
-    if (!bypassRead) {
-      this.inFlight.set(key, execution);
-    }
+    const value = bypassRead
+      ? await executeAndWrite()
+      : await this.singleflight.run(key, executeAndWrite);
 
-    try {
-      return { value: await execution, cacheHit: false };
-    } finally {
-      if (!bypassRead) {
-        this.inFlight.delete(key);
-      }
-    }
+    return { value, cacheHit: false };
   }
 
   getInFlightCount(): number {
-    return this.inFlight.size;
+    return this.singleflight.size;
   }
 
   @OnEvent('project.**', { async: true })

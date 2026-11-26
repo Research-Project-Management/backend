@@ -9,7 +9,7 @@ import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normaliz
 import { ArxivProvider } from '@/modules/library/ingestion/providers/arxiv.provider';
 import { OpenAlexProvider } from '@/modules/library/ingestion/providers/openalex.provider';
 import { MetadataExecutorService } from '@/modules/library/ingestion/services/metadata-executor.service';
-import type { IFilesPort } from '@/modules/files';
+import type { IFilesPort } from '@/modules/files/types/files.type';
 import type { IExtractionFacade } from '@/modules/library/core';
 
 describe('High-Scale Ingestion Architecture Optimizations', () => {

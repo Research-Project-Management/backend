@@ -20,12 +20,7 @@ import {
   UserRateLimitGuard,
   UserRateLimitRule,
 } from '@/core';
-import {
-  BlobStatus,
-  StorageBlobRecord,
-  UploadSessionRecord,
-  UploadSessionStatus,
-} from '@/modules/files';
+import { BlobStatus, StorageBlobRecord, UploadSessionRecord, UploadSessionStatus } from '@/modules/files/types/files.type';
 import {
   FILE_JOBS,
   MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER,
@@ -33,7 +28,7 @@ import {
   STALE_FINALIZING_LEASE_MINUTES,
   STAGING_DELETE_DELAY_MS,
 } from '@/modules/files/files.constant';
-import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage.vo';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import { FilesController } from '@/modules/files/controllers/files.controller';
 import { CasProcessor } from '@/modules/files/processors/cas.processor';

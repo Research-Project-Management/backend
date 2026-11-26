@@ -29,7 +29,8 @@ import {
 import { ItemCacheCoordinator } from './item-cache.service';
 import { LIBRARY_REDIS_KEYS } from '@/modules/library/core/config/library.config';
 import { DocumentFulltextResponse } from '@/modules/library/catalog/dto/items.dto';
-import { FILES_PORT, IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { IFilesPort } from '@/modules/files/types/files.type';
 
 @Injectable()
 export class ItemRelationsService {

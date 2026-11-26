@@ -1,7 +1,7 @@
 import { AttachmentService } from '@/modules/project/work-item/attachment/attachment.service';
 import { AttachmentRepository } from '@/modules/project/work-item/attachment/attachment.repository';
 import { PrismaService } from '@/core';
-import { IFilesPort } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
 import { EntityType } from '@prisma/client';
 
 describe('Work-Item AttachmentService & Storage Integration', () => {

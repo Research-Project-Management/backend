@@ -1,4 +1,4 @@
-import { FilesFacade } from '@/modules/files';
+import { FilesFacade } from '@/modules/files/files.facade';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';

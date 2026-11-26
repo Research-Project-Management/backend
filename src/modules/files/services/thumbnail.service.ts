@@ -6,7 +6,7 @@ import {
   MAX_PDF_THUMBNAIL_BYTES,
   STORAGE_ADAPTER,
 } from '../files.constant';
-import { StorageKey } from '../domain/storage-vo';
+import { StorageKey } from '../domain/storage.vo';
 import { streamToBuffer } from '../domain/files.policy';
 import { BlobRepository } from '../repositories/blob.repository';
 import { IStorageAdapter } from '../types/adapter.type';

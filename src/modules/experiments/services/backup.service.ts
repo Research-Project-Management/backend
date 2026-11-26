@@ -1,12 +1,9 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
-import {
-  FILES_PORT,
-  sanitizeFilename,
-  streamToBuffer,
-  type IFilesPort,
-} from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { sanitizeFilename, streamToBuffer } from '@/modules/files/domain/files.policy';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { NodeRepository } from '../repositories/node.repository';
 import { ExperimentNode } from '../domain/node.domain';
 import { ZipPackager } from '../domain/archive.domain';

@@ -1,8 +1,9 @@
-import { BlobStatus, FilesFacade, StorageBlobRecord } from '@/modules/files';
+import { BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
+import { FilesFacade } from '@/modules/files/files.facade';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import { S3StorageAdapter } from '@/modules/files/adapters/s3.adapter';
 import { supportsBucketLifecycle } from '@/modules/files/types/adapter.type';
-import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage.vo';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';
 import { BlobService } from '@/modules/files/services/blob.service';

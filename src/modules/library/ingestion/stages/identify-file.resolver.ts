@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import {
   EXTRACTION_FACADE,
   IExtractionFacade,

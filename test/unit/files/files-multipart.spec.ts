@@ -3,14 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import {
-  BlobStatus,
-  DEFAULT_STORAGE_QUOTA_BYTES,
-  StorageBlobRecord,
-  StorageQuotaRecord,
-  UploadSessionRecord,
-  UploadSessionStatus,
-} from '@/modules/files';
+import { BlobStatus, StorageBlobRecord, StorageQuotaRecord, UploadSessionRecord, UploadSessionStatus } from '@/modules/files/types/files.type';
+import { DEFAULT_STORAGE_QUOTA_BYTES } from '@/modules/files/files.constant';
 import {
   FILE_JOBS,
   MIN_MULTIPART_PART_SIZE_BYTES,
@@ -18,7 +12,7 @@ import {
   MULTIPART_MEDIUM_PART_SIZE_BYTES,
   STAGING_DELETE_DELAY_MS,
 } from '@/modules/files/files.constant';
-import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage.vo';
 import { FilesFacade } from '@/modules/files/files.facade';
 import { FilesController } from '@/modules/files/controllers/files.controller';
 import { LocalFilesController } from '@/modules/files/controllers/local.controller';

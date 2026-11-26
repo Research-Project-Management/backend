@@ -11,7 +11,7 @@ import {
   RenamerItemMetadata,
   isPlaceholderItemTitle,
 } from '@/modules/library/core';
-import { getFileContentPath } from '@/modules/files';
+import { getFileContentPath } from '@/modules/files/types/files.type';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import { IngestionSubmissionEnvelope } from '@/modules/library/ingestion/types/ingestion.types';
 import {

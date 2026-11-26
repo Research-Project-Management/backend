@@ -39,7 +39,8 @@ import { toItemData } from '@/modules/library/ingestion/stages/commit.stage';
 import { ItemMetadata } from '@/modules/library/ingestion/types/metadata.types';
 import { ParsedFeed } from '@/modules/library/ingestion/parsers/rss-atom-feed.parser';
 import { createHash, randomUUID } from 'crypto';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import { FeedRetrievalService } from './feed-retrieval.service';
 import { FeedsRepository } from '@/modules/library/ingestion/repositories/feeds.repository';
 

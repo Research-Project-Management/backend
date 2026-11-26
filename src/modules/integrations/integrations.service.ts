@@ -31,10 +31,9 @@ import {
   PullGithubDto,
   ImportGithubRepoDto,
 } from './dto/github-sync.dto';
-import {
-  ExportImportService,
-  ArchiveEntryVo,
-} from '@/modules/pages/export-import';
+import { ExportService } from '@/modules/pages/export-import/services/export.service';
+import { ImportService } from '@/modules/pages/export-import/services/import.service';
+import { ArchiveEntryVo } from '@/modules/pages/export-import/domain/archive.domain';
 
 export interface ProviderStatusSummary {
   provider: IntegrationProviderType;
@@ -66,7 +65,8 @@ export class IntegrationsService {
     private readonly mendeleyProvider: MendeleyProvider,
     private readonly githubProvider: GithubProvider,
     private readonly filestoreService: FilestoreService,
-    private readonly exportImportService: ExportImportService,
+    private readonly exportService: ExportService,
+    private readonly importService: ImportService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly structureService?: StructureService,
     @Optional() private readonly redis?: RedisCacheService,
@@ -765,7 +765,7 @@ export class IntegrationsService {
     const repoFullName = link.repoFullName;
     const branch = dto.branch || link.branch || 'main';
 
-    const entries = await this.exportImportService.collectProjectEntries(
+    const entries = await this.exportService.collectProjectEntries(
       dto.pageId,
       false,
     );
@@ -831,7 +831,7 @@ export class IntegrationsService {
       ArchiveEntryVo.create(file.path, file.data),
     );
 
-    const summary = await this.exportImportService.hydrateProjectEntries(
+    const summary = await this.importService.hydrateProjectEntries(
       dto.pageId,
       archiveEntries,
       userId,
@@ -870,7 +870,7 @@ export class IntegrationsService {
       ArchiveEntryVo.create(file.path, file.data),
     );
 
-    const summary = await this.exportImportService.hydrateProjectEntries(
+    const summary = await this.importService.hydrateProjectEntries(
       dto.pageId,
       archiveEntries,
       userId,

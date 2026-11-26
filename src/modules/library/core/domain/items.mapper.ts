@@ -1,4 +1,4 @@
-import { getFileContentPath } from '@/modules/files';
+import { getFileContentPath } from '@/modules/files/types/files.type';
 import {
   ITEM_COLUMN_METADATA_FIELDS,
   TYPE_SPECIFIC_EXTRA_FIELDS,

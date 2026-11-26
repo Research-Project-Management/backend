@@ -30,7 +30,7 @@ import {
   STAGING_SWEEP_MIN_AGE_MINUTES,
   STORAGE_ADAPTER,
 } from '../files.constant';
-import { StorageKey } from '../domain/storage-vo';
+import { StorageKey } from '../domain/storage.vo';
 import {
   inferMimeType,
   isBlockedExtension,
@@ -66,8 +66,8 @@ import {
   UploadSessionStatus,
 } from '../types/files.type';
 import { BlobService } from './blob.service';
-import { FILES_CACHE_KEYS } from '../files.cache-keys';
-import { MultipartUploadFlow } from './multipart-flow';
+import { FILES_CACHE_KEYS } from '../files.constant';
+import { MultipartUploadFlow } from './multipart.helper';
 
 interface PresignCompleteCache {
   blobId: string;

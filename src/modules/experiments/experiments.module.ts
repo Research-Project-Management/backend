@@ -4,7 +4,7 @@ import {
   shouldMountExperimentsControllers,
   shouldMountTransferControllers,
 } from '@/core';
-import { FilesModule } from '@/modules/files';
+import { FilesModule } from '@/modules/files/files.module';
 import { EXPERIMENTS_PORT } from './experiments.constant';
 import { NodeRepository } from './repositories/node.repository';
 import { VersionRepository } from './repositories/version.repository';

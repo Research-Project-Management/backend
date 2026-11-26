@@ -43,3 +43,8 @@ export const PUBLIC_OBJECT_ALLOWLIST_PREFIXES = [
 ] as const;
 
 export const SIGNED_OBJECT_PREFIXES = ['derivatives/'] as const;
+
+export const FILES_CACHE_KEYS = {
+  presignCompleteIdempotency: (keyDigest: string) =>
+    `files:idem:complete:${keyDigest}`,
+} as const;

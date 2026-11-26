@@ -1,5 +1,6 @@
-import { BlobStatus, FilesFacade, StorageBlobRecord } from '@/modules/files';
-import { ContentHash, StorageKey } from '@/modules/files/domain/storage-vo';
+import { BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
+import { FilesFacade } from '@/modules/files/files.facade';
+import { ContentHash, StorageKey } from '@/modules/files/domain/storage.vo';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { SessionRepository } from '@/modules/files/repositories/session.repository';
 import { BlobService } from '@/modules/files/services/blob.service';

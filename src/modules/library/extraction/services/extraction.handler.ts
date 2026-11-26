@@ -2,7 +2,8 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
 import { PdfProvider } from '@/modules/library/extraction/providers/pdf.provider';
-import { FILES_PORT, IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { IFilesPort } from '@/modules/files/types/files.type';
 import { OutboxEvent } from '@prisma/client';
 import {
   OutboxDispatchHandler,

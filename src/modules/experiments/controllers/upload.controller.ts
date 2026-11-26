@@ -16,7 +16,8 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
 import { CurrentUser, JwtAuthGuard } from '@/modules/identity/auth';
-import { cleanUuid, FilesBatchPartUrlsDto } from '@/modules/files';
+import { cleanUuid } from '@/modules/files/domain/files.policy';
+import { FilesBatchPartUrlsDto } from '@/modules/files/files.dto';
 import { getFileContentPath } from '../experiments.type';
 import {
   ExperimentsAccessPolicy,

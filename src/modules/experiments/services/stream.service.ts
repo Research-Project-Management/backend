@@ -5,12 +5,9 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import {
-  FILES_PORT,
-  sanitizeFilename,
-  type IFilesPort,
-  type StreamBlobTarget,
-} from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { sanitizeFilename } from '@/modules/files/domain/files.policy';
+import { type IFilesPort, type StreamBlobTarget } from '@/modules/files/types/files.type';
 import { StreamBinaryOutput } from '../experiments.type';
 import { NodeRepository } from '../repositories/node.repository';
 import { ExperimentNode } from '../domain/node.domain';

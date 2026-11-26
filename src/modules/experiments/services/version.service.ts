@@ -7,7 +7,9 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'stream';
 import * as crypto from 'crypto';
-import { FILES_PORT, sanitizeFilename, type IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { sanitizeFilename } from '@/modules/files/domain/files.policy';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { NodeRepository } from '../repositories/node.repository';
 import { VersionRepository } from '../repositories/version.repository';
 import { ExperimentsAccessPolicy } from '../domain/access.policy';

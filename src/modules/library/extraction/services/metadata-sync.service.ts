@@ -1,7 +1,8 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ExtractionRepository } from '@/modules/library/extraction/repositories/extraction.repository';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import {
   parseCreatorString,
   isNoiseAuthorName,

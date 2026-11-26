@@ -4,7 +4,9 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { FILES_PORT, streamToBuffer, type IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { streamToBuffer } from '@/modules/files/domain/files.policy';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
   getFileContentPath,
   IExperimentsPort,

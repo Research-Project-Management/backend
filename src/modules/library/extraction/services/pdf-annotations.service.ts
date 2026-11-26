@@ -8,7 +8,8 @@ import {
 } from '@nestjs/common';
 import { AnnotationsRepository } from '@/modules/library/extraction/repositories/annotations.repository';
 import { AttachmentsRepository } from '@/modules/library/extraction/repositories/attachments.repository';
-import { FILES_PORT, IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { IFilesPort } from '@/modules/files/types/files.type';
 import { AnnotationsService } from './annotations.service';
 import { AnnotationType } from '@/modules/library/core/types/extraction.types';
 import {

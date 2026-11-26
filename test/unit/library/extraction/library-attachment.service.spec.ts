@@ -33,7 +33,7 @@ import { IdentifyStage } from '@/modules/library/ingestion/stages/identify.stage
 import { IdentifyFileResolver } from '@/modules/library/ingestion/stages/identify-file.resolver';
 import { ExtractionHandler } from '@/modules/library/extraction/services/extraction.handler';
 import { ExtractionMetadataSynchronizer } from '@/modules/library/extraction/services/metadata-sync.service';
-import { IFilesPort } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
 
 describe('Library Attachments & Storage Integration Suite', () => {
   let mockStoragePort: jest.Mocked<IFilesPort>;

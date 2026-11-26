@@ -9,7 +9,8 @@ import {
 import { createHash } from 'crypto';
 import { isUUID } from 'class-validator';
 import { AttachmentsService } from './attachments.service';
-import { FILES_PORT, getFileObjectPath, IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { getFileObjectPath, IFilesPort } from '@/modules/files/types/files.type';
 import { SsrfGuardService } from '@/modules/library/core/services/ssrf-guard.service';
 import {
   ExternalProviderException,

@@ -26,7 +26,7 @@ import {
   DEFAULT_RENAME_PATTERN,
   RenamerItemMetadata,
 } from '@/modules/library/core';
-import { getFileContentPath } from '@/modules/files';
+import { getFileContentPath } from '@/modules/files/types/files.type';
 import {
   METADATA_PORT,
   MetadataPort,

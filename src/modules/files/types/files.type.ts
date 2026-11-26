@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { BlobStatus } from '../domain/storage-vo';
+import { BlobStatus } from '../domain/storage.vo';
 import { CompletedPart, StorageObjectMetadata } from './adapter.type';
 
 export { BlobStatus };

@@ -1,11 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { BlobStatus, StorageBlobRecord } from '@/modules/files';
+import { BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
 import {
   ContentHash,
   ByteRange,
   StorageKey,
-} from '@/modules/files/domain/storage-vo';
+} from '@/modules/files/domain/storage.vo';
 import {
   ExperimentNode,
   FileScope,

@@ -29,7 +29,8 @@ import { CslParser } from '@/modules/library/ingestion/parsers/csl.parser';
 import { XmlLegacyFormatsParser } from '@/modules/library/ingestion/parsers/xml-legacy-formats.parser';
 import { BibliographyFormatRegistry } from '@/modules/library/ingestion/parsers/bibliography-format.registry';
 import { NormalizationPolicy } from '@/modules/library/ingestion/domain/normalization.policy';
-import { IFilesPort, FILES_PORT } from '@/modules/files';
+import { IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import {
   normalizeArxivId,
   normalizePmid,

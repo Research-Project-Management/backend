@@ -36,6 +36,7 @@ RUN apk add --no-cache \
     perl \
     ghostscript \
     biber \
+    pandoc-cli \
     fontconfig \
     font-dejavu \
     font-liberation \
@@ -66,6 +67,13 @@ RUN apk add --no-cache \
       '  <dir>/usr/share/texmf-dist/fonts/opentype</dir>' \
       '  <dir>/usr/share/texmf-dist/fonts/truetype</dir>' \
       '</fontconfig>' > /etc/fonts/local.conf && \
+    # Truncate each font directory's mtime to its OWN whole-second epoch (.000000000) before fc-cache:
+    # Docker OCI tar layers truncate sub-second mtime precision to .0, and BuildKit does not persist
+    # arbitrary timestamp changes on untouched lower-layer dirs. Truncating each dir to its own
+    # whole-second epoch ensures /var/cache/fontconfig matches the runtime dir mtime identically
+    # (reducing first-run XeLaTeX cold compile from ~60s to ~2s).
+    find /usr/share/fonts /usr/share/texmf-dist/fonts/opentype /usr/share/texmf-dist/fonts/truetype \
+      -type d -exec sh -c 'for d in "$@"; do touch -d "@$(stat -c %Y "$d")" "$d"; done' _ {} + && \
     fc-cache -f
 
 ENV TEXMFVAR=/var/cache/texmf-var
