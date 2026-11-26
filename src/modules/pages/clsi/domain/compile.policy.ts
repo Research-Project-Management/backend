@@ -428,3 +428,125 @@ export class BibBackendDetector {
     return filePath;
   }
 }
+
+export interface CompileTimeoutLimits {
+  readonly minMs: number;
+  readonly manualMs: number;
+  readonly draftMs: number;
+  readonly autoMs: number;
+  readonly syntaxOnlyMs: number;
+  readonly absoluteMaxMs: number;
+}
+
+export interface CompileTimeoutInput {
+  readonly requestedMs?: number;
+  readonly priority?: 'manual' | 'auto';
+  readonly draft?: boolean;
+  readonly syntaxOnly?: boolean;
+}
+
+/**
+ * Empirically derived server-authoritative timeout tiers:
+ * - manualMs (90s): safely above measured XeLaTeX cold build (~56s) and below Cloudflare's
+ *   hard 100s origin timeout (524) with 10s nesting headroom (+5s internal HTTP + 5s network).
+ *   For Nginx-only deployments without Cloudflare, override via CLSI_COMPILE_TIMEOUT_MS=180000
+ *   (Overleaf Community Edition default).
+ * - autoMs (30s): ~8x heavy warm-edit latency (~3.4s) to bound infinite-loop blast radius.
+ * - draftMs (45s): skips image rendering while allowing large document layout passes.
+ * - syntaxOnlyMs (20s): ~10x measured -draftmode syntax check (~2.0s).
+ * - absoluteMaxMs (240s): Overleaf Paid hard ceiling; prevents client-driven DoS.
+ */
+export const DEFAULT_COMPILE_TIMEOUT_LIMITS: CompileTimeoutLimits = {
+  minMs: 5_000,
+  manualMs: 90_000,
+  draftMs: 45_000,
+  autoMs: 30_000,
+  syntaxOnlyMs: 20_000,
+  absoluteMaxMs: 240_000,
+};
+
+function parsePositiveMs(
+  raw: string | undefined,
+  fallback: number,
+  minMs: number,
+  maxMs: number,
+): number {
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.max(Math.floor(parsed), minMs), maxMs);
+}
+
+/**
+ * Pure parser for environment-provided timeout overrides.
+ * Accepts an explicit env map so domain logic stays decoupled from `process.env`.
+ */
+export function resolveCompileTimeoutLimits(
+  env?: Record<string, string | undefined>,
+): CompileTimeoutLimits {
+  if (!env) return DEFAULT_COMPILE_TIMEOUT_LIMITS;
+  const { minMs, absoluteMaxMs } = DEFAULT_COMPILE_TIMEOUT_LIMITS;
+  const manualMs = parsePositiveMs(
+    env.CLSI_COMPILE_TIMEOUT_MS,
+    DEFAULT_COMPILE_TIMEOUT_LIMITS.manualMs,
+    minMs,
+    absoluteMaxMs,
+  );
+  return {
+    minMs,
+    manualMs,
+    draftMs: parsePositiveMs(
+      env.CLSI_DRAFT_COMPILE_TIMEOUT_MS,
+      DEFAULT_COMPILE_TIMEOUT_LIMITS.draftMs,
+      minMs,
+      manualMs,
+    ),
+    autoMs: parsePositiveMs(
+      env.CLSI_AUTO_COMPILE_TIMEOUT_MS,
+      DEFAULT_COMPILE_TIMEOUT_LIMITS.autoMs,
+      minMs,
+      manualMs,
+    ),
+    syntaxOnlyMs: parsePositiveMs(
+      env.CLSI_SYNTAX_COMPILE_TIMEOUT_MS,
+      DEFAULT_COMPILE_TIMEOUT_LIMITS.syntaxOnlyMs,
+      minMs,
+      manualMs,
+    ),
+    absoluteMaxMs,
+  };
+}
+
+/**
+ * Computes the server-authoritative compilation timeout in milliseconds.
+ * Clients may request a SHORTER timeout than the server tier cap, never a longer one.
+ */
+export function resolveCompileTimeout(
+  input: CompileTimeoutInput,
+  limits: CompileTimeoutLimits = DEFAULT_COMPILE_TIMEOUT_LIMITS,
+): number {
+  let tierCap: number;
+  if (input.syntaxOnly) {
+    tierCap = limits.syntaxOnlyMs;
+  } else if (input.priority === 'auto') {
+    tierCap = limits.autoMs;
+  } else if (input.draft) {
+    tierCap = limits.draftMs;
+  } else {
+    tierCap = limits.manualMs;
+  }
+
+  const effectiveCap = Math.min(
+    Math.max(tierCap, limits.minMs),
+    limits.absoluteMaxMs,
+  );
+
+  if (
+    typeof input.requestedMs === 'number' &&
+    Number.isFinite(input.requestedMs)
+  ) {
+    return Math.min(Math.max(Math.floor(input.requestedMs), limits.minMs), effectiveCap);
+  }
+
+  return effectiveCap;
+}

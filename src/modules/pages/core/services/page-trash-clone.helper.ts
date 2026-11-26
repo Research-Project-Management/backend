@@ -8,7 +8,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Prisma, PageDoc, PageNode } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
-import { type IFilesPort } from '@/modules/files';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
   ensureCanonicalPageId,
   getRecordSpaceId,

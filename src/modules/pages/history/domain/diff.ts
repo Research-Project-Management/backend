@@ -1,20 +1,95 @@
-/**
- * history/domain/diff.engine.ts
- * Pure, side-effect-free Myers LCS line-diff and intra-line word-diff engine
- * for comparing Manuscript Snapshots.
- */
-
 import { Injectable } from '@nestjs/common';
-import { Snapshot } from './snapshot.entity';
-import {
-  DiffHunkVo,
-  DiffLine,
-  FileDiffVo,
-  TextDiffResult,
-  WordDiffToken,
-} from './ports';
+import { diffArrays, diffWordsWithSpace } from 'diff';
+import { FileSnapshotType, Snapshot } from './snapshot';
 
-export { FileDiffVo };
+export type LineDiffType = 'added' | 'deleted' | 'unchanged';
+export type WordDiffType = 'added' | 'deleted' | 'unchanged';
+
+export interface WordDiffToken {
+  type: WordDiffType;
+  text: string;
+}
+
+export interface DiffLine {
+  type: LineDiffType;
+  text: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+  words?: WordDiffToken[];
+}
+
+export interface DiffHunkProps {
+  oldStartLine: number;
+  oldLineCount: number;
+  newStartLine: number;
+  newLineCount: number;
+  lines: DiffLine[];
+}
+
+export class DiffHunkVo {
+  public readonly oldStartLine: number;
+  public readonly oldLineCount: number;
+  public readonly newStartLine: number;
+  public readonly newLineCount: number;
+  public readonly lines: DiffLine[];
+
+  constructor(props: DiffHunkProps) {
+    this.oldStartLine = props.oldStartLine;
+    this.oldLineCount = props.oldLineCount;
+    this.newStartLine = props.newStartLine;
+    this.newLineCount = props.newLineCount;
+    this.lines = props.lines;
+  }
+
+  public get header(): string {
+    return `@@ -${this.oldStartLine},${this.oldLineCount} +${this.newStartLine},${this.newLineCount} @@`;
+  }
+}
+
+export type FileDiffStatus =
+  'added' | 'deleted' | 'modified' | 'renamed' | 'unchanged';
+
+export interface FileDiffProps {
+  path: string;
+  status: FileDiffStatus;
+  type: FileSnapshotType;
+  oldPath?: string;
+  oldHash?: string;
+  newHash?: string;
+  additions: number;
+  deletions: number;
+  hunks: DiffHunkVo[];
+}
+
+export class FileDiffVo {
+  public readonly path: string;
+  public readonly status: FileDiffStatus;
+  public readonly type: FileSnapshotType;
+  public readonly oldPath?: string;
+  public readonly oldHash?: string;
+  public readonly newHash?: string;
+  public readonly additions: number;
+  public readonly deletions: number;
+  public readonly hunks: DiffHunkVo[];
+
+  constructor(props: FileDiffProps) {
+    this.path = props.path;
+    this.status = props.status;
+    this.type = props.type;
+    this.oldPath = props.oldPath;
+    this.oldHash = props.oldHash;
+    this.newHash = props.newHash;
+    this.additions = props.additions;
+    this.deletions = props.deletions;
+    this.hunks = props.hunks;
+  }
+}
+
+export interface TextDiffResult {
+  hunks: DiffHunkVo[];
+  additions: number;
+  deletions: number;
+}
 
 @Injectable()
 export class DiffEngine {
@@ -228,161 +303,25 @@ export class DiffEngine {
     a: string[],
     b: string[],
   ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
-    const n = a.length;
-    const m = b.length;
-    if (n === 0 && m === 0) return [];
+    if (a.length === 0 && b.length === 0) return [];
 
-    let start = 0;
-    while (start < n && start < m && a[start] === b[start]) {
-      start++;
-    }
-
-    let aEnd = n - 1;
-    let bEnd = m - 1;
-    while (aEnd >= start && bEnd >= start && a[aEnd] === b[bEnd]) {
-      aEnd--;
-      bEnd--;
-    }
-
-    const prefix = a.slice(0, start).map((text) => ({
-      type: 'unchanged' as const,
-      text,
-    }));
-    const suffix = a.slice(aEnd + 1).map((text) => ({
-      type: 'unchanged' as const,
-      text,
-    }));
-
-    const middleA = a.slice(start, aEnd + 1);
-    const middleB = b.slice(start, bEnd + 1);
-
-    if (middleA.length === 0 && middleB.length === 0) {
-      return [...prefix, ...suffix];
-    }
-
-    if (middleA.length + middleB.length > 3000) {
-      const fallbackOps: Array<{
-        type: 'added' | 'deleted' | 'unchanged';
-        text: string;
-      }> = [
-        ...middleA.map((text) => ({ type: 'deleted' as const, text })),
-        ...middleB.map((text) => ({ type: 'added' as const, text })),
+    // Guard against pathological huge line diffs
+    if (a.length + b.length > 10_000) {
+      return [
+        ...a.map((text) => ({ type: 'deleted' as const, text })),
+        ...b.map((text) => ({ type: 'added' as const, text })),
       ];
-      return [...prefix, ...fallbackOps, ...suffix];
     }
 
-    const middleOps = this.rawMyers(middleA, middleB);
-    return [...prefix, ...middleOps, ...suffix];
-  }
-
-  private rawMyers(
-    a: string[],
-    b: string[],
-  ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
-    const n = a.length;
-    const m = b.length;
-    const max = n + m;
-    if (max === 0) return [];
-
-    const v = new Int32Array(2 * max + 1);
-    v[1 + max] = 0;
-    const trace: Int32Array[] = [];
-
-    for (let d = 0; d <= max; d++) {
-      const snap = new Int32Array(2 * d + 1).fill(-1);
-      for (let k = -d; k <= d; k += 2) {
-        let x: number;
-        if (k === -d || (k !== d && v[k - 1 + max] < v[k + 1 + max])) {
-          x = v[k + 1 + max];
-        } else {
-          x = v[k - 1 + max] + 1;
-        }
-
-        let y = x - k;
-        while (x < n && y < m && a[x] === b[y]) {
-          x++;
-          y++;
-        }
-
-        v[k + max] = x;
-        snap[k + d] = x;
-
-        if (x >= n && y >= m) {
-          trace.push(snap);
-          return this.backtrackMyers(a, b, trace);
-        }
+    const changes = diffArrays(a, b);
+    const ops: Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> = [];
+    for (const part of changes) {
+      const type = part.added ? 'added' : part.removed ? 'deleted' : 'unchanged';
+      for (const line of part.value) {
+        ops.push({ type, text: line });
       }
-      trace.push(snap);
     }
-
-    return [];
-  }
-
-  private backtrackMyers(
-    a: string[],
-    b: string[],
-    trace: Int32Array[],
-  ): Array<{ type: 'added' | 'deleted' | 'unchanged'; text: string }> {
-    let x = a.length;
-    let y = b.length;
-    const result: Array<{
-      type: 'added' | 'deleted' | 'unchanged';
-      text: string;
-    }> = [];
-
-    for (let d = trace.length - 1; d > 0; d--) {
-      const k = x - y;
-      const prevSnap = trace[d - 1];
-      const prevD = d - 1;
-      const leftVal =
-        k - 1 + prevD >= 0 && k - 1 + prevD < prevSnap.length
-          ? prevSnap[k - 1 + prevD]
-          : -1;
-      const rightVal =
-        k + 1 + prevD >= 0 && k + 1 + prevD < prevSnap.length
-          ? prevSnap[k + 1 + prevD]
-          : -1;
-
-      let prevK: number;
-      if (k === -d || (k !== d && leftVal < rightVal)) {
-        prevK = k + 1;
-      } else {
-        prevK = k - 1;
-      }
-
-      const prevXRaw =
-        prevK + prevD >= 0 && prevK + prevD < prevSnap.length
-          ? prevSnap[prevK + prevD]
-          : -1;
-      const prevX = prevXRaw >= 0 ? prevXRaw : 0;
-      const prevY = prevX - prevK;
-
-      while (x > prevX && y > prevY) {
-        result.push({ type: 'unchanged', text: a[x - 1] });
-        x--;
-        y--;
-      }
-
-      if (d > 0) {
-        if (x === prevX) {
-          result.push({ type: 'added', text: b[prevY] });
-        } else if (y === prevY) {
-          result.push({ type: 'deleted', text: a[prevX] });
-        }
-      }
-
-      x = prevX;
-      y = prevY;
-    }
-
-    while (x > 0 && y > 0) {
-      result.push({ type: 'unchanged', text: a[x - 1] });
-      x--;
-      y--;
-    }
-
-    result.reverse();
-    return result;
+    return ops;
   }
 
   private enhanceWithWordDiffs(diffLines: DiffLine[]): void {
@@ -409,96 +348,24 @@ export class DiffEngine {
       for (let k = 0; k < pairCount; k++) {
         const delLine = diffLines[delStart + k];
         const addLine = diffLines[addStart + k];
-        const oldTokens = this.tokenizeText(delLine.text);
-        const newTokens = this.tokenizeText(addLine.text);
-        const { aTokens, bTokens } = this.computeTokenLCS(oldTokens, newTokens);
+        const parts = diffWordsWithSpace(delLine.text, addLine.text);
+        const aTokens: WordDiffToken[] = [];
+        const bTokens: WordDiffToken[] = [];
+        for (const part of parts) {
+          if (!part.value) continue;
+          if (part.removed) {
+            aTokens.push({ type: 'deleted', text: part.value });
+          } else if (part.added) {
+            bTokens.push({ type: 'added', text: part.value });
+          } else {
+            aTokens.push({ type: 'unchanged', text: part.value });
+            bTokens.push({ type: 'unchanged', text: part.value });
+          }
+        }
         delLine.words = aTokens;
         addLine.words = bTokens;
       }
     }
-  }
-
-  private tokenizeText(text: string): string[] {
-    return text.split(/([^\w\s]+|\s+)/).filter(Boolean);
-  }
-
-  private computeTokenLCS(
-    a: string[],
-    b: string[],
-  ): { aTokens: WordDiffToken[]; bTokens: WordDiffToken[] } {
-    const n = a.length;
-    const m = b.length;
-    if (n === 0 && m === 0) return { aTokens: [], bTokens: [] };
-    if (n === 0) {
-      return {
-        aTokens: [],
-        bTokens: [{ type: 'added', text: b.join('') }],
-      };
-    }
-    if (m === 0) {
-      return {
-        aTokens: [{ type: 'deleted', text: a.join('') }],
-        bTokens: [],
-      };
-    }
-
-    if (n + m > 500) {
-      return {
-        aTokens: [{ type: 'deleted', text: a.join('') }],
-        bTokens: [{ type: 'added', text: b.join('') }],
-      };
-    }
-
-    const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < m; j++) {
-        if (a[i] === b[j]) {
-          dp[i + 1][j + 1] = dp[i][j] + 1;
-        } else {
-          dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
-        }
-      }
-    }
-
-    let i = n;
-    let j = m;
-    const aResult: WordDiffToken[] = [];
-    const bResult: WordDiffToken[] = [];
-
-    while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-        aResult.push({ type: 'unchanged', text: a[i - 1] });
-        bResult.push({ type: 'unchanged', text: b[j - 1] });
-        i--;
-        j--;
-      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-        bResult.push({ type: 'added', text: b[j - 1] });
-        j--;
-      } else if (i > 0) {
-        aResult.push({ type: 'deleted', text: a[i - 1] });
-        i--;
-      }
-    }
-
-    aResult.reverse();
-    bResult.reverse();
-
-    return {
-      aTokens: this.mergeAdjacentTokens(aResult),
-      bTokens: this.mergeAdjacentTokens(bResult),
-    };
-  }
-
-  private mergeAdjacentTokens(tokens: WordDiffToken[]): WordDiffToken[] {
-    const merged: WordDiffToken[] = [];
-    for (const t of tokens) {
-      if (merged.length > 0 && merged[merged.length - 1].type === t.type) {
-        merged[merged.length - 1].text += t.text;
-      } else {
-        merged.push({ type: t.type, text: t.text });
-      }
-    }
-    return merged;
   }
 
   private buildHunks(lines: DiffLine[], contextSize = 3): DiffHunkVo[] {

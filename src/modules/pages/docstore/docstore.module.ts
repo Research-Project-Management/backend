@@ -6,7 +6,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core';
-import { FilesModule } from '@/modules/files';
+import { FilesModule } from '@/modules/files/files.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 import { DocController } from './controllers/doc.controller';
 import { PageController } from './controllers/page.controller';

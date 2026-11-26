@@ -1,217 +1,135 @@
 /**
- * modules/manuscripts/spelling/spelling.service.ts
- * Deep Application Service for academic spell checking, LaTeX prose tokenization,
- * Levenshtein suggestion ranking, and custom project/user dictionary management.
+ * spelling/spelling.service.ts
+ * Application service coordinating cached project dictionaries and Hunspell checks.
  */
 
-import {
-  Injectable,
-  Optional,
-  Inject,
-  ServiceUnavailableException,
-} from '@nestjs/common';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import {
-  LIVE_COLLABORATION_PORT,
-  LiveCollaborationPort,
-} from '@/modules/pages/core';
+import { Injectable } from '@nestjs/common';
+import { LRUCache } from 'lru-cache';
 import { SpellingRepository } from './spelling.repository';
 import {
-  SpellEngine,
-  LanguageCodeVo,
-  LatexTokenizer,
+  SpellingEngine,
+  normalizeLanguageCode,
+  validateCustomWord,
+} from './domain/spelling.engine';
+import { InvalidWordException } from './domain/spelling.errors';
+import type { CheckSpellingDto } from './dto/spelling.dto';
+import type {
+  CustomDictionaryResult,
   SpellingReport,
-} from './domain';
-import {
-  CheckSpellingDto,
-  CustomDictionaryResponseDto,
-  SpellingReportDto,
-  SuggestionQueryDto,
-} from './dto/spelling.dto';
+} from './types/spelling.types';
 
-export interface CheckSpellingQuery {
-  text?: string;
-  projectId?: string;
-  pageId?: string;
-  docId?: string;
-  language?: string;
-  userId?: string;
-  maxSuggestions?: number;
-}
+const DICTIONARY_CACHE_TTL_MS = 60_000;
+const MAX_WORDS_PER_SPACE = 2_000;
 
 @Injectable()
 export class SpellingService {
-  private readonly tokenizer: LatexTokenizer;
-  private readonly spellEngine: SpellEngine;
+  private readonly dictionaryCache = new LRUCache<string, ReadonlySet<string>>({
+    max: 500,
+    ttl: DICTIONARY_CACHE_TTL_MS,
+  });
+  private readonly pendingLoads = new Map<
+    string,
+    Promise<ReadonlySet<string>>
+  >();
+  private cacheEpoch = 0;
 
   constructor(
-    @Optional() private readonly repository?: SpellingRepository,
-    @Optional() private readonly docstoreService?: DocstoreService,
-    @Optional()
-    @Inject(LIVE_COLLABORATION_PORT)
-    private readonly liveCollab?: LiveCollaborationPort,
-    @Optional() tokenizer?: LatexTokenizer,
-    @Optional() spellEngine?: SpellEngine,
-  ) {
-    this.tokenizer = tokenizer ?? new LatexTokenizer();
-    this.spellEngine = spellEngine ?? new SpellEngine(this.tokenizer);
+    private readonly repository: SpellingRepository,
+    private readonly engine: SpellingEngine,
+  ) {}
+
+  private invalidateSpaceCache(spaceId: string): void {
+    this.cacheEpoch++;
+    this.dictionaryCache.delete(spaceId);
+    this.pendingLoads.delete(spaceId);
   }
 
-  private get repo(): SpellingRepository {
-    if (!this.repository) {
-      throw new ServiceUnavailableException(
-        'SpellingRepository is not configured',
-      );
-    }
-    return this.repository;
-  }
+  private async getCachedWordSet(spaceId: string): Promise<ReadonlySet<string>> {
+    const cached = this.dictionaryCache.get(spaceId);
+    if (cached) return cached;
 
-  /**
-   * Executes a spell check across inline text or a persisted document.
-   */
-  public async checkSpelling(
-    query: CheckSpellingQuery,
-  ): Promise<SpellingReport> {
-    // Validate language upfront so callers receive UnsupportedLanguageException even on blank text
-    LanguageCodeVo.create(query.language);
-    const maxSuggestions = query.maxSuggestions ?? 5;
-
-    let sourceText = query.text ?? '';
-    if (!sourceText && query.projectId && query.docId && this.docstoreService) {
-      if (this.liveCollab) {
-        await this.liveCollab
-          .flushDoc(query.projectId, query.docId)
-          .catch(() => []);
-      }
-      const doc = await this.docstoreService.getDoc(
-        query.projectId,
-        query.docId,
-      );
-      sourceText = (doc.lines || []).join('\n');
+    let pending = this.pendingLoads.get(spaceId);
+    if (!pending) {
+      const loadEpoch = this.cacheEpoch;
+      pending = this.repository
+        .listWords(spaceId)
+        .then((words) => {
+          const wordSet = new Set(words.map((w) => w.toLowerCase()));
+          if (this.cacheEpoch === loadEpoch) {
+            this.dictionaryCache.set(spaceId, wordSet);
+          }
+          return wordSet;
+        })
+        .finally(() => {
+          if (this.pendingLoads.get(spaceId) === pending) {
+            this.pendingLoads.delete(spaceId);
+          }
+        });
+      this.pendingLoads.set(spaceId, pending);
     }
 
-    const customWordSet = new Set<string>();
-    const [pWords, uWords] = await Promise.all([
-      query.projectId
-        ? this.repo.listProjectWords(query.projectId)
-        : Promise.resolve([]),
-      query.userId
-        ? this.repo.listUserWords(query.userId)
-        : Promise.resolve([]),
-    ]);
-    for (const w of pWords) customWordSet.add(w.toLowerCase());
-    for (const w of uWords) customWordSet.add(w.toLowerCase());
-
-    return this.spellEngine.checkText(
-      sourceText,
-      query.language,
-      customWordSet,
-      maxSuggestions,
-      this.tokenizer,
-    );
+    return pending;
   }
 
-  /**
-   * Checks document spelling for controller endpoint.
-   */
-  public async checkDocumentSpelling(
-    projectId: string,
-    userId: string,
+  public async check(
+    spaceId: string,
     dto: CheckSpellingDto,
-  ): Promise<SpellingReportDto> {
-    const report = await this.checkSpelling({
-      projectId,
-      pageId: dto.pageId,
-      userId,
-      text: dto.text,
-      docId: dto.docId ?? dto.pageId,
-      language: dto.language,
-    });
-    return report.toJSON();
-  }
-
-  /**
-   * Computes ranked candidate replacements for a potentially misspelled word.
-   */
-  public getSuggestions(query: SuggestionQueryDto): string[] {
-    const trimmed = (query.word ?? '').trim();
-    if (!trimmed) {
-      return [];
+  ): Promise<SpellingReport> {
+    const language = normalizeLanguageCode(dto.language);
+    const words = Array.isArray(dto.words) ? dto.words : [];
+    if (words.length === 0) {
+      return {
+        language,
+        totalWordsChecked: 0,
+        misspelledCount: 0,
+        errors: [],
+      };
     }
 
-    const language = LanguageCodeVo.create(query.language);
-    const maxSuggestions = Math.min(Math.max(query.maxSuggestions ?? 5, 1), 25);
-    if (this.spellEngine.isCorrect(trimmed, language)) {
-      return [];
+    const customWords = await this.getCachedWordSet(spaceId);
+    return this.engine.checkWords(words, language, customWords);
+  }
+
+  public async listWords(spaceId: string): Promise<CustomDictionaryResult> {
+    const loadEpoch = this.cacheEpoch;
+    const words = await this.repository.listWords(spaceId);
+    if (this.cacheEpoch === loadEpoch) {
+      this.dictionaryCache.set(
+        spaceId,
+        new Set(words.map((w) => w.toLowerCase())),
+      );
     }
-    return this.spellEngine.getSuggestions(trimmed, language, maxSuggestions);
+    return { words, count: words.length };
   }
 
-  /**
-   * Adds a custom word to the project dictionary.
-   */
-  public async learnProjectWord(
-    projectId: string,
+  public async learnWord(
+    spaceId: string,
     word: string,
-  ): Promise<void> {
-    const cleaned = SpellEngine.validateCustomWord(word);
-    await this.repo.addProjectWord(projectId, cleaned);
+    createdById?: string,
+  ): Promise<string> {
+    const normalizedWord = validateCustomWord(word);
+    const existing = await this.getCachedWordSet(spaceId);
+    if (existing.has(normalizedWord)) {
+      return normalizedWord;
+    }
+    if (existing.size >= MAX_WORDS_PER_SPACE) {
+      throw new InvalidWordException(
+        word,
+        `Project dictionary limit (${MAX_WORDS_PER_SPACE} words) reached`,
+      );
+    }
+
+    await this.repository.addWord(spaceId, normalizedWord, createdById);
+    this.invalidateSpaceCache(spaceId);
+    return normalizedWord;
   }
 
-  /**
-   * Removes a custom word from the project dictionary.
-   */
-  public async unlearnProjectWord(
-    projectId: string,
-    word: string,
-  ): Promise<boolean> {
-    const cleaned = (word ?? '').trim().toLowerCase();
-    if (!cleaned) return false;
-    return this.repo.removeProjectWord(projectId, cleaned);
-  }
+  public async unlearnWord(spaceId: string, word: string): Promise<boolean> {
+    const normalizedWord = (word ?? '').trim().toLowerCase();
+    if (!normalizedWord) return false;
 
-  /**
-   * Lists custom words in the project dictionary.
-   */
-  public async listProjectWords(
-    projectId: string,
-  ): Promise<CustomDictionaryResponseDto> {
-    const words = await this.repo.listProjectWords(projectId);
-    return {
-      scope: 'PROJECT',
-      words,
-      count: words.length,
-    };
-  }
-
-  /**
-   * Adds a custom word to the user dictionary.
-   */
-  public async learnUserWord(userId: string, word: string): Promise<void> {
-    const cleaned = SpellEngine.validateCustomWord(word);
-    await this.repo.addUserWord(userId, cleaned);
-  }
-
-  /**
-   * Removes a custom word from the user dictionary.
-   */
-  public async unlearnUserWord(userId: string, word: string): Promise<boolean> {
-    const cleaned = (word ?? '').trim().toLowerCase();
-    if (!cleaned) return false;
-    return this.repo.removeUserWord(userId, cleaned);
-  }
-
-  /**
-   * Lists custom words in the user dictionary.
-   */
-  public async listUserWords(
-    userId: string,
-  ): Promise<CustomDictionaryResponseDto> {
-    const words = await this.repo.listUserWords(userId);
-    return {
-      scope: 'USER',
-      words,
-      count: words.length,
-    };
+    const removed = await this.repository.removeWord(spaceId, normalizedWord);
+    this.invalidateSpaceCache(spaceId);
+    return removed;
   }
 }

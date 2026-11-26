@@ -22,6 +22,7 @@ import {
   UnsupportedLanguageException,
 } from '@/modules/pages/spelling/domain/spelling.errors';
 import { SpellingService } from '@/modules/pages/spelling/spelling.service';
+import { SpellingEngine } from '@/modules/pages/spelling/domain/spelling.engine';
 import type { SpellingRepository } from '@/modules/pages/spelling/spelling.repository';
 import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
 import { formatPageByIdResponse } from '@/modules/pages/docstore/services/doc-occ.helper';
@@ -40,13 +41,18 @@ import {
   ArchiveFileLimitExceededException,
   InvalidZipArchiveException,
   ArchiveSizeExceededException,
+} from '@/modules/pages/export-import/domain/archive.errors';
+import {
   ArchiveEntryVo,
   ImportSummaryVo,
+} from '@/modules/pages/export-import/domain/archive.domain';
+import {
   type IPageArchiveAggregatorPort,
   type IPageArchiveHydratorPort,
-} from '@/modules/pages/export-import/domain/archive-validator';
-import { ZipAdapter } from '@/modules/pages/export-import/services/zip.adapter';
-import { ExportImportService } from '@/modules/pages/export-import/export-import.service';
+} from '@/modules/pages/export-import/domain/archive.ports';
+import { ZipAdapter } from '@/modules/pages/export-import/adapters/zip.adapter';
+import { ExportService } from '@/modules/pages/export-import/services/export.service';
+import { ImportService } from '@/modules/pages/export-import/services/import.service';
 import {
   InvalidTemplateException,
   TemplateNotFoundException,
@@ -372,15 +378,12 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
       expect(coords).toEqual({ spaceId: SPACE_ID, pageId: PAGE_A_ID });
 
       const repo = {
-        listProjectWords: jest.fn().mockResolvedValue(['customtermx']),
-        listUserWords: jest.fn().mockResolvedValue(['usertermx']),
+        listWords: jest.fn().mockResolvedValue(['customtermx']),
       } as unknown as SpellingRepository;
-      const spelling = new SpellingService(repo);
+      const spelling = new SpellingService(repo, new SpellingEngine());
 
-      const report = await spelling.checkSpelling({
-        projectId: SPACE_ID,
-        userId: USER_ID,
-        text: 'Hello customtermx and usertermx world.',
+      const report = await spelling.check(SPACE_ID, {
+        words: ['Hello', 'customtermx', 'world'],
         language: 'en-US',
       });
       expect(report.misspelledCount).toBe(0);
@@ -510,17 +513,17 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
       );
     });
 
-    it('forwards pageId in ExportImportService collectProjectEntries and hydrateProjectEntries', async () => {
+    it('forwards pageId in ExportService collectProjectEntries and ImportService hydrateProjectEntries', async () => {
       const collectProjectEntries = jest.fn().mockResolvedValue([]);
       const hydrateProjectEntries = jest.fn().mockResolvedValue(
         new ImportSummaryVo({
+          projectId: SPACE_ID,
           totalEntries: 1,
-          createdDocs: 1,
-          createdFiles: 0,
-          createdFolders: 0,
+          totalDocs: 1,
+          totalFiles: 0,
+          totalFolders: 0,
           rootDocId: 'doc-a',
           rootDocPath: 'main.tex',
-          warnings: [],
         }),
       );
       const aggregator = {
@@ -531,12 +534,10 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
         hydrateProjectEntries,
       } as unknown as IPageArchiveHydratorPort;
 
-      const svc = new ExportImportService(
-        aggregator,
-        new ZipAdapter(),
-        hydrator,
-      );
-      await svc.collectProjectEntries(SPACE_ID, false, true, PAGE_A_ID);
+      const exportSvc = new ExportService(aggregator, new ZipAdapter());
+      const importSvc = new ImportService(hydrator, new ZipAdapter());
+
+      await exportSvc.collectProjectEntries(SPACE_ID, false, true, PAGE_A_ID);
       expect(collectProjectEntries).toHaveBeenCalledWith(
         SPACE_ID,
         false,
@@ -545,7 +546,7 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
       );
 
       const entries = [ArchiveEntryVo.create('main.tex', Buffer.from('x'))];
-      await svc.hydrateProjectEntries(
+      await importSvc.hydrateProjectEntries(
         SPACE_ID,
         entries,
         USER_ID,

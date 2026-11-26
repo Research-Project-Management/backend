@@ -16,13 +16,13 @@ import {
   PageSnapshotLabel as PrismaLabel,
 } from '@prisma/client';
 import { IHistoryRepositoryPort } from './domain/ports';
-import { Snapshot } from './domain/snapshot.entity';
-import { VersionLabel } from './domain/label.entity';
-import { FileSnapshotVo } from './domain/file-snapshot.vo';
+import { Snapshot } from './domain/snapshot';
+import { VersionLabel } from './domain/label';
+import { FileSnapshotVo } from './domain/snapshot';
 import {
   SnapshotNormalizer,
   RawSnapshotFileEntry,
-} from './domain/snapshot.mapper';
+} from './domain/snapshot';
 
 export type { RawSnapshotFileEntry };
 

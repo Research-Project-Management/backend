@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/spelling/spelling.repository.ts
- * Direct Prisma repository for custom project & user spelling dictionaries.
+ * spelling/spelling.repository.ts
+ * Prisma repository for project-scoped custom spelling dictionaries.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -10,100 +10,36 @@ import { PrismaService } from '@/core';
 export class SpellingRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  public async listProjectWords(projectId: string): Promise<string[]> {
-    const records = await this.prisma.customDictionaryWord.findMany({
-      where: { spaceId: projectId },
+  public async listWords(spaceId: string): Promise<string[]> {
+    const records = await this.prisma.spellingWord.findMany({
+      where: { spaceId },
       select: { word: true },
       orderBy: { word: 'asc' },
     });
-    return records.map((r: { word: string }) => r.word);
+    return records.map((record: { word: string }) => record.word);
   }
 
-  public async listUserWords(userId: string): Promise<string[]> {
-    const records = await this.prisma.customDictionaryWord.findMany({
-      where: { spaceId: userId },
-      select: { word: true },
-      orderBy: { word: 'asc' },
-    });
-    return records.map((r: { word: string }) => r.word);
-  }
-
-  public async addProjectWord(projectId: string, word: string): Promise<void> {
-    const clean = word.toLowerCase().trim();
-    if (!clean) return;
-
-    const existing = await this.prisma.customDictionaryWord.findFirst({
-      where: {
-        spaceId: projectId,
-        word: clean,
-      },
-      select: { id: true },
-    });
-
-    if (!existing) {
-      try {
-        await this.prisma.customDictionaryWord.create({
-          data: {
-            spaceId: projectId,
-            word: clean,
-          },
-        });
-      } catch (err: unknown) {
-        if ((err as { code?: string })?.code !== 'P2002') {
-          throw err;
-        }
-      }
-    }
-  }
-
-  public async addUserWord(userId: string, word: string): Promise<void> {
-    const clean = word.toLowerCase().trim();
-    if (!clean) return;
-
-    const existing = await this.prisma.customDictionaryWord.findFirst({
-      where: {
-        spaceId: userId,
-        word: clean,
-      },
-      select: { id: true },
-    });
-
-    if (!existing) {
-      try {
-        await this.prisma.customDictionaryWord.create({
-          data: {
-            spaceId: userId,
-            createdById: userId,
-            word: clean,
-          },
-        });
-      } catch (err: unknown) {
-        if ((err as { code?: string })?.code !== 'P2002') {
-          throw err;
-        }
-      }
-    }
-  }
-
-  public async removeProjectWord(
-    projectId: string,
+  public async addWord(
+    spaceId: string,
     word: string,
-  ): Promise<boolean> {
-    const clean = word.toLowerCase().trim();
-    const res = await this.prisma.customDictionaryWord.deleteMany({
-      where: {
-        spaceId: projectId,
-        word: clean,
-      },
+    createdById?: string,
+  ): Promise<void> {
+    const normalizedWord = word.toLowerCase().trim();
+    if (!normalizedWord) return;
+
+    await this.prisma.spellingWord.createMany({
+      data: [{ spaceId, word: normalizedWord, createdById: createdById ?? null }],
+      skipDuplicates: true,
     });
-    return res.count > 0;
   }
 
-  public async removeUserWord(userId: string, word: string): Promise<boolean> {
-    const clean = word.toLowerCase().trim();
-    const res = await this.prisma.customDictionaryWord.deleteMany({
-      where: { spaceId: userId, word: clean },
+  public async removeWord(spaceId: string, word: string): Promise<boolean> {
+    const normalizedWord = word.toLowerCase().trim();
+    if (!normalizedWord) return false;
+
+    const result = await this.prisma.spellingWord.deleteMany({
+      where: { spaceId, word: normalizedWord },
     });
-    return res.count > 0;
+    return result.count > 0;
   }
 }

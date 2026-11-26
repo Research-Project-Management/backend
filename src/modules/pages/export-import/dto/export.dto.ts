@@ -1,12 +1,6 @@
-/**
- * export-import/dto/export-import.dto.ts
- * Data Transfer Objects for Manuscripts Project Archive, ZIP Export/Import & Templates.
- */
-
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsString,
-  IsNotEmpty,
   IsBoolean,
   IsOptional,
   IsInt,
@@ -61,40 +55,17 @@ export class ExportZipQueryDto {
   pageId?: string;
 }
 
-export class ScaffoldTemplateDto {
-  @ApiProperty({
-    description:
-      'Identifier of the academic template (e.g., ieee-transactions, acm-sigconf)',
+export class ExportDocumentDto {
+  @ApiPropertyOptional({
+    description: 'Target export format (tex, md, html, docx)',
   })
-  @IsString()
-  @IsNotEmpty()
-  templateId!: string;
-
-  @ApiPropertyOptional({ description: 'Optional Page scope ID' })
   @IsOptional()
   @IsString()
-  pageId?: string;
-}
+  format?: string;
 
-export class ImportSummaryResponseDto {
-  @ApiProperty()
-  projectId!: string;
-
-  @ApiProperty()
-  totalEntries!: number;
-
-  @ApiProperty()
-  totalDocs!: number;
-
-  @ApiProperty()
-  totalFiles!: number;
-
-  @ApiProperty()
-  totalFolders!: number;
-
-  @ApiPropertyOptional({ nullable: true })
-  rootDocId!: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  rootDocPath!: string | null;
+  @ApiPropertyOptional({
+    description: 'Inline child \\input / \\include / \\subfile files',
+  })
+  @IsOptional()
+  includeChildren?: boolean | string;
 }

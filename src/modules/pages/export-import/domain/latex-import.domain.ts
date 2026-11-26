@@ -1,44 +1,105 @@
 /**
- * modules/manuscripts/export-import/services/transpiler.adapter.ts
- * Pure in-process transpiler converting Word (.docx) and Markdown (.md) documents
- * into compilable LaTeX projects without external CLI dependencies.
+ * modules/pages/export-import/domain/latex-import.domain.ts
+ *
+ * GoF Strategy + Registry + Template Method for converting Word (.docx) and Markdown (.md / .markdown)
+ * documents into compilable LaTeX project entries without external CLI dependencies.
  */
 
 import {
   Injectable,
-  Logger,
   Optional,
   BadRequestException,
 } from '@nestjs/common';
-import {
-  ArchiveEntryVo,
-  IDocumentTranspilerPort,
-  IZipEnginePort,
-  TranspiledProjectResult,
-} from '../domain/archive-validator';
+import * as path from 'node:path';
+import { ArchiveEntryVo } from './archive.domain';
+import { IDocumentTranspilerPort, IZipEnginePort } from './archive.ports';
+import type { TranspiledProjectResult } from '../types/archive.types';
 import {
   escapeLatex,
   sanitizeLatexUrl,
   unescapeXml,
-} from '../domain/latex.transpiler';
-import { ZipAdapter } from './zip.adapter';
+} from './latex-export.domain';
+import { ZipAdapter } from '../adapters/zip.adapter';
 
 export { escapeLatex, sanitizeLatexUrl, unescapeXml };
 
-@Injectable()
-export class TranspilerAdapter extends IDocumentTranspilerPort {
-  private readonly logger = new Logger(TranspilerAdapter.name);
-  private readonly zipEngine: IZipEnginePort;
+export type SupportedImportFormat = 'docx' | 'md';
 
-  constructor(@Optional() zipEngine?: ZipAdapter) {
-    super();
-    this.zipEngine = zipEngine ?? new ZipAdapter();
+/**
+ * GoF Template Method helper: Shared LaTeX article document envelope.
+ */
+export function renderLatexArticleEnvelope(params: {
+  title: string;
+  author?: string;
+  date?: string;
+  abstractText?: string;
+  bodyLines: string[];
+}): string {
+  const {
+    title,
+    author = 'Author',
+    date = '\\today',
+    abstractText,
+    bodyLines,
+  } = params;
+
+  const abstractBlock = abstractText
+    ? `\\begin{abstract}\n${escapeLatex(abstractText)}\n\\end{abstract}\n\n`
+    : '';
+
+  return `\\documentclass[11pt,a4paper]{article}
+\\usepackage[margin=1in]{geometry}
+\\usepackage{amsmath,amssymb}
+\\usepackage{graphicx}
+\\usepackage{hyperref}
+\\usepackage{booktabs}
+
+\\title{\\textbf{${escapeLatex(title)}}}
+\\author{${escapeLatex(author)}}
+\\date{${date === '\\today' ? '\\today' : escapeLatex(date)}}
+
+\\begin{document}
+\\maketitle
+
+${abstractBlock}${bodyLines.join('\n')}
+
+\\end{document}
+`;
+}
+
+/**
+ * Extracts embedded `word/media/*` binary image assets from a `.docx` archive into `media/*` entries.
+ */
+export function extractDocxMediaEntries(entries: ArchiveEntryVo[]): ArchiveEntryVo[] {
+  return entries
+    .filter((e) => e.path.startsWith('word/media/') && !e.isDirectory)
+    .map((img) => {
+      const imgFileName = img.path.replace(/^word\/media\//, '');
+      return ArchiveEntryVo.create(`media/${imgFileName}`, img.data, false);
+    });
+}
+
+/**
+ * GoF Strategy interface for inbound document format transpilers.
+ */
+export interface IDocumentImportStrategy {
+  readonly format: SupportedImportFormat;
+  readonly aliases: readonly string[];
+  transpile(buffer: Buffer, fileName?: string): Promise<TranspiledProjectResult>;
+}
+
+class MarkdownImportStrategy implements IDocumentImportStrategy {
+  public readonly format = 'md' as const;
+  public readonly aliases = ['markdown'] as const;
+
+  public async transpile(
+    buffer: Buffer,
+    fileName?: string,
+  ): Promise<TranspiledProjectResult> {
+    return this.transpileText(buffer.toString('utf8'), fileName);
   }
 
-  /**
-   * Transpiles CommonMark / GitHub Flavored Markdown into a full LaTeX project.
-   */
-  public async transpileMarkdown(
+  public async transpileText(
     content: string,
     fileName?: string,
   ): Promise<TranspiledProjectResult> {
@@ -53,7 +114,6 @@ export class TranspilerAdapter extends IDocumentTranspilerPort {
     let abstractText = '';
     let startLine = 0;
 
-    // 1. Parse optional YAML frontmatter
     if (lines[0]?.trim() === '---') {
       let fmEnd = -1;
       for (let i = 1; i < lines.length; i++) {
@@ -165,30 +225,22 @@ export class TranspilerAdapter extends IDocumentTranspilerPort {
 
       const h1Match = line.match(/^#\s+(.*)$/);
       if (h1Match) {
-        latexBody.push(
-          `\\section{${this.transpileInlineMarkdown(h1Match[1])}}\n`,
-        );
+        latexBody.push(`\\section{${this.transpileInlineMarkdown(h1Match[1])}}\n`);
         continue;
       }
       const h2Match = line.match(/^##\s+(.*)$/);
       if (h2Match) {
-        latexBody.push(
-          `\\subsection{${this.transpileInlineMarkdown(h2Match[1])}}\n`,
-        );
+        latexBody.push(`\\subsection{${this.transpileInlineMarkdown(h2Match[1])}}\n`);
         continue;
       }
       const h3Match = line.match(/^###\s+(.*)$/);
       if (h3Match) {
-        latexBody.push(
-          `\\subsubsection{${this.transpileInlineMarkdown(h3Match[1])}}\n`,
-        );
+        latexBody.push(`\\subsubsection{${this.transpileInlineMarkdown(h3Match[1])}}\n`);
         continue;
       }
       const h4Match = line.match(/^####\s+(.*)$/);
       if (h4Match) {
-        latexBody.push(
-          `\\paragraph{${this.transpileInlineMarkdown(h4Match[1])}}\n`,
-        );
+        latexBody.push(`\\paragraph{${this.transpileInlineMarkdown(h4Match[1])}}\n`);
         continue;
       }
 
@@ -197,39 +249,20 @@ export class TranspilerAdapter extends IDocumentTranspilerPort {
         continue;
       }
 
-      if (line.trim() === '') {
-        latexBody.push('');
-      } else {
-        latexBody.push(this.transpileInlineMarkdown(line));
-      }
+      latexBody.push(line.trim() === '' ? '' : this.transpileInlineMarkdown(line));
     }
 
     if (inCodeBlock) latexBody.push('\\end{verbatim}');
     if (inList) latexBody.push(`\\end{${inList}}`);
     if (inQuote) latexBody.push('\\end{quote}');
 
-    const mainTex = `\\documentclass[11pt,a4paper]{article}
-\\usepackage[margin=1in]{geometry}
-\\usepackage{amsmath,amssymb}
-\\usepackage{graphicx}
-\\usepackage{hyperref}
-\\usepackage{booktabs}
-
-\\title{\\textbf{${escapeLatex(title)}}}
-\\author{${escapeLatex(author)}}
-\\date{${escapeLatex(date)}}
-
-\\begin{document}
-\\maketitle
-
-${
-  abstractText
-    ? `\\begin{abstract}\n${escapeLatex(abstractText)}\n\\end{abstract}\n\n`
-    : ''
-}${latexBody.join('\n')}
-
-\\end{document}
-`;
+    const mainTex = renderLatexArticleEnvelope({
+      title,
+      author,
+      date,
+      abstractText,
+      bodyLines: latexBody,
+    });
 
     const mainEntry = ArchiveEntryVo.create(
       'main.tex',
@@ -254,13 +287,10 @@ ${
     };
 
     let out = text;
-
     out = out.replace(/`([^`]+)`/g, (_, code: string) =>
       shield(`\\texttt{${escapeLatex(code)}}`),
     );
-
     out = out.replace(/\$([^$]+)\$/g, (_, math: string) => shield(`$${math}$`));
-
     out = out.replace(
       /!\[([^\]]*)\]\(([^)]+)\)/g,
       (_, alt: string, url: string) =>
@@ -268,38 +298,36 @@ ${
           `\\begin{figure}[htbp]\\centering\\includegraphics[width=0.8\\textwidth]{${sanitizeLatexUrl(url)}}\\caption{${escapeLatex(alt)}}\\end{figure}`,
         ),
     );
-
     out = out.replace(
       /\[([^\]]+)\]\(([^)]+)\)/g,
       (_, linkText: string, url: string) =>
         shield(`\\href{${sanitizeLatexUrl(url)}}{${escapeLatex(linkText)}}`),
     );
-
     out = out.replace(/(\*\*\*|___)(.+?)\1/g, (_, __, body: string) =>
       shield(`\\textbf{\\textit{${escapeLatex(body)}}}`),
     );
-
     out = out.replace(/(\*\*|__)(.+?)\1/g, (_, __, body: string) =>
       shield(`\\textbf{${escapeLatex(body)}}`),
     );
-
     out = out.replace(/(\*|_)(.+?)\1/g, (_, __, body: string) =>
       shield(`\\textit{${escapeLatex(body)}}`),
     );
 
     out = escapeLatex(out);
-
     for (let i = shieldedTokens.length - 1; i >= 0; i--) {
       out = out.replace(`@@FLUXTOK${i}@@`, () => shieldedTokens[i]);
     }
-
     return out;
   }
+}
 
-  /**
-   * Transpiles a Microsoft Word OpenXML document (.docx) into a full LaTeX project.
-   */
-  public async transpileDocx(
+class DocxImportStrategy implements IDocumentImportStrategy {
+  public readonly format = 'docx' as const;
+  public readonly aliases = ['word'] as const;
+
+  constructor(private readonly zipEngine: IZipEnginePort) {}
+
+  public async transpile(
     docxBuffer: Buffer,
     fileName?: string,
   ): Promise<TranspiledProjectResult> {
@@ -331,17 +359,7 @@ ${
       }
     }
 
-    const mediaEntries: ArchiveEntryVo[] = [];
-    const imageEntries = entries.filter((e) =>
-      e.path.startsWith('word/media/'),
-    );
-
-    for (const img of imageEntries) {
-      const imgFileName = img.path.replace(/^word\/media\//, '');
-      const cleanPath = `media/${imgFileName}`;
-      mediaEntries.push(ArchiveEntryVo.create(cleanPath, img.data, false));
-    }
-
+    const mediaEntries = extractDocxMediaEntries(entries);
     const docXml = docXmlEntry.data.toString('utf8');
     const defaultTitle = fileName
       ? fileName.replace(/\.[^/.]+$/, '')
@@ -357,15 +375,12 @@ ${
 
     while ((pMatch = pRegex.exec(docXml)) !== null) {
       const pXml = pMatch[1];
-
       const styleMatch = pXml.match(/<w:pStyle[^>]*w:val="([^"]+)"/);
       const styleVal = styleMatch ? styleMatch[1].toLowerCase() : '';
-
       const isListItem = /<w:numPr[ >]/.test(pXml);
 
       const pText = this.parseRunsInParagraph(pXml, relsMap);
       const rawPlainText = this.extractPlainTextFromParagraph(pXml);
-
       if (!pText.trim()) continue;
 
       if (styleVal.includes('title')) {
@@ -425,24 +440,11 @@ ${
       latexBody.push(`\\end{${inList}}\n`);
     }
 
-    const mainTex = `\\documentclass[11pt,a4paper]{article}
-\\usepackage[margin=1in]{geometry}
-\\usepackage{amsmath,amssymb}
-\\usepackage{graphicx}
-\\usepackage{hyperref}
-\\usepackage{booktabs}
-
-\\title{\\textbf{${escapeLatex(detectedTitle)}}}
-\\author{Imported Author}
-\\date{\\today}
-
-\\begin{document}
-\\maketitle
-
-${latexBody.join('\n')}
-
-\\end{document}
-`;
+    const mainTex = renderLatexArticleEnvelope({
+      title: detectedTitle,
+      author: 'Imported Author',
+      bodyLines: latexBody,
+    });
 
     const mainEntry = ArchiveEntryVo.create(
       'main.tex',
@@ -482,7 +484,7 @@ ${latexBody.join('\n')}
       if (target) {
         const rawPath = target.startsWith('media/')
           ? target
-          : `media/${target.replace(/^.*[\\\/]/, '')}`;
+          : `media/${target.replace(/^.*[\\/]/, '')}`;
         const cleanPath = sanitizeLatexUrl(rawPath);
         parts.push(
           `\n\\begin{figure}[htbp]\\centering\\includegraphics[width=0.75\\textwidth]{${cleanPath}}\\end{figure}\n`,
@@ -495,7 +497,6 @@ ${latexBody.join('\n')}
 
     while ((rMatch = rRegex.exec(pXml)) !== null) {
       const rXml = rMatch[1];
-
       const isBold =
         /<w:b(?:\s+w:val="(?!0|false|none)[^"]*")?\s*\/>|<w:b>(?:1|true)<\/w:b>/i.test(
           rXml,
@@ -510,11 +511,9 @@ ${latexBody.join('\n')}
       const tRegex = /<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g;
       let tMatch;
       let runText = '';
-
       while ((tMatch = tRegex.exec(rXml)) !== null) {
         runText += tMatch[1];
       }
-
       if (!runText) continue;
 
       let formatted = escapeLatex(unescapeXml(runText));
@@ -530,5 +529,83 @@ ${latexBody.join('\n')}
   }
 }
 
-export { TranspilerAdapter as DocumentTranspilerAdapter };
+export class ImportFormatRegistry {
+  private readonly strategies = new Map<string, IDocumentImportStrategy>();
+
+  constructor(strategies: ReadonlyArray<IDocumentImportStrategy>) {
+    for (const s of strategies) {
+      this.register(s);
+    }
+  }
+
+  public register(strategy: IDocumentImportStrategy): this {
+    this.strategies.set(strategy.format.toLowerCase(), strategy);
+    for (const alias of strategy.aliases) {
+      this.strategies.set(alias.toLowerCase(), strategy);
+    }
+    return this;
+  }
+
+  public resolve(formatOrExt?: string): IDocumentImportStrategy | null {
+    if (!formatOrExt) return null;
+    const key = formatOrExt.trim().replace(/^\./, '').toLowerCase();
+    return this.strategies.get(key) ?? null;
+  }
+}
+
+export function resolveImportFormat(
+  explicitFormat?: string,
+  fileName?: string,
+): SupportedImportFormat | null {
+  const raw = explicitFormat || (fileName ? path.extname(fileName) : '');
+  const clean = raw.trim().replace(/^\./, '').toLowerCase();
+  if (clean === 'docx' || clean === 'word') return 'docx';
+  if (clean === 'md' || clean === 'markdown') return 'md';
+  return null;
+}
+
+@Injectable()
+export class LatexImportTranspiler extends IDocumentTranspilerPort {
+  private readonly markdownStrategy: MarkdownImportStrategy;
+  private readonly docxStrategy: DocxImportStrategy;
+  private readonly registry: ImportFormatRegistry;
+
+  constructor(@Optional() zipEngine?: IZipEnginePort) {
+    super();
+    const resolvedZip = zipEngine ?? new ZipAdapter();
+    this.markdownStrategy = new MarkdownImportStrategy();
+    this.docxStrategy = new DocxImportStrategy(resolvedZip);
+    this.registry = new ImportFormatRegistry([
+      this.markdownStrategy,
+      this.docxStrategy,
+    ]);
+  }
+
+  public async transpileByFormat(
+    format: SupportedImportFormat,
+    buffer: Buffer,
+    fileName?: string,
+  ): Promise<TranspiledProjectResult> {
+    const strategy = this.registry.resolve(format);
+    if (!strategy) {
+      throw new BadRequestException(`Unsupported import format: "${format}"`);
+    }
+    return strategy.transpile(buffer, fileName);
+  }
+
+  public async transpileMarkdown(
+    content: string,
+    fileName?: string,
+  ): Promise<TranspiledProjectResult> {
+    return this.markdownStrategy.transpileText(content, fileName);
+  }
+
+  public async transpileDocx(
+    docxBuffer: Buffer,
+    fileName?: string,
+  ): Promise<TranspiledProjectResult> {
+    return this.docxStrategy.transpile(docxBuffer, fileName);
+  }
+}
+
 export type { TranspiledProjectResult };

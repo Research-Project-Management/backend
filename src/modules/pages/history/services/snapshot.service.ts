@@ -7,8 +7,8 @@ import {
 import { Readable } from 'node:stream';
 import { HistoryRepository } from '../history.repository';
 import { SnapshotCollectorAdapter } from '../adapters/collector.adapter';
-import { Snapshot } from '../domain/snapshot.entity';
-import { VersionLabel } from '../domain/label.entity';
+import { Snapshot } from '../domain/snapshot';
+import { VersionLabel } from '../domain/label';
 import {
   VersionNotFoundException,
   DuplicateLabelException,

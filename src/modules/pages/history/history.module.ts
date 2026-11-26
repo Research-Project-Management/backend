@@ -18,7 +18,7 @@ import { MaintenanceService } from './services/maintenance.service';
 import { HistoryRepository } from './history.repository';
 import { SnapshotCollectorAdapter } from './adapters/collector.adapter';
 import { SnapshotRestorerAdapter } from './adapters/restorer.adapter';
-import { DiffEngine } from './domain/diff.engine';
+import { DiffEngine } from './domain/diff';
 
 @Module({
   imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],

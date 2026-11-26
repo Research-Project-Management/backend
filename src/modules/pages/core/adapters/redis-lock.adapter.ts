@@ -1,27 +1,22 @@
 /**
- * modules/manuscripts/core/adapters/redis-lock.adapter.ts
+ * modules/pages/core/adapters/redis-lock.adapter.ts
  *
- * Distributed Lock Port Adapter delegating to core DistributedLockService
- * (SET NX PX + Lua atomic unlock + in-memory fallback).
+ * Distributed Lock Port Adapter delegating directly to core DistributedLockService
+ * (SET NX PX + Lua atomic unlock + built-in in-memory fallback).
  */
 
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { DistributedLockService } from '@/core';
 import {
   IDistributedLockPort,
   IDistributedLockHandle,
-  InMemoryDistributedLockAdapter,
 } from '../ports/distributed-lock.port';
 import { DistributedLockTimeoutError } from '../domain/pages-domain.error';
 import { PAGES_CACHE_KEYS } from '../pages.cache-keys';
 
 @Injectable()
 export class RedisLockAdapter extends IDistributedLockPort {
-  private readonly inMemoryFallback = new InMemoryDistributedLockAdapter();
-
-  constructor(
-    @Optional() private readonly lockService?: DistributedLockService,
-  ) {
+  constructor(private readonly lockService: DistributedLockService) {
     super();
   }
 
@@ -33,10 +28,6 @@ export class RedisLockAdapter extends IDistributedLockPort {
     resource: string,
     ttlMs: number = 30000,
   ): Promise<IDistributedLockHandle | null> {
-    if (!this.lockService) {
-      return this.inMemoryFallback.acquire(resource, ttlMs);
-    }
-
     const key = this.lockKey(resource);
     const acquiredAt = Date.now();
     const token = await this.lockService.acquireLock(key, ttlMs);
@@ -51,7 +42,7 @@ export class RedisLockAdapter extends IDistributedLockPort {
       release: async () => {
         if (released) return;
         released = true;
-        await this.lockService?.releaseLock(key, token);
+        await this.lockService.releaseLock(key, token);
       },
     };
   }
@@ -61,10 +52,6 @@ export class RedisLockAdapter extends IDistributedLockPort {
     action: () => Promise<T>,
     ttlMs: number = 30000,
   ): Promise<T> {
-    if (!this.lockService) {
-      return this.inMemoryFallback.withLock(resource, action, ttlMs);
-    }
-
     const startTime = Date.now();
     const maxWaitMs = Math.max(ttlMs, 30000);
     let handle = await this.acquire(resource, ttlMs);

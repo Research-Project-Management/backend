@@ -23,13 +23,13 @@ import {
   CompileSupersededError,
   TooManyCompileRequestsError,
 } from '../domain/errors';
+import { resolveCompileTimeoutLimits } from '../domain/compile.policy';
 
 /**
- * Citation: Overleaf `services/clsi/app/js/LockManager.js` (lines 9, 53-80).
- * Lock timeout equals maximum compile timeout plus 2 minutes (120,000ms).
+ * Lock expiry equals server manual compile timeout cap plus a 60s safety buffer
+ * so crashed or orphaned locks are reclaimed promptly without outliving valid builds.
  */
-const DEFAULT_MAX_COMPILE_TIMEOUT_MS = 240_000;
-const OVERLEAF_LOCK_EXPIRY_BUFFER_MS = 120_000;
+const LOCK_EXPIRY_BUFFER_MS = 60_000;
 
 /**
  * Memory footprint budget per active TeX Live (`latexmk` + `pdflatex`/`xelatex`) subprocess (~112 MiB),
@@ -223,7 +223,7 @@ export class CompileLockService implements OnModuleDestroy {
     this.supersedeGraceMs = config?.supersedeGraceMs ?? 3000;
     this.lockTimeoutMs =
       config?.lockTimeoutMs ??
-      DEFAULT_MAX_COMPILE_TIMEOUT_MS + OVERLEAF_LOCK_EXPIRY_BUFFER_MS;
+      resolveCompileTimeoutLimits(process.env).manualMs + LOCK_EXPIRY_BUFFER_MS;
     this.logChunkFlushIntervalMs = config?.logChunkFlushIntervalMs ?? 300;
     this.maxLogChunkBytes = config?.maxLogChunkBytes ?? 4096;
 

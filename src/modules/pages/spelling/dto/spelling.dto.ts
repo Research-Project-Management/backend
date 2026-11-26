@@ -1,83 +1,50 @@
 /**
  * spelling/dto/spelling.dto.ts
- * Data Transfer Objects for Spelling & Custom Dictionary operations.
+ * HTTP DTOs & validation guardrails for Spelling Check and Project Dictionary.
  */
 
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CheckSpellingDto {
-  @ApiPropertyOptional({ description: 'Raw LaTeX text content to check' })
-  @IsString()
-  @IsOptional()
-  text?: string;
-
-  @ApiPropertyOptional({
-    description: 'Document ID in docstore to fetch content from',
+  @ApiProperty({
+    description: 'Unique words extracted from LaTeX prose by the editor',
+    type: [String],
   })
-  @IsString()
-  @IsOptional()
-  docId?: string;
+  @IsArray()
+  @ArrayMaxSize(5000)
+  @IsString({ each: true })
+  @MaxLength(128, { each: true })
+  words!: string[];
 
   @ApiPropertyOptional({
-    description:
-      'Page UUID fallback when docId is omitted on Page-scoped routes',
-  })
-  @IsString()
-  @IsOptional()
-  pageId?: string;
-
-  @ApiPropertyOptional({
-    description: 'Language code (en-US, en-GB, vi-VN, etc.)',
+    description: 'Language code (en-US, en-GB, vi-VN, fr-FR, de-DE, es-ES)',
     default: 'en-US',
   })
   @IsString()
+  @MaxLength(16)
   @IsOptional()
   language?: string;
 }
 
 export class LearnWordDto {
-  @ApiProperty({ description: 'Word to add to dictionary' })
+  @ApiProperty({ description: 'Word to add to the project dictionary' })
   @IsString()
+  @MaxLength(128)
   @IsNotEmpty({ message: 'word is required' })
   word!: string;
-}
-
-export class SuggestionQueryDto {
-  @ApiProperty({ description: 'Word to get suggestions for' })
-  @IsString()
-  @IsNotEmpty({ message: 'word is required' })
-  word!: string;
-
-  @ApiPropertyOptional({
-    description: 'Language code (en-US, vi-VN)',
-    default: 'en-US',
-  })
-  @IsString()
-  @IsOptional()
-  language?: string;
-
-  @ApiPropertyOptional({
-    description: 'Maximum suggestions to return',
-    default: 5,
-  })
-  @IsNumber()
-  @IsOptional()
-  maxSuggestions?: number;
 }
 
 export class MisspelledWordDto {
   @ApiProperty()
   word!: string;
-
-  @ApiProperty()
-  line!: number;
-
-  @ApiProperty()
-  col!: number;
-
-  @ApiProperty()
-  length!: number;
 
   @ApiProperty({ type: [String] })
   suggestions!: string[];
@@ -98,9 +65,6 @@ export class SpellingReportDto {
 }
 
 export class CustomDictionaryResponseDto {
-  @ApiProperty()
-  scope!: string;
-
   @ApiProperty({ type: [String] })
   words!: string[];
 

@@ -13,7 +13,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { FILES_PORT, type IFilesPort } from '@/modules/files';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
   IBinaryStoragePort,
   IContentHasherPort,

@@ -25,8 +25,8 @@ import {
   RestoreResult,
   RestoreSingleFileResult,
 } from '../domain/ports';
-import { Snapshot } from '../domain/snapshot.entity';
-import { FileSnapshotVo } from '../domain/file-snapshot.vo';
+import { Snapshot } from '../domain/snapshot';
+import { FileSnapshotVo } from '../domain/snapshot';
 import { SnapshotFileNotFoundException } from '../domain/errors';
 
 @Injectable()

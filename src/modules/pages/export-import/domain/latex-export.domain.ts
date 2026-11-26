@@ -528,20 +528,4 @@ export function transpileLatexDocument(params: {
   });
 }
 
-/** @deprecated Use `transpileLatexDocument` */
-export const transpileLatexDocumentForExport = transpileLatexDocument;
-
-export const LatexTranspiler = {
-  escapeXml,
-  convertLatexToMarkdown,
-  convertLatexToHtml,
-  buildMinimalZip,
-  convertLatexToDocxBuffer,
-  resolveIncludedLatexContent,
-  transpileLatexDocument,
-  transpileLatexDocumentForExport,
-  defaultExportFormatRegistry,
-} as const;
-
-/** @deprecated Use `LatexTranspiler` */
-export const LatexExportTranspiler = LatexTranspiler;
+export { ExportFormatRegistry, defaultExportFormatRegistry };

@@ -1,27 +1,19 @@
 /**
- * modules/manuscripts/spelling/spelling.module.ts
- * NestJS Module for Manuscripts Spelling subsystem (Adaptive Modular Monolith).
+ * spelling/spelling.module.ts
+ * NestJS Module for Pages Spelling & Custom Project Dictionary.
  */
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-
-// Controllers, Service & Repository
-import {
-  SpellingController,
-  SpellingUtilityController,
-} from './spelling.controller';
+import { SpellingController } from './spelling.controller';
 import { SpellingService } from './spelling.service';
 import { SpellingRepository } from './spelling.repository';
-
-// Domain
-import { LatexTokenizer, SpellEngine } from './domain';
+import { SpellingEngine } from './domain/spelling.engine';
 
 @Module({
-  imports: [PrismaModule, DocstoreModule],
-  controllers: [SpellingController, SpellingUtilityController],
-  providers: [SpellingService, SpellingRepository, LatexTokenizer, SpellEngine],
-  exports: [SpellingService, SpellingRepository, LatexTokenizer, SpellEngine],
+  imports: [PrismaModule],
+  controllers: [SpellingController],
+  providers: [SpellingService, SpellingRepository, SpellingEngine],
+  exports: [SpellingService],
 })
 export class SpellingModule {}

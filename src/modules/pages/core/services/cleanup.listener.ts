@@ -180,7 +180,7 @@ export class CleanupListener {
         this.prisma.pageNode.deleteMany({ where: { spaceId: projectId } }),
         this.prisma.pageFile.deleteMany({ where: { spaceId: projectId } }),
         this.prisma.pageSnapshot.deleteMany({ where: { spaceId: projectId } }),
-        this.prisma.customDictionaryWord.deleteMany({
+        this.prisma.spellingWord.deleteMany({
           where: { spaceId: projectId },
         }),
         this.prisma.pageDoc.deleteMany({ where: { spaceId: projectId } }),

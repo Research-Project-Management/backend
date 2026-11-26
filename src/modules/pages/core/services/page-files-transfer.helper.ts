@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
-import { type IFilesPort } from '@/modules/files';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { LiveCollaborationPort } from '../ports/live-collaboration.port';
 import {
   ensureCanonicalPageId,

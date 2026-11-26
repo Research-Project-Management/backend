@@ -14,10 +14,19 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CompilePipelineResult } from '../services/compile.service';
 import type { ClsiHealthReport } from './health.adapter';
-import { CompilePageDto } from '../dto/compile.dto';
+import { CompilePageDto, ClsiWordCountDto } from '../dto/compile.dto';
 import { ForwardSyncDto, ReverseSyncDto } from '../dto/synctex.dto';
-import { AuxFileInfo, SyncPoint, ReverseSyncPoint } from '../domain/ports';
+import {
+  AuxFileInfo,
+  SyncPoint,
+  ReverseSyncPoint,
+  WordCountStats,
+} from '../domain/ports';
 import { RemoteClsiClientError } from '../domain/errors';
+import {
+  resolveCompileTimeout,
+  resolveCompileTimeoutLimits,
+} from '../domain/compile.policy';
 
 export interface RemoteCompileRequest {
   spaceId: string;
@@ -27,6 +36,7 @@ export interface RemoteCompileRequest {
   mergedFiles: Record<string, string | Buffer>;
   dto: CompilePageDto;
   engine?: string;
+  effectiveTimeoutMs?: number;
   cacheKey: string;
   signal?: AbortSignal;
 }
@@ -312,13 +322,21 @@ export class RemoteClsiClientAdapter {
       mergedFiles,
       dto,
       engine,
+      effectiveTimeoutMs: preResolvedTimeoutMs,
       signal,
     } = request;
 
-    const effectiveTimeoutMs = Math.min(
-      Math.max(dto.timeoutMs ?? 240000, 5000),
-      600000,
-    );
+    const effectiveTimeoutMs =
+      preResolvedTimeoutMs ??
+      resolveCompileTimeout(
+        {
+          requestedMs: dto.timeoutMs,
+          priority: dto.priority,
+          draft: dto.draft,
+          syntaxOnly: dto.syntaxOnly,
+        },
+        resolveCompileTimeoutLimits(process.env),
+      );
 
     const filesPayload: Record<string, string> = {};
     for (const [filePath, val] of Object.entries(mergedFiles)) {
@@ -424,6 +442,28 @@ export class RemoteClsiClientAdapter {
       return {
         success: data.success,
         result: data.result,
+        error: data.error,
+      };
+    }
+    return null;
+  }
+
+  public async tryRemoteWordCount(
+    payload: ClsiWordCountDto,
+    routingKey?: string,
+  ): Promise<{ success: boolean; stats?: WordCountStats; error?: string } | null> {
+    const data = await this.postRemoteJson<{
+      success?: boolean;
+      stats?: WordCountStats;
+      error?: string;
+    }>('/word-count', { ...payload }, {
+      timeoutMs: 12_000,
+      routingKey,
+    });
+    if (data && typeof data.success === 'boolean' && data.stats) {
+      return {
+        success: data.success,
+        stats: data.stats,
         error: data.error,
       };
     }

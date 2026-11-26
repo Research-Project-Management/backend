@@ -8,7 +8,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core';
-import { FilesModule, FILES_PORT, type IFilesPort } from '@/modules/files';
+import { FilesModule } from '@/modules/files/files.module';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { FilestoreController } from './filestore.controller';
 import { FilestoreService } from './filestore.service';
 import {

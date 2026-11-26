@@ -1,76 +1,48 @@
 ﻿
 
 /**
- * citations/domain/bibtex.parser.ts
- * Zero-dependency, pure TypeScript BibTeX parser and serializer.
- * Robust against nested braces, multiline fields, quotes, and comments.
+ * citations/domain/bibtex-parser.domain.ts
+ * BibTeX parser powered by `@citation-js/plugin-bibtex` with in-place span upserts.
  */
 
+import { plugins } from '@citation-js/core';
+import '@citation-js/plugin-bibtex';
 import { IBibtexParserPort } from './citations.ports';
 import { BibEntry } from './bib-entry.domain';
 import { CitationKeyVo } from './value-objects.domain';
 
 export type ConflictPolicy = 'overwrite' | 'skip' | 'rename';
 
-export class BibtexParser implements IBibtexParserPort {
-  private static readonly STANDARD_MONTH_MACROS: Record<string, string> = {
-    jan: 'January',
-    feb: 'February',
-    mar: 'March',
-    apr: 'April',
-    may: 'May',
-    jun: 'June',
-    jul: 'July',
-    aug: 'August',
-    sep: 'September',
-    oct: 'October',
-    nov: 'November',
-    dec: 'December',
-  };
+interface CitationJsRawBibtexEntry {
+  type?: string;
+  label?: string;
+  properties?: Record<string, unknown>;
+}
 
+export class BibtexParser implements IBibtexParserPort {
   /**
-   * Parse a raw BibTeX string into an array of BibEntry entities.
+   * Parse a raw BibTeX string into an array of BibEntry entities using `@citation-js/plugin-bibtex`.
    */
   public parse(rawBibtex: string): BibEntry[] {
     if (!rawBibtex || typeof rawBibtex !== 'string') return [];
 
-    const entries: BibEntry[] = [];
-    const cleanSource = this.stripComments(rawBibtex);
-    const stringMacros: Record<string, string> = {
-      ...BibtexParser.STANDARD_MONTH_MACROS,
-    };
-
-    // 1. Pre-scan @string{key = value} or @string(key = value) macro definitions
-    const stringDefRegex = /@string\s*([{(])/gi;
-    let strMatch: RegExpExecArray | null;
-    while ((strMatch = stringDefRegex.exec(cleanSource)) !== null) {
-      const openChar = strMatch[1];
-      const openIdx = strMatch.index + strMatch[0].length - 1;
-      const closeIdx =
-        openChar === '('
-          ? this.findMatchingClosingParen(cleanSource, openIdx)
-          : this.findMatchingClosingBrace(cleanSource, openIdx);
-      if (closeIdx !== -1) {
-        const body = cleanSource.slice(openIdx + 1, closeIdx);
-        const parsedMacro = this.parseFields(body, stringMacros);
-        for (const [k, v] of Object.entries(parsedMacro)) {
-          stringMacros[k.toLowerCase()] = v;
-        }
-        stringDefRegex.lastIndex = closeIdx + 1;
+    let rawEntries: CitationJsRawBibtexEntry[] = [];
+    try {
+      const parsed = plugins.input.chainLink(rawBibtex) as unknown;
+      if (Array.isArray(parsed)) {
+        rawEntries = parsed as CitationJsRawBibtexEntry[];
       }
+    } catch {
+      return [];
     }
 
-    // 2. Locate the start of each entry: @entryType{key, or @entryType(key,
-    const entryStartRegex = /@([a-zA-Z]+)\s*([{(])\s*([^,\s}()]+)\s*,/g;
-
-    let match: RegExpExecArray | null;
-    while ((match = entryStartRegex.exec(cleanSource)) !== null) {
-      const entryType = match[1].toLowerCase();
-      const openDelim = match[2];
-      const rawKey = match[3];
-
-      // Skip @comment, @preamble, or @string
+    const entries: BibEntry[] = [];
+    for (const item of rawEntries) {
+      const entryType = (item.type || '').toLowerCase();
+      const rawKey = (item.label || '').trim();
       if (
+        !entryType ||
+        !rawKey ||
         entryType === 'comment' ||
         entryType === 'preamble' ||
         entryType === 'string'
@@ -78,32 +50,17 @@ export class BibtexParser implements IBibtexParserPort {
         continue;
       }
 
-      const openDelimIndex = match.index + match[0].indexOf(openDelim);
-      const bodyStartIndex = match.index + match[0].length;
-      const bodyEndIndex =
-        openDelim === '('
-          ? this.findMatchingClosingParen(cleanSource, openDelimIndex)
-          : this.findMatchingClosingBrace(cleanSource, openDelimIndex);
-
-      if (bodyEndIndex === -1) {
-        // Unclosed entry: parse as much as possible up to next '@' or EOF
-        const nextAt = cleanSource.indexOf('@', bodyStartIndex);
-        const bodyContent =
-          nextAt !== -1
-            ? cleanSource.slice(bodyStartIndex, nextAt)
-            : cleanSource.slice(bodyStartIndex);
-        const fields = this.parseFields(bodyContent, stringMacros);
-        try {
-          entries.push(new BibEntry({ key: rawKey, entryType, fields }));
-        } catch {
-          // Skip invalid entry
+      const fields: Record<string, string> = {};
+      if (item.properties && typeof item.properties === 'object') {
+        for (const [k, v] of Object.entries(item.properties)) {
+          const fieldName = k.toLowerCase().trim();
+          if (!fieldName || v === null || v === undefined) continue;
+          const strVal = String(v).replace(/\s+/g, ' ').trim();
+          if (strVal.length > 0) {
+            fields[fieldName] = strVal;
+          }
         }
-        break;
       }
-
-      const bodyContent = cleanSource.slice(bodyStartIndex, bodyEndIndex);
-      const fields = this.parseFields(bodyContent, stringMacros);
-      const rawSnippet = cleanSource.slice(match.index, bodyEndIndex + 1);
 
       try {
         const sanitizedKey = CitationKeyVo.sanitize(rawKey);
@@ -112,15 +69,11 @@ export class BibtexParser implements IBibtexParserPort {
             key: sanitizedKey || rawKey,
             entryType,
             fields,
-            rawBibtex: rawSnippet,
           }),
         );
       } catch {
-        // Skip entry if key is hopelessly invalid
+        // Skip entry if key is invalid
       }
-
-      // Move regex index forward
-      entryStartRegex.lastIndex = bodyEndIndex + 1;
     }
 
     return entries;
@@ -131,124 +84,6 @@ export class BibtexParser implements IBibtexParserPort {
    */
   public format(entries: BibEntry[]): string {
     return entries.map((e) => e.toBibtexString()).join('\n\n');
-  }
-
-  /**
-   * Extract key-value field pairs from the body of a BibTeX entry,
-   * supporting # string concatenation and @string macro expansion.
-   */
-  private parseFields(
-    body: string,
-    stringMacros: Record<string, string> = {},
-  ): Record<string, string> {
-    const fields: Record<string, string> = {};
-    let pos = 0;
-
-    while (pos < body.length) {
-      // Find field name
-      const eqIndex = body.indexOf('=', pos);
-      if (eqIndex === -1) break;
-
-      const rawFieldName = body
-        .slice(pos, eqIndex)
-        .trim()
-        .replace(/^[,;\s]+/, '');
-      const fieldName = rawFieldName.toLowerCase();
-      pos = eqIndex + 1;
-
-      const parts: string[] = [];
-
-      // Read one or more value segments joined by '#'
-      while (pos < body.length) {
-        while (pos < body.length && /\s/.test(body[pos])) {
-          pos++;
-        }
-        if (pos >= body.length) break;
-
-        const firstChar = body[pos];
-        let segmentValue = '';
-
-        if (firstChar === '{') {
-          // Delimited by curly braces: handle nested braces!
-          const closeBraceIdx = this.findMatchingClosingBrace(body, pos);
-          if (closeBraceIdx !== -1) {
-            segmentValue = body.slice(pos + 1, closeBraceIdx);
-            pos = closeBraceIdx + 1;
-          } else {
-            segmentValue = body.slice(pos + 1);
-            pos = body.length;
-          }
-        } else if (firstChar === '"') {
-          // Delimited by double quotes (respecting nested braces or escaped quotes)
-          let endQuoteIdx = -1;
-          let braceDepth = 0;
-          for (let j = pos + 1; j < body.length; j++) {
-            if (body[j] === '{' && body[j - 1] !== '\\') braceDepth++;
-            else if (body[j] === '}' && body[j - 1] !== '\\')
-              braceDepth = Math.max(0, braceDepth - 1);
-            else if (
-              body[j] === '"' &&
-              body[j - 1] !== '\\' &&
-              braceDepth === 0
-            ) {
-              endQuoteIdx = j;
-              break;
-            }
-          }
-          if (endQuoteIdx !== -1) {
-            segmentValue = body.slice(pos + 1, endQuoteIdx);
-            pos = endQuoteIdx + 1;
-          } else {
-            segmentValue = body.slice(pos + 1);
-            pos = body.length;
-          }
-        } else {
-          // Naked value (e.g. number 2024 or @string macro identifier) up to '#', ',', or end of block
-          let tokenEnd = pos;
-          while (
-            tokenEnd < body.length &&
-            body[tokenEnd] !== ',' &&
-            body[tokenEnd] !== '#'
-          ) {
-            tokenEnd++;
-          }
-          const rawToken = body.slice(pos, tokenEnd).trim();
-          const macroLookup = stringMacros[rawToken.toLowerCase()];
-          segmentValue = macroLookup !== undefined ? macroLookup : rawToken;
-          pos = tokenEnd;
-        }
-
-        parts.push(segmentValue);
-
-        // Skip whitespace and check if '#' concatenation follows
-        while (pos < body.length && /\s/.test(body[pos])) {
-          pos++;
-        }
-        if (pos < body.length && body[pos] === '#') {
-          pos++; // consume '#' and loop to read next concatenated segment
-        } else {
-          break;
-        }
-      }
-
-      const value = parts.join('');
-
-      if (
-        fieldName &&
-        fieldName.length > 0 &&
-        /^[a-zA-Z0-9_.:-]+$/.test(fieldName)
-      ) {
-        // Clean whitespace and linebreaks in values
-        fields[fieldName] = value.replace(/\s+/g, ' ').trim();
-      }
-
-      // Skip optional comma or trailing spaces
-      while (pos < body.length && /[,\s]/.test(body[pos])) {
-        pos++;
-      }
-    }
-
-    return fields;
   }
 
   /**
@@ -517,17 +352,6 @@ export class BibtexParser implements IBibtexParserPort {
       }
     }
     return -1;
-  }
-
-  private findMatchingClosingParen(text: string, openParenIdx: number): number {
-    return BibtexParser.findMatchingClosingParenStatic(text, openParenIdx);
-  }
-
-  /**
-   * Strip LaTeX/BibTeX comments (% to end of line) only outside braces/quotes.
-   */
-  private stripComments(text: string): string {
-    return BibtexParser.scanComments(text, false);
   }
 }
 

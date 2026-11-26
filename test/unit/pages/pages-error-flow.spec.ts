@@ -82,7 +82,7 @@ import {
   ArchiveSizeExceededException,
   InvalidZipArchiveException,
   ZipSlipSecurityException,
-} from '@/modules/pages/export-import/domain/archive-validator';
+} from '@/modules/pages/export-import/domain/archive.errors';
 import { GitBridgeDomainError } from '@/modules/pages/git-bridge/domain/git-bridge.types';
 import {
   DuplicateLabelException,
@@ -90,7 +90,7 @@ import {
   SnapshotFileNotFoundException,
   VersionNotFoundException,
 } from '@/modules/pages/history/domain/errors';
-import { InvalidVersionLabelException } from '@/modules/pages/history/domain/label.entity';
+import { InvalidVersionLabelException } from '@/modules/pages/history/domain/label';
 import {
   ChangeNotFoundError,
   InvalidChangeError,

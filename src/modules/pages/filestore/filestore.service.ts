@@ -9,7 +9,8 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Readable } from 'node:stream';
 import { isUuid } from '@/core';
-import { BlobStatus, FILES_PORT, type IFilesPort } from '@/modules/files';
+import { BlobStatus, type IFilesPort } from '@/modules/files/types/files.type';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { FilestoreRepository } from './filestore.repository';
 import {

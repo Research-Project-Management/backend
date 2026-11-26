@@ -31,6 +31,7 @@ import {
   TexEngineDetector,
   BibBackendDetector,
   DraftModeManager,
+  DEFAULT_COMPILE_TIMEOUT_LIMITS,
 } from '../domain/compile.policy';
 import { CompileLogParser } from '../domain/log-parser/tex-log.parser';
 import { SafePath } from '../domain/path.policy';
@@ -275,7 +276,8 @@ export class CompileService {
             });
           }
 
-          const timeoutMs = dto.timeoutMs || 240000;
+          const timeoutMs =
+            dto.timeoutMs || DEFAULT_COMPILE_TIMEOUT_LIMITS.manualMs;
           const stopOnFirstError = dto.stopOnFirstError ?? false;
           const engineResult = await resolvedRunner.engineToUse.compile(
             {

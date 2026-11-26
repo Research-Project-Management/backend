@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { FileDiffVo } from '../domain/ports';
+import { FileDiffVo } from '../domain/diff';
 
 export class DiffQueryDto {
   @ApiProperty({ description: 'Base baseline version number' })

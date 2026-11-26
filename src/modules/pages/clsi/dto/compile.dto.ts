@@ -87,15 +87,16 @@ export class CompilePageDto {
   syntaxOnly?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Compilation timeout in milliseconds',
-    default: 240000,
+    description:
+      'Requested compilation timeout in milliseconds (clamped to server tier cap)',
+    default: 90000,
     minimum: 5000,
-    maximum: 600000,
+    maximum: 240000,
   })
   @IsOptional()
   @IsNumber()
   @Min(5000)
-  @Max(600000)
+  @Max(240000)
   timeoutMs?: number;
 
   @ApiPropertyOptional({

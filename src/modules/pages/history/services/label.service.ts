@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { HistoryRepository } from '../history.repository';
-import { VersionLabel } from '../domain/label.entity';
+import { VersionLabel } from '../domain/label';
 import {
   VersionNotFoundException,
   DuplicateLabelException,

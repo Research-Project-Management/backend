@@ -28,15 +28,11 @@ import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { filterRecordsByPageScope } from '@/modules/pages/core/page-scope.helper';
 import { findPageRecordWithNode } from '@/modules/pages/docstore/services/doc-occ.helper';
 import { applyPageMetadataAndTitleUpdates } from '@/modules/pages/core/services/page-query-metadata.helper';
-import {
-  type IFilesPort,
-  BlobStatus,
-  StorageBlobRecord,
-} from '@/modules/files';
+import { type IFilesPort, BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
 import {
   ContentHash as PlatformContentHash,
   StorageKey as PlatformStorageKey,
-} from '@/modules/files/domain/storage-vo';
+} from '@/modules/files/domain/storage.vo';
 import { BlobRepository } from '@/modules/files/repositories/blob.repository';
 import { BlobService } from '@/modules/files/services/blob.service';
 

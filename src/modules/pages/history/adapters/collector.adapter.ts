@@ -18,8 +18,8 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
 import { ISnapshotCollectorPort } from '../domain/ports';
-import { Snapshot } from '../domain/snapshot.entity';
-import { FileSnapshotVo } from '../domain/file-snapshot.vo';
+import { Snapshot } from '../domain/snapshot';
+import { FileSnapshotVo } from '../domain/snapshot';
 
 const COLLECT_CONCURRENCY = 6;
 

@@ -1,7 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { HistoryRepository } from '../history.repository';
 import { VersionNotFoundException } from '../domain/errors';
-import { DiffEngine } from '../domain/diff.engine';
+import { DiffEngine } from '../domain/diff';
 import { DiffResponseDto } from '../dto/diff.dto';
 
 const DIFF_CACHE_MAX_ENTRIES = 256;

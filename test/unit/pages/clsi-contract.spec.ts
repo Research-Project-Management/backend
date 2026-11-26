@@ -6,6 +6,21 @@ import { CompileLockService } from '@/modules/pages/clsi/services/compile-lock.s
 import { CompileService } from '@/modules/pages/clsi/services/compile.service';
 import { RemoteClsiClientAdapter } from '@/modules/pages/clsi/adapters/remote-clsi.adapter';
 import { ClsiMetrics } from '@/modules/pages/clsi/adapters/metrics.adapter';
+import {
+  DEFAULT_COMPILE_TIMEOUT_LIMITS,
+  resolveCompileTimeout,
+  resolveCompileTimeoutLimits,
+} from '@/modules/pages/clsi/domain/compile.policy';
+import {
+  buildZipBuffer,
+  createZipStream,
+} from '@/modules/pages/core/utils/zip-builder';
+import { parseTexcountBriefOutput } from '@/modules/pages/clsi/adapters/texcount.adapter';
+import {
+  PandocAdapter,
+  normalizePandocExportFormat,
+} from '@/modules/pages/export-import/adapters/pandoc.adapter';
+import { unzipSync, strFromU8 } from 'fflate';
 import type {
   BuildStateRecord,
   ILatexEngine,
@@ -250,6 +265,136 @@ describe('CLSI Production Contract Suite', () => {
       expect(prom).toContain('clsi_compile_duration_seconds_bucket{le="2"} 1');
       expect(prom).toContain('clsi_compile_duration_seconds_bucket{le="1"} 0');
       expect(prom).toContain('clsi_compile_duration_seconds_count 1');
+    });
+  });
+
+  describe('CompileTimeoutPolicy (Server-Authoritative Tiered Timeout)', () => {
+    it('applies tier defaults and clamps client-requested timeouts to server cap', () => {
+      // Defaults by mode/priority
+      expect(resolveCompileTimeout({})).toBe(
+        DEFAULT_COMPILE_TIMEOUT_LIMITS.manualMs,
+      );
+      expect(resolveCompileTimeout({ priority: 'auto' })).toBe(
+        DEFAULT_COMPILE_TIMEOUT_LIMITS.autoMs,
+      );
+      expect(resolveCompileTimeout({ draft: true })).toBe(
+        DEFAULT_COMPILE_TIMEOUT_LIMITS.draftMs,
+      );
+      expect(resolveCompileTimeout({ syntaxOnly: true })).toBe(
+        DEFAULT_COMPILE_TIMEOUT_LIMITS.syntaxOnlyMs,
+      );
+
+      // Client cannot exceed server cap (prevents 600s DoS)
+      expect(resolveCompileTimeout({ requestedMs: 600_000 })).toBe(90_000);
+      expect(
+        resolveCompileTimeout({ requestedMs: 240_000, priority: 'auto' }),
+      ).toBe(30_000);
+      expect(
+        resolveCompileTimeout({ requestedMs: 240_000, syntaxOnly: true }),
+      ).toBe(20_000);
+
+      // Client MAY request a shorter timeout, bounded by minMs (5s)
+      expect(resolveCompileTimeout({ requestedMs: 12_000 })).toBe(12_000);
+      expect(resolveCompileTimeout({ requestedMs: 100 })).toBe(5_000);
+    });
+
+    it('parses env overrides while enforcing absoluteMaxMs (240s) and tier <= manualMs', () => {
+      const limits = resolveCompileTimeoutLimits({
+        CLSI_COMPILE_TIMEOUT_MS: '180000',
+        CLSI_AUTO_COMPILE_TIMEOUT_MS: '25000',
+        CLSI_DRAFT_COMPILE_TIMEOUT_MS: '999999', // clamped to manualMs (180s)
+      });
+
+      expect(limits.manualMs).toBe(180_000);
+      expect(limits.autoMs).toBe(25_000);
+      expect(limits.draftMs).toBe(180_000);
+      expect(resolveCompileTimeout({ requestedMs: 999_999 }, limits)).toBe(
+        180_000,
+      );
+
+      // Even if env sets > 240s, absoluteMaxMs caps it
+      const capped = resolveCompileTimeoutLimits({
+        CLSI_COMPILE_TIMEOUT_MS: '900000',
+      });
+      expect(capped.manualMs).toBe(240_000);
+    });
+  });
+
+  describe('ZipBuilder (fflate-backed packing & streaming)', () => {
+    it('packs and streams valid ZIP archives while sanitizing traversal paths', async () => {
+      const buf = buildZipBuffer([
+        { path: '../sections/intro.tex', data: '\\section{Intro}' },
+        { path: 'empty.txt', data: '' },
+      ]);
+      const unzipped = unzipSync(new Uint8Array(buf));
+      expect(Object.keys(unzipped).sort()).toEqual([
+        'empty.txt',
+        'sections/intro.tex',
+      ]);
+      expect(strFromU8(unzipped['sections/intro.tex'])).toBe('\\section{Intro}');
+      expect(unzipped['empty.txt'].byteLength).toBe(0);
+
+      const stream = createZipStream([
+        { path: 'main.tex', getData: async () => '\\documentclass{article}' },
+        { path: 'missing.png', getData: async () => null },
+      ]);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const streamedUnzip = unzipSync(new Uint8Array(Buffer.concat(chunks)));
+      expect(Object.keys(streamedUnzip)).toEqual(['main.tex']);
+      expect(strFromU8(streamedUnzip['main.tex'])).toBe(
+        '\\documentclass{article}',
+      );
+    });
+  });
+
+  describe('TexcountCliAdapter (Real TeX Live texcount parser)', () => {
+    it('parses texcount -brief -sub=section output into totals, sections, and per-file stats', () => {
+      const sampleStdout = [
+        '12+2+0 (1/0/1/0) Section: Introduction',
+        '30+1+5 (1/1/2/1) Section: Method',
+        '42+3+5 (2/1/3/1) File: main.tex',
+        '18+1+0 (1/0/0/0) Included file: sections/appendix.tex',
+        '60+4+5 (3/1/3/1) Total',
+      ].join('\n');
+
+      const parsed = parseTexcountBriefOutput(sampleStdout, 'main.tex');
+      expect(parsed).not.toBeNull();
+      expect(parsed!.wordsInText).toBe(60);
+      expect(parsed!.wordsInHeaders).toBe(4);
+      expect(parsed!.wordsInCaptions).toBe(5);
+      expect(parsed!.headers).toBe(3);
+      expect(parsed!.floats).toBe(1);
+      expect(parsed!.mathInlines).toBe(3);
+      expect(parsed!.mathDisplayed).toBe(1);
+      expect(parsed!.sections).toHaveLength(2);
+      expect(parsed!.sections[0]).toMatchObject({
+        level: 'section',
+        title: 'Introduction',
+        words: 14,
+      });
+      expect(parsed!.perFileStats).toHaveLength(2);
+      expect(parsed!.perFileStats[1].path).toBe('sections/appendix.tex');
+    });
+  });
+
+  describe('PandocAdapter (LaTeX <-> DOCX/MD/HTML)', () => {
+    it('normalizes export formats and gracefully returns null when pandoc binary is absent', async () => {
+      expect(normalizePandocExportFormat('docx')).toBe('docx');
+      expect(normalizePandocExportFormat('word')).toBe('docx');
+      expect(normalizePandocExportFormat('markdown')).toBe('md');
+      expect(normalizePandocExportFormat('HTML')).toBe('html');
+      expect(normalizePandocExportFormat('pdf')).toBeNull();
+
+      const missingBinAdapter = new PandocAdapter('nonexistent-pandoc-bin-xyz');
+      const result = await missingBinAdapter.exportLatex({
+        rawFilename: 'main.tex',
+        content: '\\section{Intro} Hello',
+        format: 'docx',
+      });
+      expect(result).toBeNull();
     });
   });
 });

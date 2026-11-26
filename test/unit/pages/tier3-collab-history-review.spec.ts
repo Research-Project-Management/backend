@@ -12,18 +12,18 @@ import {
   PAGES_REALTIME_DEFAULTS,
   PagesRealtimeConfigService,
 } from '@/modules/realtime/channels/pages/config';
-import { Snapshot } from '@/modules/pages/history/domain/snapshot.entity';
+import { Snapshot } from '@/modules/pages/history/domain/snapshot';
 import {
   VersionLabel,
   InvalidVersionLabelException,
-} from '@/modules/pages/history/domain/label.entity';
+} from '@/modules/pages/history/domain/label';
 import {
   VersionNotFoundException,
   DuplicateLabelException,
   EmptyProjectException,
 } from '@/modules/pages/history/domain/errors';
-import { FileSnapshotVo } from '@/modules/pages/history/domain/file-snapshot.vo';
-import { DiffEngine } from '@/modules/pages/history/domain/diff.engine';
+import { FileSnapshotVo } from '@/modules/pages/history/domain/snapshot';
+import { DiffEngine } from '@/modules/pages/history/domain/diff';
 import {
   HistoryMapper,
   HistoryRepository,

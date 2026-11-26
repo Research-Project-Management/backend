@@ -93,6 +93,19 @@ export class CompileSourceService {
       if (page?.id) {
         resolvedSpaceId = page.spaceId;
         resolvedPageId = page.id;
+      } else {
+        // Frontend routes like /projects/:spaceId/pages/:docId may pass a PageDoc UUID as pageId.
+        // Resolve its canonical owning Page UUID so planFiles() filters by Page.id instead of returning 0 files.
+        const doc = await Promise.resolve(
+          this.prisma.pageDoc?.findUnique?.({
+            where: { id: dto.pageId },
+            select: { pageId: true, spaceId: true },
+          }),
+        ).catch(() => null);
+        if (doc?.pageId) {
+          resolvedSpaceId = doc.spaceId;
+          resolvedPageId = doc.pageId;
+        }
       }
     }
 

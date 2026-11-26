@@ -81,6 +81,7 @@ export class ClsiRuntimeAdapter {
       mergedFiles,
       dto,
       engine,
+      effectiveTimeoutMs,
       cacheKey,
       signal,
     });

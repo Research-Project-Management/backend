@@ -25,7 +25,7 @@ import { SnapshotService } from './history/services/snapshot.service';
 import { RestoreService } from './history/services/restore.service';
 import { DiffService } from './history/services/diff.service';
 import { CitationsService } from './citations/services/citations.service';
-import { ExportImportService } from './export-import/export-import.service';
+import { ExportService } from './export-import/services/export.service';
 import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
 import { PageDomainEventBus } from './core/events/event-bus.service';
 import { PagesServiceUnavailableError } from './core/domain/pages-domain.error';
@@ -47,7 +47,7 @@ import {
   ResolveIdentifierDto,
 } from './citations/dto/citations.dto';
 import { CreateSnapshotDto } from './history/dto/snapshot.dto';
-import { ExportZipQueryDto } from './export-import/dto/export-import.dto';
+import { ExportZipQueryDto } from './export-import/dto/export.dto';
 
 @Injectable()
 export class PagesFacade {
@@ -58,7 +58,7 @@ export class PagesFacade {
     public readonly clsi: ClsiService,
     public readonly projectHistory: SnapshotService,
     public readonly citations: CitationsService,
-    public readonly exportImport: ExportImportService,
+    public readonly exportImport: ExportService,
     public readonly workspaceCollector: WorkspaceCollectorService,
     public readonly domainEvents: PageDomainEventBus,
     @Optional() public readonly editorBootstrap?: EditorBootstrapService,

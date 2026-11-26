@@ -34,7 +34,7 @@ import {
   IncludedProjectDoc,
   ExportFormattedDocResult,
   transpileLatexDocument,
-} from '@/modules/pages/export-import/domain';
+} from '@/modules/pages/export-import/domain/latex-export.domain';
 import {
   CreateDocDto,
   UpdateDocDto,

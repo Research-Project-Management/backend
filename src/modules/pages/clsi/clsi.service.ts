@@ -32,6 +32,10 @@ import {
   validatePlannedFileSet,
 } from './domain/file-set.planner';
 import { BoundedLruCache } from './domain/lru-cache';
+import {
+  resolveCompileTimeout,
+  resolveCompileTimeoutLimits,
+} from './domain/compile.policy';
 import { CompilePipelineResult } from './services/compile.service';
 import { CompileLockService } from './services/compile-lock.service';
 import { ClsiMetrics } from './adapters/metrics.adapter';
@@ -105,7 +109,15 @@ export class ClsiService implements OnModuleDestroy {
           ? `adhoc-${userId}`
           : `adhoc-${crypto.randomUUID()}`;
     const scratchWorkspaceId = targetPageId || effectiveSpaceId;
-    const effectiveTimeoutMs = dto.timeoutMs ?? 240000;
+    const effectiveTimeoutMs = resolveCompileTimeout(
+      {
+        requestedMs: dto.timeoutMs,
+        priority: dto.priority,
+        draft: dto.draft,
+        syntaxOnly: dto.syntaxOnly,
+      },
+      resolveCompileTimeoutLimits(process.env),
+    );
     const metricEngine = requestedEngine || 'pdflatex';
 
     return await this.compileLock.runWithLock(

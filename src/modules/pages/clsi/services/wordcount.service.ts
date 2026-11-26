@@ -3,17 +3,21 @@
  * Multi-file TeX word count service (TeXcount).
  */
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ClsiWordCountDto } from '../dto/compile.dto';
 import { WordCountStats } from '../domain/ports';
 import { TexWordCounter } from '../domain/word-count.engine';
+import { RemoteClsiClientAdapter } from '../adapters/remote-clsi.adapter';
 import { CompileSourceService } from './compile-source.service';
 
 @Injectable()
 export class WordCountService {
   private readonly wordCounter = new TexWordCounter();
 
-  constructor(private readonly compileSource: CompileSourceService) {}
+  constructor(
+    private readonly compileSource: CompileSourceService,
+    @Optional() private readonly remoteClient?: RemoteClsiClientAdapter,
+  ) {}
 
   public async count(
     dto: ClsiWordCountDto,
@@ -73,12 +77,46 @@ export class WordCountService {
         stringFiles = { ...dto.files };
       }
 
+      if (this.remoteClient?.isEnabled() && Object.keys(stringFiles).length > 0) {
+        const remoteRes = await this.remoteClient.tryRemoteWordCount(
+          {
+            files: stringFiles,
+            filename: rootFile,
+            includeBib: dto.includeBib,
+          },
+          scratchTargetId,
+        );
+        if (remoteRes?.success && remoteRes.stats) {
+          if (dto.source && dto.source.trim().length > 0) {
+            const singleRemote = await this.remoteClient.tryRemoteWordCount(
+              {
+                source: dto.source,
+                filename: dto.filename || rootFile,
+                includeBib: dto.includeBib,
+              },
+              scratchTargetId,
+            );
+            if (singleRemote?.success && singleRemote.stats) {
+              return {
+                success: true,
+                stats: {
+                  ...singleRemote.stats,
+                  perFileStats: remoteRes.stats.perFileStats,
+                },
+              };
+            }
+          } else {
+            return remoteRes;
+          }
+        }
+      }
+
       const stats = this.wordCounter.countProject(stringFiles, {
         rootFile,
         includeBib: dto.includeBib,
       });
 
-      if (dto.source !== undefined) {
+      if (dto.source && dto.source.trim().length > 0) {
         const singleStats = this.wordCounter.count(
           dto.source,
           dto.filename || rootFile,
@@ -122,11 +160,27 @@ export class WordCountService {
       };
     }
 
-    const stats = this.wordCounter.count(
-      dto.source,
-      dto.filename || 'document.tex',
-      { includeBib: dto.includeBib },
-    );
+    let stats: WordCountStats | null = null;
+    if (this.remoteClient?.isEnabled()) {
+      const remoteSingle = await this.remoteClient.tryRemoteWordCount(
+        {
+          source: dto.source,
+          filename: dto.filename || 'document.tex',
+          includeBib: dto.includeBib,
+        },
+        scratchTargetId,
+      );
+      if (remoteSingle?.success && remoteSingle.stats) {
+        stats = remoteSingle.stats;
+      }
+    }
+    if (!stats) {
+      stats = this.wordCounter.count(
+        dto.source,
+        dto.filename || 'document.tex',
+        { includeBib: dto.includeBib },
+      );
+    }
 
     if (spaceId && spaceId !== 'default') {
       try {
