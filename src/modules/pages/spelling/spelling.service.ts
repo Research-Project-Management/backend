@@ -6,11 +6,7 @@
 import { Injectable } from '@nestjs/common';
 import { LRUCache } from 'lru-cache';
 import { SpellingRepository } from './spelling.repository';
-import {
-  SpellingEngine,
-  normalizeLanguageCode,
-  validateCustomWord,
-} from './domain/spelling.engine';
+import { SpellingEngine, validateCustomWord } from './domain/spelling.engine';
 import { InvalidWordException } from './domain/spelling.errors';
 import type { CheckSpellingDto } from './dto/spelling.dto';
 import type {
@@ -75,19 +71,10 @@ export class SpellingService {
     spaceId: string,
     dto: CheckSpellingDto,
   ): Promise<SpellingReport> {
-    const language = normalizeLanguageCode(dto.language);
     const words = Array.isArray(dto.words) ? dto.words : [];
-    if (words.length === 0) {
-      return {
-        language,
-        totalWordsChecked: 0,
-        misspelledCount: 0,
-        errors: [],
-      };
-    }
-
-    const customWords = await this.getCachedWordSet(spaceId);
-    return this.engine.checkWords(words, language, customWords);
+    const customWords =
+      words.length > 0 ? await this.getCachedWordSet(spaceId) : undefined;
+    return this.engine.checkWords(words, dto.language, customWords);
   }
 
   public async listWords(spaceId: string): Promise<CustomDictionaryResult> {
@@ -124,12 +111,15 @@ export class SpellingService {
     return normalizedWord;
   }
 
-  public async unlearnWord(spaceId: string, word: string): Promise<boolean> {
+  public async unlearnWord(
+    spaceId: string,
+    word: string,
+  ): Promise<{ removed: boolean; word: string }> {
     const normalizedWord = (word ?? '').trim().toLowerCase();
-    if (!normalizedWord) return false;
+    if (!normalizedWord) return { removed: false, word: '' };
 
     const removed = await this.repository.removeWord(spaceId, normalizedWord);
     this.invalidateSpaceCache(spaceId);
-    return removed;
+    return { removed, word: normalizedWord };
   }
 }

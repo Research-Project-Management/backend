@@ -24,21 +24,15 @@ export class SpellingRepository {
     word: string,
     createdById?: string,
   ): Promise<void> {
-    const normalizedWord = word.toLowerCase().trim();
-    if (!normalizedWord) return;
-
     await this.prisma.spellingWord.createMany({
-      data: [{ spaceId, word: normalizedWord, createdById: createdById ?? null }],
+      data: [{ spaceId, word, createdById: createdById ?? null }],
       skipDuplicates: true,
     });
   }
 
   public async removeWord(spaceId: string, word: string): Promise<boolean> {
-    const normalizedWord = word.toLowerCase().trim();
-    if (!normalizedWord) return false;
-
     const result = await this.prisma.spellingWord.deleteMany({
-      where: { spaceId, word: normalizedWord },
+      where: { spaceId, word },
     });
     return result.count > 0;
   }

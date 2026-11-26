@@ -123,8 +123,7 @@ export class SpellingController {
     @Req() req?: AuthenticatedRequest,
   ) {
     const spaceId = this.resolveSpaceId(spaceIdParam, resolvedSpace, req);
-    const normalizedWord = (word ?? '').trim().toLowerCase();
-    const removed = await this.spellingService.unlearnWord(spaceId, normalizedWord);
-    return { success: true, removed, word: normalizedWord };
+    const result = await this.spellingService.unlearnWord(spaceId, word);
+    return { success: true, ...result };
   }
 }
