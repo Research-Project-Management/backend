@@ -39,19 +39,57 @@ const HEADING_PRIORITY: Record<string, number> = {
   subparagraph: 6,
 };
 
+const MAX_MULTILINE_SCAN_LINES = 12;
+
 export class LatexOutlineExtractor {
+  /**
+   * Returns true if the character at `index` is preceded by an odd number of backslashes.
+   * Properly distinguishes `\%` (escaped) from `\\%` (line break + comment).
+   */
+  public static isEscaped(str: string, index: number): boolean {
+    let backslashes = 0;
+    for (let i = index - 1; i >= 0 && str[i] === '\\'; i--) {
+      backslashes++;
+    }
+    return backslashes % 2 === 1;
+  }
+
+  /**
+   * Strips an unescaped `%` comment from a single LaTeX source line.
+   */
+  public static stripComment(rawLine: string): string {
+    for (let c = 0; c < rawLine.length; c++) {
+      if (rawLine[c] === '%' && !this.isEscaped(rawLine, c)) {
+        return rawLine.slice(0, c);
+      }
+    }
+    return rawLine;
+  }
+
   public static cleanLatexTitle(raw: string): string {
     if (!raw) return '';
     let text = raw.trim();
+    // Strip inline math delimiters while keeping content
     text = text.replace(/\$([^$]+)\$/g, '$1');
+    // Remove non-visual annotation macros first
     text = text.replace(
-      /\\(?:textbf|textit|emph|texttt|textsc|textrm|textsf|underline|mbox|hbox)\*?\s*\{([^{}]*)\}/g,
-      '$1',
-    );
-    text = text.replace(
-      /\\(?:cite[a-zA-Z]*|ref|eqref|pageref|autoref|cref|Cref|label|footnote)\*?\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/g,
+      /\\(?:cite[a-zA-Z]*|ref|eqref|pageref|autoref|cref|Cref|label|footnote)\*?\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}/g,
       '',
     );
+    // Unwrap nested formatting commands (e.g. \textbf{Foo \emph{Bar}})
+    for (let pass = 0; pass < 6; pass++) {
+      const next = text.replace(
+        /\\(?:textbf|textit|emph|texttt|textsc|textrm|textsf|underline|mbox|hbox|textrm|textnormal|mathrm|mathbf|mathit|mathcal|text|texorpdfstring)\*?\s*\{([^{}]*)\}/g,
+        '$1',
+      );
+      if (next === text) break;
+      text = next;
+    }
+    // Unescape common LaTeX special characters before stripping unknown macros
+    text = text.replace(/\\([&%_#$])/g, '$1');
+    text = text.replace(/\\([{}])/g, '$1');
+    text = text.replace(/\\textbackslash\b\s*/g, '\\');
+    // Strip remaining LaTeX control sequences
     text = text.replace(/\\[a-zA-Z@]+\*?\s*/g, '');
     text = text.replace(/[{}]/g, '');
     text = text.replace(/~/g, ' ');
@@ -59,27 +97,57 @@ export class LatexOutlineExtractor {
     return text;
   }
 
-  private static extractBalancedBraces(
-    str: string,
+  /**
+   * Extracts balanced `{...}` content starting at `openBraceIndex` on `lines[startLineIdx]`,
+   * seamlessly spanning multiple lines (up to MAX_MULTILINE_SCAN_LINES) while ignoring comments.
+   */
+  private static extractMultiLineBalancedBraces(
+    lines: string[],
+    startLineIdx: number,
     openBraceIndex: number,
-  ): { content: string; endIndex: number } | null {
-    if (str[openBraceIndex] !== '{') return null;
+  ): { content: string; endLineIdx: number; endIndex: number } | null {
+    const firstClean = this.stripComment(lines[startLineIdx] ?? '');
+    if (firstClean[openBraceIndex] !== '{') return null;
+
     let depth = 1;
-    let i = openBraceIndex + 1;
-    while (i < str.length && depth > 0) {
-      if (str[i] === '\\') {
-        i += 2;
-        continue;
+    let buf = '';
+    const maxLine = Math.min(
+      lines.length - 1,
+      startLineIdx + MAX_MULTILINE_SCAN_LINES,
+    );
+
+    for (let lineIdx = startLineIdx; lineIdx <= maxLine; lineIdx++) {
+      const cleanLine =
+        lineIdx === startLineIdx
+          ? firstClean
+          : this.stripComment(lines[lineIdx] ?? '');
+      const startCol = lineIdx === startLineIdx ? openBraceIndex + 1 : 0;
+      if (lineIdx > startLineIdx) {
+        buf += ' ';
       }
-      if (str[i] === '{') depth++;
-      else if (str[i] === '}') depth--;
-      i++;
+
+      for (let col = startCol; col < cleanLine.length; col++) {
+        const ch = cleanLine[col];
+        if (ch === '{' && !this.isEscaped(cleanLine, col)) {
+          depth++;
+          buf += ch;
+        } else if (ch === '}' && !this.isEscaped(cleanLine, col)) {
+          depth--;
+          if (depth === 0) {
+            return {
+              content: buf,
+              endLineIdx: lineIdx,
+              endIndex: col + 1,
+            };
+          }
+          buf += ch;
+        } else {
+          buf += ch;
+        }
+      }
     }
-    if (depth !== 0) return null;
-    return {
-      content: str.slice(openBraceIndex + 1, i - 1),
-      endIndex: i,
-    };
+
+    return null;
   }
 
   public static extractFromContent(
@@ -100,21 +168,16 @@ export class LatexOutlineExtractor {
     } | null = null;
 
     const sectionRegex =
-      /\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)(\*)?\s*(?:\[([^\]]*)\])?\s*\{/;
+      /\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)(\*)?\s*(?:\[([^\]]*)\])?\s*\{/g;
+    const frameStartRegex =
+      /\\begin\{frame\}(?:\s*<[^>]*>)?(?:\s*\[[^\]]*\])?\s*\{/;
+    const frameTitleRegex =
+      /\\frametitle(?:\s*<[^>]*>)?(?:\s*\[[^\]]*\])?\s*\{/;
 
     for (let i = 0; i < lines.length; i++) {
       const rawLine = lines[i] ?? '';
       const lineNum = i + 1;
-
-      // Strip unescaped % comments
-      let cleanLine = rawLine;
-      for (let c = 0; c < rawLine.length; c++) {
-        if (rawLine[c] === '%' && (c === 0 || rawLine[c - 1] !== '\\')) {
-          cleanLine = rawLine.slice(0, c);
-          break;
-        }
-      }
-
+      const cleanLine = this.stripComment(rawLine);
       const trimmed = cleanLine.trim();
       if (!trimmed) continue;
 
@@ -152,7 +215,11 @@ export class LatexOutlineExtractor {
         if (capIdx !== -1) {
           const braceIdx = cleanLine.indexOf('{', capIdx);
           if (braceIdx !== -1) {
-            const extracted = this.extractBalancedBraces(cleanLine, braceIdx);
+            const extracted = this.extractMultiLineBalancedBraces(
+              lines,
+              i,
+              braceIdx,
+            );
             if (extracted) {
               currentFloat.caption = this.cleanLatexTitle(extracted.content);
             }
@@ -197,12 +264,19 @@ export class LatexOutlineExtractor {
         });
       }
 
-      // Check Beamer \begin{frame}{Title} or \frametitle{Title}
-      const frameMatch = trimmed.match(
-        /\\begin\{frame\}(?:\[[^\]]*\])?\s*\{([^}]*)\}|\\frametitle(?:\[[^\]]*\])?\s*\{([^}]*)\}/,
-      );
+      // Check Beamer \begin{frame}{Title} or \frametitle{Title} with balanced/multi-line braces
+      const frameMatch =
+        frameStartRegex.exec(cleanLine) ?? frameTitleRegex.exec(cleanLine);
       if (frameMatch) {
-        const rawFrameTitle = frameMatch[1] || frameMatch[2] || '';
+        const openBraceIdx = frameMatch.index + frameMatch[0].lastIndexOf('{');
+        const extracted = this.extractMultiLineBalancedBraces(
+          lines,
+          i,
+          openBraceIdx,
+        );
+        const rawFrameTitle = extracted
+          ? extracted.content
+          : cleanLine.slice(openBraceIdx + 1).replace(/\}.*$/, '');
         const cleanFrameTitle =
           this.cleanLatexTitle(rawFrameTitle) || `Slide (line ${lineNum})`;
         entries.push({
@@ -211,32 +285,51 @@ export class LatexOutlineExtractor {
           line: lineNum,
           ...(file ? { file } : {}),
         });
+        if (extracted && extracted.endLineIdx > i) {
+          i = extracted.endLineIdx;
+          continue;
+        }
       }
 
-      // Check standard sectioning commands
-      const secMatch = sectionRegex.exec(cleanLine);
-      if (secMatch && secMatch[1]) {
+      // Check standard sectioning commands (supports multiple per line & multi-line titles)
+      sectionRegex.lastIndex = 0;
+      let secMatch: RegExpExecArray | null;
+      let maxEndLineIdx = i;
+      while ((secMatch = sectionRegex.exec(cleanLine)) !== null) {
+        if (!secMatch[1]) continue;
         const level = secMatch[1] as LatexOutlineLevel;
         const starred = Boolean(secMatch[2]);
         const shortTitle = secMatch[3]
           ? this.cleanLatexTitle(secMatch[3])
           : undefined;
         const openBraceIdx = secMatch.index + secMatch[0].lastIndexOf('{');
-        const extracted = this.extractBalancedBraces(cleanLine, openBraceIdx);
+        const extracted = this.extractMultiLineBalancedBraces(
+          lines,
+          i,
+          openBraceIdx,
+        );
         const rawTitle = extracted
           ? extracted.content
           : cleanLine.slice(openBraceIdx + 1).replace(/\}.*$/, '');
         const title = this.cleanLatexTitle(rawTitle) || level;
+        const endLineIdx = extracted ? extracted.endLineIdx : i;
+        if (endLineIdx > maxEndLineIdx) {
+          maxEndLineIdx = endLineIdx;
+        }
 
-        // Check for \label on same or immediate next line
+        // Check for \label on end line or immediate next line
         let label: string | undefined;
-        const sameLineLabel = cleanLine.match(/\\label\s*\{\s*([^}]+)\s*\}/);
+        const endCleanLine =
+          endLineIdx === i
+            ? cleanLine
+            : this.stripComment(lines[endLineIdx] ?? '');
+        const sameLineLabel = endCleanLine.match(/\\label\s*\{\s*([^}]+)\s*\}/);
         if (sameLineLabel && sameLineLabel[1]) {
           label = sameLineLabel[1].trim();
-        } else if (i + 1 < lines.length) {
-          const nextLineLabel = (lines[i + 1] ?? '').match(
-            /^\s*\\label\s*\{\s*([^}]+)\s*\}/,
-          );
+        } else if (endLineIdx + 1 < lines.length) {
+          const nextLineLabel = this.stripComment(
+            lines[endLineIdx + 1] ?? '',
+          ).match(/^\s*\\label\s*\{\s*([^}]+)\s*\}/);
           if (nextLineLabel && nextLineLabel[1]) {
             label = nextLineLabel[1].trim();
           }
@@ -251,6 +344,18 @@ export class LatexOutlineExtractor {
           ...(starred ? { starred: true } : {}),
           ...(shortTitle ? { shortTitle } : {}),
         });
+
+        if (extracted && extracted.endLineIdx === i) {
+          sectionRegex.lastIndex = Math.max(
+            sectionRegex.lastIndex,
+            extracted.endIndex,
+          );
+        } else if (extracted && extracted.endLineIdx > i) {
+          break;
+        }
+      }
+      if (maxEndLineIdx > i) {
+        i = maxEndLineIdx;
       }
     }
 

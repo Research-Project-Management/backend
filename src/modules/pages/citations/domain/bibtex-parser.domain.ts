@@ -1,6 +1,4 @@
-﻿
-
-/**
+﻿/**
  * citations/domain/bibtex-parser.domain.ts
  * BibTeX parser powered by `@citation-js/plugin-bibtex` with in-place span upserts.
  */
@@ -28,7 +26,8 @@ export class BibtexParser implements IBibtexParserPort {
 
     let rawEntries: CitationJsRawBibtexEntry[] = [];
     try {
-      const parsed = plugins.input.chainLink(rawBibtex) as unknown;
+      const stripped = BibtexParser.maskCommentsPreserveLength(rawBibtex);
+      const parsed = plugins.input.chainLink(stripped);
       if (Array.isArray(parsed)) {
         rawEntries = parsed as CitationJsRawBibtexEntry[];
       }
@@ -181,7 +180,11 @@ export class BibtexParser implements IBibtexParserPort {
     text: string,
     entries: Array<{ key: string; bibString: string }>,
     conflictPolicy: ConflictPolicy = 'overwrite',
-  ): { text: string; conflicts: string[]; renamedKeys: Record<string, string> } {
+  ): {
+    text: string;
+    conflicts: string[];
+    renamedKeys: Record<string, string>;
+  } {
     if (entries.length === 0) {
       return { text, conflicts: [], renamedKeys: {} };
     }
@@ -356,4 +359,3 @@ export class BibtexParser implements IBibtexParserPort {
 }
 
 export { BibtexParser as RegexAstBibtexParser };
-

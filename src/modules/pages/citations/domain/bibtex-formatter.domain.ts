@@ -99,12 +99,15 @@ export function toBibtexValue(
   }
 
   const normalizedStr = str.replace(
-    /([A-Za-z0-9])\s*[â€“â€”]\s*([A-Za-z0-9])/g,
+    /([A-Za-z0-9])\s*[\u2013\u2014]\s*([A-Za-z0-9])/g,
     '$1--$2',
   );
 
   if (field === 'pages' || field === 'page') {
-    const normalizedPages = normalizedStr.replace(/\s*[â€“â€”]\s*/g, '--');
+    const normalizedPages = normalizedStr.replace(
+      /\s*[\u2013\u2014]\s*/g,
+      '--',
+    );
     return escapeLatex(normalizedPages);
   }
 
@@ -129,19 +132,24 @@ export function toBibtexValue(
  * Format a single BibTeX name. Organizations / single-field names are wrapped
  * in braces ({World Health Organization}) so BibTeX treats them as a literal.
  */
-export function formatBibtexName(name: {
-  lastName?: string | null;
-  firstName?: string | null;
-  fieldMode?: number | null;
-}): string {
+export function formatBibtexName(
+  name: {
+    lastName?: string | null;
+    firstName?: string | null;
+    fieldMode?: number | null;
+  },
+  options: { escape?: boolean } = {},
+): string {
+  const shouldEscape = options.escape ?? true;
+  const fmt = (s: string) => (shouldEscape ? escapeLatex(s) : s);
   const last = (name.lastName || '').trim();
   const first = (name.firstName || '').trim();
   if (name.fieldMode === 1) {
     const literal = last || first;
-    return literal ? `{${escapeLatex(literal)}}` : '';
+    return literal ? `{${fmt(literal)}}` : '';
   }
-  if (last && first) return `${escapeLatex(last)}, ${escapeLatex(first)}`;
-  return escapeLatex(last || first);
+  if (last && first) return `${fmt(last)}, ${fmt(first)}`;
+  return fmt(last || first);
 }
 
 /**
@@ -149,7 +157,7 @@ export function formatBibtexName(name: {
  */
 export function sanitizeCitationKey(raw: string): string {
   return raw
-    .replace(/[Ä‘Ä]/g, 'd')
+    .replace(/[\u0111\u0110]/g, 'd')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^A-Za-z0-9_:.-]/g, '');

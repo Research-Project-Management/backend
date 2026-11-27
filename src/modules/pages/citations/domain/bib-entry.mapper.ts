@@ -1,11 +1,69 @@
 ﻿import { BibEntry } from './bib-entry.domain';
-import { formatBibtexName, sanitizeCitationKey } from './bibtex-formatter.domain';
+import {
+  formatBibtexName,
+  sanitizeCitationKey,
+} from './bibtex-formatter.domain';
 import { InvalidBibtexException } from './citations.errors';
 import type { StructuredCitationEntryInput } from '../types/citations.types';
 
 // ─── Structured Input Mapper ──────────────────────────────────────────────────
 
 export type { StructuredCitationEntryInput };
+
+const STANDARD_BIBTEX_TYPES = new Set([
+  'article',
+  'book',
+  'booklet',
+  'conference',
+  'inbook',
+  'incollection',
+  'inproceedings',
+  'manual',
+  'mastersthesis',
+  'misc',
+  'phdthesis',
+  'proceedings',
+  'techreport',
+  'unpublished',
+  'online',
+  'software',
+  'dataset',
+]);
+
+function normalizeBibtexEntryType(rawInput: string): string {
+  const raw = rawInput.trim().toLowerCase();
+  if (!raw) return 'article';
+  if (STANDARD_BIBTEX_TYPES.has(raw)) return raw;
+  if (raw === 'journalarticle' || raw === 'journal-article') return 'article';
+  if (raw === 'booksection' || raw === 'book-chapter' || raw === 'chapter') {
+    return 'incollection';
+  }
+  if (raw.includes('inbook')) return 'inbook';
+  if (raw.includes('incollection')) return 'incollection';
+  if (
+    raw === 'conferencepaper' ||
+    raw === 'proceedings-article' ||
+    raw.includes('conf') ||
+    raw.includes('proc')
+  ) {
+    return 'inproceedings';
+  }
+  if (raw.includes('master')) return 'mastersthesis';
+  if (raw.includes('thesis') || raw.includes('dissertation')) {
+    return 'phdthesis';
+  }
+  if (raw.includes('report')) return 'techreport';
+  if (raw.includes('book') || raw === 'monograph') return 'book';
+  if (
+    raw === 'webpage' ||
+    raw === 'website' ||
+    raw === 'preprint' ||
+    raw === 'blogpost'
+  ) {
+    return 'misc';
+  }
+  return 'misc';
+}
 
 /**
  * Converts a structured item or BibEntry payload into a domain `BibEntry`.
@@ -22,23 +80,13 @@ export function buildBibEntryFromInput(
       : 'reference');
   const cleanKey = sanitizeCitationKey(String(rawKey)) || 'reference';
 
+  const rawBib = (input.rawBibtex || input.raw || '').trim();
+  const isRawLatex = rawBib.startsWith('@');
+
   const rawType = (input.entryType || input.type || input.itemType || 'article')
     .toString()
     .toLowerCase();
-  let entryType = 'article';
-  if (rawType.includes('book') && !rawType.includes('inbook')) {
-    entryType = 'book';
-  } else if (
-    rawType.includes('conf') ||
-    rawType.includes('proc') ||
-    rawType === 'inproceedings'
-  ) {
-    entryType = 'inproceedings';
-  } else if (rawType.includes('thesis')) {
-    entryType = 'phdthesis';
-  } else if (/^[a-z]+$/.test(rawType)) {
-    entryType = rawType;
-  }
+  const entryType = normalizeBibtexEntryType(rawType);
 
   const fields: Record<string, string> = { ...(input.fields || {}) };
 
@@ -59,11 +107,14 @@ export function buildBibEntryFromInput(
         .map((c) => {
           if (c.literal) return `{${c.literal}}`;
           if (c.name || c.fullName) return (c.name || c.fullName || '').trim();
-          return formatBibtexName({
-            lastName: c.lastName,
-            firstName: c.firstName,
-            fieldMode: c.fieldMode,
-          });
+          return formatBibtexName(
+            {
+              lastName: c.lastName,
+              firstName: c.firstName,
+              fieldMode: c.fieldMode,
+            },
+            { escape: isRawLatex },
+          );
         })
         .filter(Boolean);
       if (names.length > 0) {
@@ -114,7 +165,6 @@ export function buildBibEntryFromInput(
     fields.abstract = String(abstractVal).replace(/\s+/g, ' ').trim();
   }
 
-  const rawBib = (input.rawBibtex || input.raw || '').trim();
   if (!cleanKey) {
     throw new InvalidBibtexException('Citation key cannot be empty');
   }
@@ -124,8 +174,7 @@ export function buildBibEntryFromInput(
     key: cleanKey,
     entryType,
     fields,
-    rawBibtex: rawBib.startsWith('@') ? rawBib : undefined,
-    valueFormat: rawBib.startsWith('@') ? 'latex' : 'plain',
+    rawBibtex: isRawLatex ? rawBib : undefined,
+    valueFormat: isRawLatex ? 'latex' : 'plain',
   });
 }
-

@@ -5,13 +5,7 @@
 
 import { randomUUID } from 'crypto';
 import { CitationKeyVo, AuthorListVo } from './value-objects.domain';
-import {
-  toBibtexValue,
-  formatBibtexName,
-  sanitizeCitationKey,
-} from './bibtex.domain';
-import { InvalidBibtexException } from './citations.errors';
-import type { StructuredCitationEntryInput } from '../types/citations.types';
+import { toBibtexValue } from './bibtex.domain';
 
 /**
  * How field values should be treated when serializing:
@@ -109,12 +103,17 @@ export class BibEntry {
   }
 
   private generateBibtex(): string {
-    const lines = [`@${this.entryType}{${this.key.value},`];
+    const fieldLines: string[] = [];
     for (const [k, v] of this.fields.entries()) {
       const value =
         this.valueFormat === 'plain' ? toBibtexValue(v, { field: k }) : v;
       if (!value) continue;
-      lines.push(`  ${k} = {${value}},`);
+      fieldLines.push(`  ${k} = {${value}}`);
+    }
+    const lines = [`@${this.entryType}{${this.key.value},`];
+    for (let i = 0; i < fieldLines.length; i++) {
+      const suffix = i < fieldLines.length - 1 ? ',' : '';
+      lines.push(`${fieldLines[i]}${suffix}`);
     }
     lines.push('}');
     return lines.join('\n');
@@ -157,7 +156,6 @@ export class BibEntry {
     };
   }
 }
-
 
 /**
  * citations/domain/entities/bibliography-file.entity.ts
@@ -227,7 +225,6 @@ export class BibliographyFile {
     };
   }
 }
-
 
 /**
  * citations/domain/citation-operations.ts
