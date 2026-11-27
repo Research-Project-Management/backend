@@ -17,6 +17,15 @@ export class InvalidWordException extends PagesDomainError {
   }
 }
 
+export class DictionaryLimitExceededException extends PagesDomainError {
+  constructor(limit: number) {
+    super(`Project dictionary limit (${limit} words) reached.`, {
+      code: 'DICTIONARY_LIMIT_EXCEEDED',
+      statusCode: 400,
+    });
+  }
+}
+
 export class UnsupportedLanguageException extends PagesDomainError {
   constructor(language: string, supportedLanguages?: readonly string[]) {
     const suffix = supportedLanguages?.length

@@ -1,16 +1,8 @@
-/**
- * modules/pages/export-import/adapters/zip.adapter.ts
- *
- * GoF Adapter + Strategy Pattern (Decompression Method Strategies):
- * PKZIP streaming & buffer engine implementing `IZipEnginePort` with Zip-Slip & Zip-Bomb guards.
- */
-
 import * as zlib from 'node:zlib';
 import { Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
 import { buildZipBuffer, createZipStream } from '@/modules/pages/core';
 import { ArchiveEntryVo } from '../domain/archive.domain';
-import { IZipEnginePort } from '../domain/archive.ports';
 import {
   ArchiveQuotaExceededException,
   InvalidZipArchiveException,
@@ -22,100 +14,8 @@ import {
 } from '../domain/archive.policy';
 import type { RawZipEntryInput } from '../types/archive.types';
 
-interface DecompressionContext {
-  fileName: string;
-  compressedSlice: Buffer;
-  compressedSize: number;
-  declaredUncompressedSize: number;
-  logger: Logger;
-}
-
-/**
- * GoF Strategy Pattern: Encapsulates PKZIP entry decompression algorithms (STORE=0, DEFLATE=8).
- */
-interface IZipDecompressionStrategy {
-  readonly methodCode: number;
-  decompress(ctx: DecompressionContext): Buffer;
-}
-
-class StoredZipDecompressionStrategy implements IZipDecompressionStrategy {
-  public readonly methodCode = 0;
-
-  public decompress(ctx: DecompressionContext): Buffer {
-    if (ctx.compressedSlice.length > MAX_SINGLE_FILE_BYTES) {
-      throw new ArchiveQuotaExceededException(
-        ctx.compressedSlice.length,
-        MAX_SINGLE_FILE_BYTES,
-      );
-    }
-    return Buffer.from(ctx.compressedSlice);
-  }
-}
-
-class DeflateZipDecompressionStrategy implements IZipDecompressionStrategy {
-  public readonly methodCode = 8;
-
-  public decompress(ctx: DecompressionContext): Buffer {
-    const {
-      fileName,
-      compressedSlice,
-      compressedSize,
-      declaredUncompressedSize,
-      logger,
-    } = ctx;
-
-    if (
-      compressedSize > 0 &&
-      declaredUncompressedSize > 10 * 1024 * 1024 &&
-      declaredUncompressedSize / compressedSize > 100
-    ) {
-      throw new InvalidZipArchiveException(
-        `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
-      );
-    }
-
-    try {
-      const inflated = zlib.inflateRawSync(compressedSlice, {
-        maxOutputLength: MAX_SINGLE_FILE_BYTES,
-      });
-      if (
-        compressedSize > 0 &&
-        inflated.length > 10 * 1024 * 1024 &&
-        inflated.length / compressedSize > 100
-      ) {
-        throw new InvalidZipArchiveException(
-          `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
-        );
-      }
-      return inflated;
-    } catch (inflateErr: unknown) {
-      if (inflateErr instanceof InvalidZipArchiveException) {
-        throw inflateErr;
-      }
-      const errCode = (inflateErr as { code?: string })?.code;
-      if (errCode === 'ERR_BUFFER_TOO_LARGE') {
-        throw new ArchiveQuotaExceededException(
-          MAX_SINGLE_FILE_BYTES + 1,
-          MAX_SINGLE_FILE_BYTES,
-        );
-      }
-      const inflateMsg =
-        inflateErr instanceof Error ? inflateErr.message : String(inflateErr);
-      logger.warn(`Failed to inflate entry '${fileName}': ${inflateMsg}`);
-      throw new InvalidZipArchiveException(
-        `Failed to decompress entry '${fileName}'.`,
-      );
-    }
-  }
-}
-
-const DECOMPRESSION_STRATEGIES = new Map<number, IZipDecompressionStrategy>([
-  [0, new StoredZipDecompressionStrategy()],
-  [8, new DeflateZipDecompressionStrategy()],
-]);
-
 @Injectable()
-export class ZipAdapter extends IZipEnginePort {
+export class ZipAdapter {
   private readonly logger = new Logger(ZipAdapter.name);
 
   public buildZip(entries: RawZipEntryInput[]): Buffer {
@@ -209,24 +109,15 @@ export class ZipAdapter extends IZipEnginePort {
           );
         }
 
-        const strategy = DECOMPRESSION_STRATEGIES.get(compressionMethod);
-        if (!strategy) {
-          this.logger.warn(
-            `Unsupported ZIP compression method ${compressionMethod} for '${fileName}'. Skipping.`,
-          );
-          continue;
-        }
-
-        uncompressedData = strategy.decompress({
-          fileName,
-          compressedSlice: zipBuffer.subarray(
-            dataOffset,
-            dataOffset + compressedSize,
-          ),
-          compressedSize,
+        const slice = zipBuffer.subarray(dataOffset, dataOffset + compressedSize);
+        const inflated = this.decompressSlice(
+          compressionMethod,
+          slice,
           declaredUncompressedSize,
-          logger: this.logger,
-        });
+          fileName,
+        );
+        if (inflated === null) continue;
+        uncompressedData = inflated;
       }
 
       totalUncompressedBytes += uncompressedData.length;
@@ -249,6 +140,69 @@ export class ZipAdapter extends IZipEnginePort {
     }
 
     return entries;
+  }
+
+  private decompressSlice(
+    method: number,
+    slice: Buffer,
+    declaredUncompressedSize: number,
+    fileName: string,
+  ): Buffer | null {
+    if (method === 0) {
+      if (slice.length > MAX_SINGLE_FILE_BYTES) {
+        throw new ArchiveQuotaExceededException(
+          slice.length,
+          MAX_SINGLE_FILE_BYTES,
+        );
+      }
+      return Buffer.from(slice);
+    }
+
+    if (method === 8) {
+      if (
+        slice.length > 0 &&
+        declaredUncompressedSize > 10 * 1024 * 1024 &&
+        declaredUncompressedSize / slice.length > 100
+      ) {
+        throw new InvalidZipArchiveException(
+          `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
+        );
+      }
+
+      try {
+        const inflated = zlib.inflateRawSync(slice, {
+          maxOutputLength: MAX_SINGLE_FILE_BYTES,
+        });
+        if (
+          slice.length > 0 &&
+          inflated.length > 10 * 1024 * 1024 &&
+          inflated.length / slice.length > 100
+        ) {
+          throw new InvalidZipArchiveException(
+            `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
+          );
+        }
+        return inflated;
+      } catch (err: unknown) {
+        if (err instanceof InvalidZipArchiveException) throw err;
+        if ((err as { code?: string })?.code === 'ERR_BUFFER_TOO_LARGE') {
+          throw new ArchiveQuotaExceededException(
+            MAX_SINGLE_FILE_BYTES + 1,
+            MAX_SINGLE_FILE_BYTES,
+          );
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to inflate entry '${fileName}': ${msg}`);
+        throw new InvalidZipArchiveException(
+          `Failed to decompress entry '${fileName}'.`,
+        );
+      }
+    }
+
+    this.logger.warn(
+      `Unsupported ZIP compression method ${method} for '${fileName}'. Skipping.`,
+    );
+    return null;
   }
 
   private locateEocdOffset(zipBuffer: Buffer): number {

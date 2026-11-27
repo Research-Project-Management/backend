@@ -2,13 +2,13 @@ import { Injectable, Optional } from '@nestjs/common';
 import { TemplatesService } from '@/modules/pages/templates/templates.service';
 import { TemplateNotFoundException } from '@/modules/pages/templates/domain';
 import { ArchiveEntryVo } from '../domain/archive.domain';
-import { IPageArchiveHydratorPort } from '../domain/archive.ports';
+import { PageArchiveHydratorAdapter } from '../adapters/hydrator.adapter';
 import { ImportSummaryResponseDto } from '../dto/import.dto';
 
 @Injectable()
 export class ScaffoldService {
   constructor(
-    private readonly hydrator: IPageArchiveHydratorPort,
+    private readonly hydrator: PageArchiveHydratorAdapter,
     @Optional() private readonly templatesService?: TemplatesService,
   ) {}
 

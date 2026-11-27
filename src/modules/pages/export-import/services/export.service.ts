@@ -1,14 +1,8 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
 import { ArchiveManifest } from '../domain/archive.domain';
-import {
-  IExportProfileStrategy,
-  resolveExportProfile,
-} from '../domain/archive.policy';
-import {
-  IPageArchiveAggregatorPort,
-  IZipEnginePort,
-} from '../domain/archive.ports';
+import { ExportProfile, resolveExportProfile } from '../domain/archive.policy';
+import { PageArchiveAggregatorAdapter } from '../adapters/collector.adapter';
 import { ZipAdapter } from '../adapters/zip.adapter';
 import { ExportZipQueryDto } from '../dto/export.dto';
 import type {
@@ -23,11 +17,11 @@ const DEFAULT_MAIN_TEX_FALLBACK = Buffer.from(
 
 @Injectable()
 export class ExportService {
-  private readonly zipEngine: IZipEnginePort;
+  private readonly zipEngine: ZipAdapter;
 
   constructor(
-    private readonly aggregator: IPageArchiveAggregatorPort,
-    @Optional() zipEngine?: IZipEnginePort,
+    private readonly aggregator: PageArchiveAggregatorAdapter,
+    @Optional() zipEngine?: ZipAdapter,
     @Optional() private readonly snapshotService?: SnapshotService,
   ) {
     this.zipEngine = zipEngine ?? new ZipAdapter();
@@ -52,11 +46,10 @@ export class ExportService {
     query?: ExportZipQueryDto,
   ): Promise<ExportProjectZipOutput> {
     const profile = resolveExportProfile(query);
-    const includePdf = profile.shouldIncludeCompiledPdf(query?.includePdf);
 
     const collected = await this.aggregator.collectProjectEntries(
       projectId,
-      includePdf,
+      profile.includePdf,
       profile.cleanArxiv,
       query?.pageId,
     );
@@ -69,7 +62,7 @@ export class ExportService {
     );
 
     const zipBuffer = this.zipEngine.buildZip(files);
-    const manifest = ArchiveManifest.create({
+    const manifest = new ArchiveManifest({
       projectId,
       projectName: resolvedName,
       fileCount: files.length,
@@ -101,11 +94,10 @@ export class ExportService {
     }
 
     const profile = resolveExportProfile(query);
-    const includePdf = profile.shouldIncludeCompiledPdf(query?.includePdf);
 
     const collected = await this.aggregator.collectLazyProjectEntries(
       projectId,
-      includePdf,
+      profile.includePdf,
       profile.cleanArxiv,
       query?.pageId,
     );
@@ -127,7 +119,7 @@ export class ExportService {
 
   private prepareExportPlan<T extends { path: string }>(
     files: T[],
-    profile: IExportProfileStrategy,
+    profile: ExportProfile,
     createFallbackEntry: (path: string, data: Buffer) => T,
     projectName?: string,
   ): {

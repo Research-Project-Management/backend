@@ -16,9 +16,6 @@ export interface ArchiveManifestProps {
   hasCompiledPdf?: boolean;
 }
 
-/**
- * Immutable Value Object + Static Factory Method (GoF Creational).
- */
 export class ArchiveManifest {
   public readonly projectId: string;
   public readonly projectName: string;
@@ -34,11 +31,6 @@ export class ArchiveManifest {
     this.fileCount = props.fileCount;
     this.totalSizeBytes = props.totalSizeBytes;
     this.hasCompiledPdf = props.hasCompiledPdf ?? false;
-    Object.freeze(this);
-  }
-
-  public static create(props: ArchiveManifestProps): ArchiveManifest {
-    return new ArchiveManifest(props);
   }
 
   public toJSON(): Record<string, unknown> {
@@ -63,9 +55,6 @@ export interface ImportSummaryProps {
   rootDocPath: string | null;
 }
 
-/**
- * Immutable Value Object representing hydrated archive metrics.
- */
 export class ImportSummaryVo {
   public readonly projectId: string;
   public readonly totalEntries: number;
@@ -83,19 +72,6 @@ export class ImportSummaryVo {
     this.totalFolders = props.totalFolders;
     this.rootDocId = props.rootDocId;
     this.rootDocPath = props.rootDocPath;
-    Object.freeze(this);
-  }
-
-  public static empty(projectId: string): ImportSummaryVo {
-    return new ImportSummaryVo({
-      projectId,
-      totalEntries: 0,
-      totalDocs: 0,
-      totalFiles: 0,
-      totalFolders: 0,
-      rootDocId: null,
-      rootDocPath: null,
-    });
   }
 
   public toJSON(): ImportSummaryProps {
@@ -111,79 +87,6 @@ export class ImportSummaryVo {
   }
 }
 
-/**
- * GoF Builder Pattern: Step-by-step construction of `ImportSummaryVo` + hydrated document map
- * during multi-node archive hydration.
- */
-export class ImportSummaryBuilder {
-  private totalDocs = 0;
-  private totalFiles = 0;
-  private totalFolders = 0;
-  private rootDocId: string | null = null;
-  private rootDocPath: string | null = null;
-  private readonly docContents = new Map<string, string[]>();
-
-  constructor(
-    private readonly projectId: string,
-    private readonly totalEntries: number,
-  ) {}
-
-  public recordFolder(): this {
-    this.totalFolders += 1;
-    return this;
-  }
-
-  public recordDoc(docId: string, lines: string[]): this {
-    this.totalDocs += 1;
-    this.docContents.set(docId, lines);
-    return this;
-  }
-
-  public recordFile(): this {
-    this.totalFiles += 1;
-    return this;
-  }
-
-  public withRootDoc(docId: string | null, docPath: string | null): this {
-    this.rootDocId = docId;
-    this.rootDocPath = docPath;
-    return this;
-  }
-
-  public getRootDocId(): string | null {
-    return this.rootDocId;
-  }
-
-  public getDocLines(docId: string): string[] | undefined {
-    return this.docContents.get(docId);
-  }
-
-  public getDocContentsMap(): Map<string, string[]> {
-    return this.docContents;
-  }
-
-  public build(): ImportSummaryVo {
-    return new ImportSummaryVo({
-      projectId: this.projectId,
-      totalEntries: this.totalEntries,
-      totalDocs: this.totalDocs,
-      totalFiles: this.totalFiles,
-      totalFolders: this.totalFolders,
-      rootDocId: this.rootDocId,
-      rootDocPath: this.rootDocPath,
-    });
-  }
-}
-
-export interface ArchiveEntryProps {
-  path: string;
-  data: Buffer;
-  isDirectory?: boolean;
-}
-
-/**
- * Immutable Value Object + Factory Method enforcing Zip-Slip security invariants on creation.
- */
 export class ArchiveEntryVo {
   public readonly path: string;
   public readonly data: Buffer;
@@ -195,7 +98,6 @@ export class ArchiveEntryVo {
     this.data = data;
     this.isDirectory = isDirectory;
     this.sizeBytes = data.length;
-    Object.freeze(this);
   }
 
   public static create(

@@ -16,22 +16,19 @@ import { resolveActiveProjectId } from '@/modules/pages/core/page-scope.helper';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { ArchiveEntryVo } from '../domain/archive.domain';
 import {
-  IDocumentTranspilerPort,
-  IPageArchiveHydratorPort,
-  IZipEnginePort,
-} from '../domain/archive.ports';
-import {
   ExportFormattedDocResult,
   IncludedProjectDoc,
   resolveIncludedLatexContent,
   transpileLatexDocument,
 } from '../domain/latex-export.domain';
 import {
-  LatexImportTranspiler,
   SupportedImportFormat,
   extractDocxMediaEntries,
   resolveImportFormat,
+  transpileDocxEntriesToLatex,
+  transpileMarkdownToLatex,
 } from '../domain/latex-import.domain';
+import { PageArchiveHydratorAdapter } from '../adapters/hydrator.adapter';
 import { PandocAdapter } from '../adapters/pandoc.adapter';
 import { ZipAdapter } from '../adapters/zip.adapter';
 import { ImportSummaryResponseDto } from '../dto/import.dto';
@@ -40,180 +37,25 @@ import type {
   TranspiledProjectResult,
 } from '../types/archive.types';
 
-interface ExportChainRequest {
-  rawFilename: string;
-  content: string;
-  format: string;
-  projectDocs?: IncludedProjectDoc[];
-}
-
-/**
- * GoF Chain of Responsibility for Outbound Document Export (`Pandoc` -> `In-Process Registry`).
- */
-abstract class DocumentExportHandler {
-  private nextHandler: DocumentExportHandler | null = null;
-
-  public setNext(next: DocumentExportHandler): DocumentExportHandler {
-    this.nextHandler = next;
-    return next;
-  }
-
-  public async handle(req: ExportChainRequest): Promise<ExportFormattedDocResult> {
-    const result = await this.tryExport(req);
-    if (result) return result;
-    if (this.nextHandler) return this.nextHandler.handle(req);
-    return transpileLatexDocument(req);
-  }
-
-  protected abstract tryExport(
-    req: ExportChainRequest,
-  ): Promise<ExportFormattedDocResult | null>;
-}
-
-class PandocExportHandler extends DocumentExportHandler {
-  constructor(private readonly pandoc: PandocAdapter) {
-    super();
-  }
-
-  protected async tryExport(
-    req: ExportChainRequest,
-  ): Promise<ExportFormattedDocResult | null> {
-    return this.pandoc.exportLatex({
-      rawFilename: req.rawFilename,
-      content: req.content,
-      format: req.format,
-    });
-  }
-}
-
-class InProcessExportHandler extends DocumentExportHandler {
-  protected async tryExport(
-    req: ExportChainRequest,
-  ): Promise<ExportFormattedDocResult> {
-    return transpileLatexDocument(req);
-  }
-}
-
-interface ImportChainRequest {
-  format: SupportedImportFormat;
-  buffer: Buffer;
-  fileName: string;
-}
-
-/**
- * GoF Chain of Responsibility for Inbound Document Conversion (`Pandoc` -> `In-Process Strategy Registry`).
- */
-abstract class DocumentImportHandler {
-  private nextHandler: DocumentImportHandler | null = null;
-
-  public setNext(next: DocumentImportHandler): DocumentImportHandler {
-    this.nextHandler = next;
-    return next;
-  }
-
-  public async handle(req: ImportChainRequest): Promise<TranspiledProjectResult> {
-    const result = await this.tryImport(req);
-    if (result) return result;
-    if (this.nextHandler) return this.nextHandler.handle(req);
-    throw new BadRequestException(
-      `Unable to convert "${req.fileName}" (${req.format}).`,
-    );
-  }
-
-  protected abstract tryImport(
-    req: ImportChainRequest,
-  ): Promise<TranspiledProjectResult | null>;
-}
-
-class PandocImportHandler extends DocumentImportHandler {
-  constructor(
-    private readonly pandoc: PandocAdapter,
-    private readonly zipEngine: IZipEnginePort,
-  ) {
-    super();
-  }
-
-  protected async tryImport(
-    req: ImportChainRequest,
-  ): Promise<TranspiledProjectResult | null> {
-    const latex = await this.pandoc.importToLatex({
-      buffer: req.buffer,
-      format: req.format,
-    });
-    if (!latex) return null;
-
-    const mainEntry = ArchiveEntryVo.create(
-      'main.tex',
-      Buffer.from(latex, 'utf8'),
-      false,
-    );
-
-    const mediaEntries =
-      req.format === 'docx'
-        ? this.safeExtractDocxMedia(req.buffer)
-        : [];
-
-    return {
-      mainTex: latex,
-      entries: [mainEntry, ...mediaEntries],
-      detectedTitle: req.fileName.replace(/\.[^/.]+$/, ''),
-      warnings: [],
-    };
-  }
-
-  private safeExtractDocxMedia(docxBuffer: Buffer): ArchiveEntryVo[] {
-    try {
-      return extractDocxMediaEntries(this.zipEngine.extractZip(docxBuffer));
-    } catch {
-      return [];
-    }
-  }
-}
-
-class InProcessImportHandler extends DocumentImportHandler {
-  constructor(private readonly transpiler: IDocumentTranspilerPort) {
-    super();
-  }
-
-  protected async tryImport(
-    req: ImportChainRequest,
-  ): Promise<TranspiledProjectResult> {
-    return this.transpiler.transpileByFormat(
-      req.format,
-      req.buffer,
-      req.fileName,
-    );
-  }
-}
-
 @Injectable()
 export class ConvertService {
   private readonly logger = new Logger(ConvertService.name);
+  private readonly zipEngine: ZipAdapter;
+  private readonly pandoc: PandocAdapter;
   private readonly liveCollab: LiveCollaborationPort;
-  private readonly exportChain: DocumentExportHandler;
-  private readonly importChain: DocumentImportHandler;
 
   constructor(
-    private readonly hydrator: IPageArchiveHydratorPort,
-    @Optional() transpiler?: IDocumentTranspilerPort,
-    @Optional() zipEngine?: IZipEnginePort,
+    private readonly hydrator: PageArchiveHydratorAdapter,
+    @Optional() zipEngine?: ZipAdapter,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
     @Optional() pandoc?: PandocAdapter,
   ) {
-    const resolvedZip = zipEngine ?? new ZipAdapter();
-    const resolvedTranspiler =
-      transpiler ?? new LatexImportTranspiler(resolvedZip);
-    const resolvedPandoc = pandoc ?? new PandocAdapter();
+    this.zipEngine = zipEngine ?? new ZipAdapter();
+    this.pandoc = pandoc ?? new PandocAdapter();
     this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
-
-    this.exportChain = new PandocExportHandler(resolvedPandoc);
-    this.exportChain.setNext(new InProcessExportHandler());
-
-    this.importChain = new PandocImportHandler(resolvedPandoc, resolvedZip);
-    this.importChain.setNext(new InProcessImportHandler(resolvedTranspiler));
   }
 
   public async convertDocument(
@@ -224,31 +66,63 @@ export class ConvertService {
       throw new BadRequestException('Uploaded document payload is empty.');
     }
 
-    const effectiveFormat = resolveImportFormat(input.format, fileName);
-    if (!effectiveFormat) {
+    const format = resolveImportFormat(input.format, fileName);
+    if (!format) {
       throw new BadRequestException(
         `Unsupported document format for conversion: "${fileName}". Supported formats: .docx, .md, .markdown`,
       );
     }
 
     this.logger.log(
-      `Converting ${effectiveFormat.toUpperCase()} document "${fileName}" (${fileBuffer.length} bytes) for project ${projectId}`,
+      `Converting ${format.toUpperCase()} document "${fileName}" (${fileBuffer.length} bytes) for project ${projectId}`,
     );
 
-    const transpileResult = await this.importChain.handle({
-      format: effectiveFormat,
-      buffer: fileBuffer,
+    const transpiled = await this.convertToLatexEntries(
+      format,
+      fileBuffer,
       fileName,
-    });
+    );
 
     const summary = await this.hydrator.hydrateProjectEntries(
       projectId,
-      transpileResult.entries,
+      transpiled.entries,
       userId,
       'main.tex',
       pageId,
     );
     return summary.toJSON();
+  }
+
+  private async convertToLatexEntries(
+    format: SupportedImportFormat,
+    buffer: Buffer,
+    fileName: string,
+  ): Promise<TranspiledProjectResult> {
+    const docxEntries =
+      format === 'docx' ? this.zipEngine.extractZip(buffer) : null;
+
+    const pandocLatex = await this.pandoc.importToLatex({ buffer, format });
+    if (pandocLatex) {
+      const mainEntry = ArchiveEntryVo.create(
+        'main.tex',
+        Buffer.from(pandocLatex, 'utf8'),
+        false,
+      );
+      const mediaEntries = docxEntries
+        ? extractDocxMediaEntries(docxEntries)
+        : [];
+      return {
+        mainTex: pandocLatex,
+        entries: [mainEntry, ...mediaEntries],
+        detectedTitle: fileName.replace(/\.[^/.]+$/, ''),
+        warnings: [],
+      };
+    }
+
+    if (format === 'docx') {
+      return transpileDocxEntriesToLatex(docxEntries!, fileName);
+    }
+    return transpileMarkdownToLatex(buffer.toString('utf8'), fileName);
   }
 
   public exportDocumentFormat(params: {
@@ -350,6 +224,11 @@ export class ConvertService {
       }
     }
 
-    return this.exportChain.handle({ rawFilename, content, format });
+    const pandocExport = await this.pandoc.exportLatex({
+      rawFilename,
+      content,
+      format,
+    });
+    return pandocExport ?? transpileLatexDocument({ rawFilename, content, format });
   }
 }

@@ -7,17 +7,10 @@ import { ClsiModule } from '@/modules/pages/clsi/clsi.module';
 import { TemplatesModule } from '@/modules/pages/templates/templates.module';
 import { HistoryModule } from '@/modules/pages/history/history.module';
 
-import {
-  IDocumentTranspilerPort,
-  IPageArchiveAggregatorPort,
-  IPageArchiveHydratorPort,
-  IZipEnginePort,
-} from './domain/archive.ports';
 import { ZipAdapter } from './adapters/zip.adapter';
 import { PandocAdapter } from './adapters/pandoc.adapter';
 import { PageArchiveAggregatorAdapter } from './adapters/collector.adapter';
 import { PageArchiveHydratorAdapter } from './adapters/hydrator.adapter';
-import { LatexImportTranspiler } from './domain/latex-import.domain';
 
 import { ExportService } from './services/export.service';
 import { ImportService } from './services/import.service';
@@ -39,19 +32,8 @@ import { ExportImportController } from './export-import.controller';
   providers: [
     ZipAdapter,
     PandocAdapter,
-    LatexImportTranspiler,
     PageArchiveAggregatorAdapter,
     PageArchiveHydratorAdapter,
-    { provide: IZipEnginePort, useExisting: ZipAdapter },
-    { provide: IDocumentTranspilerPort, useExisting: LatexImportTranspiler },
-    {
-      provide: IPageArchiveAggregatorPort,
-      useExisting: PageArchiveAggregatorAdapter,
-    },
-    {
-      provide: IPageArchiveHydratorPort,
-      useExisting: PageArchiveHydratorAdapter,
-    },
     ExportService,
     ImportService,
     ConvertService,
@@ -62,15 +44,10 @@ import { ExportImportController } from './export-import.controller';
     ImportService,
     ConvertService,
     ScaffoldService,
-    IZipEnginePort,
-    IDocumentTranspilerPort,
-    IPageArchiveAggregatorPort,
-    IPageArchiveHydratorPort,
     PageArchiveAggregatorAdapter,
     PageArchiveHydratorAdapter,
     ZipAdapter,
     PandocAdapter,
-    LatexImportTranspiler,
   ],
 })
 export class ExportImportModule {}

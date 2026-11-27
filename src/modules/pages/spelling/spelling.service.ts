@@ -7,9 +7,9 @@ import { Injectable } from '@nestjs/common';
 import { LRUCache } from 'lru-cache';
 import { SpellingRepository } from './spelling.repository';
 import { SpellingEngine, validateCustomWord } from './domain/spelling.engine';
-import { InvalidWordException } from './domain/spelling.errors';
-import type { CheckSpellingDto } from './dto/spelling.dto';
+import { DictionaryLimitExceededException } from './domain/spelling.errors';
 import type {
+  CheckSpellingInput,
   CustomDictionaryResult,
   SpellingReport,
 } from './types/spelling.types';
@@ -69,12 +69,11 @@ export class SpellingService {
 
   public async check(
     spaceId: string,
-    dto: CheckSpellingDto,
+    input: CheckSpellingInput,
   ): Promise<SpellingReport> {
-    const words = Array.isArray(dto.words) ? dto.words : [];
     const customWords =
-      words.length > 0 ? await this.getCachedWordSet(spaceId) : undefined;
-    return this.engine.checkWords(words, dto.language, customWords);
+      input.words.length > 0 ? await this.getCachedWordSet(spaceId) : undefined;
+    return this.engine.checkWords(input.words, input.language, customWords);
   }
 
   public async listWords(spaceId: string): Promise<CustomDictionaryResult> {
@@ -100,10 +99,7 @@ export class SpellingService {
       return normalizedWord;
     }
     if (existing.size >= MAX_WORDS_PER_SPACE) {
-      throw new InvalidWordException(
-        word,
-        `Project dictionary limit (${MAX_WORDS_PER_SPACE} words) reached`,
-      );
+      throw new DictionaryLimitExceededException(MAX_WORDS_PER_SPACE);
     }
 
     await this.repository.addWord(spaceId, normalizedWord, createdById);

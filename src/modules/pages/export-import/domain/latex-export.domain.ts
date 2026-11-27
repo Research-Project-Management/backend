@@ -1,7 +1,9 @@
 ﻿/**
- * modules/manuscripts/export-import/domain/latex.transpiler.ts
+ * modules/pages/export-import/domain/latex-export.domain.ts
+ *
  * Pure in-process domain functions for resolving LaTeX child document macros
- * (\input, \include, \subfile) and transpiling LaTeX into Markdown, HTML, and DOCX buffers.
+ * (\input, \include, \subfile) and transpiling LaTeX into Markdown, HTML, DOCX, or TeX.
+ * Zero framework or I/O dependencies.
  */
 
 import * as path from 'path';
@@ -26,6 +28,15 @@ export function unescapeXml(text: string): string {
     .replace(/&apos;/g, "'");
 }
 
+export function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 export interface IncludedProjectDoc {
   id: string;
   path: string;
@@ -40,35 +51,16 @@ export interface ExportFormattedDocResult {
   sizeBytes: number;
 }
 
-/**
- * Pure XML character escaping for HTML titles and WordprocessingML nodes.
- */
-export function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-/**
- * Pure transpilation of a LaTeX source document into Markdown.
- */
 export function convertLatexToMarkdown(
   latex: string,
   fallbackTitle?: string,
 ): string {
   let content = latex.replace(/\r\n/g, '\n');
-
-  // Strip LaTeX comments
   content = content.replace(/(^|[^\\])%.*$/gm, '$1');
 
-  // Extract title if present
   const titleMatch = content.match(/\\title\{([^}]+)\}/);
   const title = titleMatch ? titleMatch[1].trim() : fallbackTitle || '';
 
-  // Extract body between \begin{document} and \end{document} if present
   const docMatch = content.match(
     /\\begin\{document\}([\s\S]*?)\\end\{document\}/,
   );
@@ -78,7 +70,6 @@ export function convertLatexToMarkdown(
     content = content.replace(/[\s\S]*?\\begin\{document\}/, '');
   }
 
-  // Remove common commands and convert structure
   content = content
     .replace(/\\maketitle/g, title ? `# ${title}\n` : '')
     .replace(/\\tableofcontents/g, '')
@@ -112,9 +103,6 @@ export function convertLatexToMarkdown(
   return content.trim();
 }
 
-/**
- * Pure transpilation of a LaTeX source document into a standalone HTML5 document.
- */
 export function convertLatexToHtml(latex: string, title?: string): string {
   const md = convertLatexToMarkdown(latex, title);
   const docTitle = title || 'Document';
@@ -181,25 +169,18 @@ export function convertLatexToHtml(latex: string, title?: string): string {
 </html>`;
 }
 
-/**
- * Builds an in-memory PKZIP buffer from raw zip entries.
- */
 export function buildMinimalZip(entries: ZipEntry[]): Buffer {
   return buildZipBuffer(entries);
 }
 
-/**
- * Pure transpilation of a LaTeX source document into an OpenXML (.docx) binary Buffer.
- */
 export function convertLatexToDocxBuffer(
   latex: string,
   title?: string,
 ): Buffer {
   const md = convertLatexToMarkdown(latex, title);
-  const lines = md.split('\n');
-
   const pNodes: string[] = [];
-  for (const line of lines) {
+
+  for (const line of md.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) {
       pNodes.push('<w:p/>');
@@ -207,62 +188,13 @@ export function convertLatexToDocxBuffer(
     }
 
     if (trimmed.startsWith('# ')) {
-      const headingText = escapeXml(trimmed.slice(2));
-      pNodes.push(`
-        <w:p>
-          <w:pPr>
-            <w:pStyle w:val="Heading1"/>
-          </w:pPr>
-          <w:r>
-            <w:rPr>
-              <w:b/>
-              <w:sz w:val="36"/>
-            </w:rPr>
-            <w:t>${headingText}</w:t>
-          </w:r>
-        </w:p>
-      `);
+      pNodes.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="36"/></w:rPr><w:t>${escapeXml(trimmed.slice(2))}</w:t></w:r></w:p>`);
     } else if (trimmed.startsWith('## ')) {
-      const headingText = escapeXml(trimmed.slice(3));
-      pNodes.push(`
-        <w:p>
-          <w:pPr>
-            <w:pStyle w:val="Heading2"/>
-          </w:pPr>
-          <w:r>
-            <w:rPr>
-              <w:b/>
-              <w:sz w:val="28"/>
-            </w:rPr>
-            <w:t>${headingText}</w:t>
-          </w:r>
-        </w:p>
-      `);
+      pNodes.push(`<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>${escapeXml(trimmed.slice(3))}</w:t></w:r></w:p>`);
     } else if (trimmed.startsWith('### ')) {
-      const headingText = escapeXml(trimmed.slice(4));
-      pNodes.push(`
-        <w:p>
-          <w:pPr>
-            <w:pStyle w:val="Heading3"/>
-          </w:pPr>
-          <w:r>
-            <w:rPr>
-              <w:b/>
-              <w:sz w:val="24"/>
-            </w:rPr>
-            <w:t>${headingText}</w:t>
-          </w:r>
-        </w:p>
-      `);
+      pNodes.push(`<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="24"/></w:rPr><w:t>${escapeXml(trimmed.slice(4))}</w:t></w:r></w:p>`);
     } else {
-      const escapedText = escapeXml(trimmed);
-      pNodes.push(`
-        <w:p>
-          <w:r>
-            <w:t xml:space="preserve">${escapedText}</w:t>
-          </w:r>
-        </w:p>
-      `);
+      pNodes.push(`<w:p><w:r><w:t xml:space="preserve">${escapeXml(trimmed)}</w:t></w:r></w:p>`);
     }
   }
 
@@ -296,77 +228,94 @@ export function convertLatexToDocxBuffer(
   return buildMinimalZip([
     { path: '[Content_Types].xml', data: Buffer.from(contentTypesXml, 'utf8') },
     { path: '_rels/.rels', data: Buffer.from(rootRelsXml, 'utf8') },
-    {
-      path: 'word/_rels/document.xml.rels',
-      data: Buffer.from(wordRelsXml, 'utf8'),
-    },
+    { path: 'word/_rels/document.xml.rels', data: Buffer.from(wordRelsXml, 'utf8') },
     { path: 'word/document.xml', data: Buffer.from(documentXml, 'utf8') },
   ]);
 }
 
-/**
- * Pure computation that resolves `\input{...}`, `\include{...}`, and `\subfile{...}` macros
- * against project documents so multi-file manuscripts export complete content.
- */
-export function resolveIncludedLatexContent(
-  rootContent: string,
-  projectDocs: ReadonlyArray<{ id: string; path: string; lines: unknown }>,
-  visited = new Set<string>(),
-  depth = 0,
-): string {
-  if (depth > 8) return rootContent;
+const INCLUDE_MACRO_RE = /\\(input|include|subfile)\s*\{([^}]+)\}/g;
 
-  const docByPath = new Map<string, string>();
-  for (const d of projectDocs) {
+interface LazyDocNode {
+  rawLines: unknown;
+  cachedText?: string;
+}
+
+function readLazyDocText(node: LazyDocNode): string {
+  if (node.cachedText !== undefined) return node.cachedText;
+  node.cachedText = Array.isArray(node.rawLines)
+    ? (node.rawLines as string[]).join('\n')
+    : typeof node.rawLines === 'string'
+      ? node.rawLines
+      : '';
+  return node.cachedText;
+}
+
+function buildLazyDocIndex(
+  projectDocs: ReadonlyArray<{ id: string; path: string; lines: unknown }>,
+): Map<string, LazyDocNode> {
+  const index = new Map<string, LazyDocNode>();
+  for (let i = 0; i < projectDocs.length; i++) {
+    const d = projectDocs[i];
     const cleanPath = (d.path || '').replace(/^\/+/, '').trim();
     if (!cleanPath) continue;
-    const text = Array.isArray(d.lines)
-      ? (d.lines as string[]).join('\n')
-      : typeof d.lines === 'string'
-        ? d.lines
-        : '';
-    docByPath.set(cleanPath, text);
-    docByPath.set(cleanPath.toLowerCase(), text);
+
+    const lazyNode: LazyDocNode = { rawLines: d.lines };
+    index.set(cleanPath, lazyNode);
+    index.set(cleanPath.toLowerCase(), lazyNode);
+
     const withoutExt = cleanPath.replace(/\.tex$/i, '');
-    if (!docByPath.has(withoutExt)) {
-      docByPath.set(withoutExt, text);
-      docByPath.set(withoutExt.toLowerCase(), text);
+    if (!index.has(withoutExt)) {
+      index.set(withoutExt, lazyNode);
+      index.set(withoutExt.toLowerCase(), lazyNode);
     }
+
     const baseOnly = path.posix.basename(cleanPath);
-    if (!docByPath.has(baseOnly)) {
-      docByPath.set(baseOnly, text);
-      docByPath.set(baseOnly.toLowerCase(), text);
+    if (!index.has(baseOnly)) {
+      index.set(baseOnly, lazyNode);
+      index.set(baseOnly.toLowerCase(), lazyNode);
     }
+
     const baseWithoutExt = baseOnly.replace(/\.tex$/i, '');
-    if (!docByPath.has(baseWithoutExt)) {
-      docByPath.set(baseWithoutExt, text);
-      docByPath.set(baseWithoutExt.toLowerCase(), text);
+    if (!index.has(baseWithoutExt)) {
+      index.set(baseWithoutExt, lazyNode);
+      index.set(baseWithoutExt.toLowerCase(), lazyNode);
     }
   }
+  return index;
+}
 
-  return rootContent.replace(
-    /\\(input|include|subfile)\s*\{([^}]+)\}/g,
+function expandIncludesWithIndex(
+  content: string,
+  docIndex: Map<string, LazyDocNode>,
+  visited: Set<string>,
+  depth: number,
+): string {
+  if (depth > 8) return content;
+
+  return content.replace(
+    INCLUDE_MACRO_RE,
     (fullMatch, macro: string, rawTarget: string) => {
       const target = rawTarget.trim().replace(/^\/+/, '').replace(/^\.\//, '');
-      if (!target || visited.has(target.toLowerCase())) {
+      const lowerTarget = target.toLowerCase();
+      if (!target || visited.has(lowerTarget)) {
         return fullMatch;
       }
 
-      const childText =
-        docByPath.get(target) ??
-        docByPath.get(`${target}.tex`) ??
-        docByPath.get(target.toLowerCase()) ??
-        docByPath.get(`${target.toLowerCase()}.tex`);
+      const matchedNode =
+        docIndex.get(target) ??
+        docIndex.get(`${target}.tex`) ??
+        docIndex.get(lowerTarget) ??
+        docIndex.get(`${lowerTarget}.tex`);
 
-      if (childText === undefined) {
+      if (!matchedNode) {
         return fullMatch;
       }
 
       const nextVisited = new Set(visited);
-      nextVisited.add(target.toLowerCase());
-      const resolvedChild = resolveIncludedLatexContent(
-        childText,
-        projectDocs,
+      nextVisited.add(lowerTarget);
+      const resolvedChild = expandIncludesWithIndex(
+        readLazyDocText(matchedNode),
+        docIndex,
         nextVisited,
         depth + 1,
       );
@@ -379,128 +328,78 @@ export function resolveIncludedLatexContent(
 }
 
 /**
- * Strategy + Registry Pattern for Document Export Formatters (Open/Closed Principle).
- * Each concrete export format encapsulates its own conversion, file extension, and MIME type,
- * allowing new formats (e.g. `.bib`, `.rst`, `.odt`) to be registered without modifying
- * `transpileLatexDocumentForExport`.
+ * O(N + L_referenced) single-index recursive macro expansion with memoized line joining.
  */
-interface ExportFormatContext {
+export function resolveIncludedLatexContent(
+  rootContent: string,
+  projectDocs: ReadonlyArray<{ id: string; path: string; lines: unknown }>,
+  visited = new Set<string>(),
+  depth = 0,
+): string {
+  if (depth > 8 || projectDocs.length === 0) return rootContent;
+  const docIndex = buildLazyDocIndex(projectDocs);
+  return expandIncludesWithIndex(rootContent, docIndex, visited, depth);
+}
+
+interface ExportFormatterInput {
   rawFilename: string;
   baseName: string;
   content: string;
 }
 
-export interface IExportFormatStrategy {
-  readonly format: string;
-  readonly aliases?: readonly string[];
-  transpile(ctx: ExportFormatContext): ExportFormattedDocResult;
-}
+type ExportFormatter = (ctx: ExportFormatterInput) => ExportFormattedDocResult;
 
-class DocxExportStrategy implements IExportFormatStrategy {
-  public readonly format = 'docx';
+const EXPORT_TEX: ExportFormatter = (ctx) => ({
+  filename: ctx.rawFilename,
+  mimeType: 'application/x-tex',
+  content: ctx.content,
+  isBase64: false,
+  sizeBytes: Buffer.byteLength(ctx.content, 'utf8'),
+});
 
-  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
-    const docxBuffer = convertLatexToDocxBuffer(ctx.content, ctx.baseName);
-    return {
-      filename: `${ctx.baseName}.docx`,
-      mimeType:
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      content: docxBuffer.toString('base64'),
-      isBase64: true,
-      sizeBytes: docxBuffer.length,
-    };
-  }
-}
+const EXPORT_MD: ExportFormatter = (ctx) => {
+  const mdContent = convertLatexToMarkdown(ctx.content, ctx.baseName);
+  return {
+    filename: `${ctx.baseName}.md`,
+    mimeType: 'text/markdown',
+    content: mdContent,
+    isBase64: false,
+    sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
+  };
+};
 
-export class MarkdownExportStrategy implements IExportFormatStrategy {
-  public readonly format = 'md';
-  public readonly aliases = ['markdown'] as const;
+const EXPORT_HTML: ExportFormatter = (ctx) => {
+  const htmlContent = convertLatexToHtml(ctx.content, ctx.baseName);
+  return {
+    filename: `${ctx.baseName}.html`,
+    mimeType: 'text/html',
+    content: htmlContent,
+    isBase64: false,
+    sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
+  };
+};
 
-  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
-    const mdContent = convertLatexToMarkdown(ctx.content, ctx.baseName);
-    return {
-      filename: `${ctx.baseName}.md`,
-      mimeType: 'text/markdown',
-      content: mdContent,
-      isBase64: false,
-      sizeBytes: Buffer.byteLength(mdContent, 'utf8'),
-    };
-  }
-}
+const EXPORT_DOCX: ExportFormatter = (ctx) => {
+  const docxBuffer = convertLatexToDocxBuffer(ctx.content, ctx.baseName);
+  return {
+    filename: `${ctx.baseName}.docx`,
+    mimeType:
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    content: docxBuffer.toString('base64'),
+    isBase64: true,
+    sizeBytes: docxBuffer.length,
+  };
+};
 
-class HtmlExportStrategy implements IExportFormatStrategy {
-  public readonly format = 'html';
+const EXPORT_FORMATTERS: Record<string, ExportFormatter> = {
+  tex: EXPORT_TEX,
+  latex: EXPORT_TEX,
+  md: EXPORT_MD,
+  markdown: EXPORT_MD,
+  html: EXPORT_HTML,
+  docx: EXPORT_DOCX,
+};
 
-  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
-    const htmlContent = convertLatexToHtml(ctx.content, ctx.baseName);
-    return {
-      filename: `${ctx.baseName}.html`,
-      mimeType: 'text/html',
-      content: htmlContent,
-      isBase64: false,
-      sizeBytes: Buffer.byteLength(htmlContent, 'utf8'),
-    };
-  }
-}
-
-class PlainTexExportStrategy implements IExportFormatStrategy {
-  public readonly format = 'tex';
-  public readonly aliases = ['latex'] as const;
-
-  public transpile(ctx: ExportFormatContext): ExportFormattedDocResult {
-    return {
-      filename: ctx.rawFilename,
-      mimeType: 'application/x-tex',
-      content: ctx.content,
-      isBase64: false,
-      sizeBytes: Buffer.byteLength(ctx.content, 'utf8'),
-    };
-  }
-}
-
-class ExportFormatRegistry {
-  private readonly strategies = new Map<string, IExportFormatStrategy>();
-  private readonly fallbackStrategy: IExportFormatStrategy;
-
-  constructor(
-    initialStrategies: ReadonlyArray<IExportFormatStrategy> = [
-      new DocxExportStrategy(),
-      new MarkdownExportStrategy(),
-      new HtmlExportStrategy(),
-      new PlainTexExportStrategy(),
-    ],
-    fallbackStrategy: IExportFormatStrategy = new PlainTexExportStrategy(),
-  ) {
-    this.fallbackStrategy = fallbackStrategy;
-    for (const s of initialStrategies) {
-      this.register(s);
-    }
-  }
-
-  public register(strategy: IExportFormatStrategy): this {
-    this.strategies.set(strategy.format.toLowerCase(), strategy);
-    for (const alias of strategy.aliases ?? []) {
-      this.strategies.set(alias.toLowerCase(), strategy);
-    }
-    return this;
-  }
-
-  public resolve(format?: string): IExportFormatStrategy {
-    const key = (format || 'tex').trim().toLowerCase();
-    return this.strategies.get(key) ?? this.fallbackStrategy;
-  }
-
-  public getSupportedFormats(): string[] {
-    return Array.from(this.strategies.keys());
-  }
-}
-
-const defaultExportFormatRegistry = new ExportFormatRegistry();
-
-/**
- * Pure transpilation of a LaTeX document (with optional child document resolution)
- * into the requested export format (tex, md, html, docx) via `ExportFormatRegistry`.
- */
 export function transpileLatexDocument(params: {
   rawFilename: string;
   content: string;
@@ -520,12 +419,7 @@ export function transpileLatexDocument(params: {
     );
   }
 
-  const strategy = defaultExportFormatRegistry.resolve(params.format);
-  return strategy.transpile({
-    rawFilename,
-    baseName,
-    content,
-  });
+  const key = (params.format || 'tex').trim().toLowerCase();
+  const formatter = EXPORT_FORMATTERS[key] ?? EXPORT_TEX;
+  return formatter({ rawFilename, baseName, content });
 }
-
-export { ExportFormatRegistry, defaultExportFormatRegistry };

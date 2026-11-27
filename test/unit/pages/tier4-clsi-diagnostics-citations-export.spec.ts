@@ -46,10 +46,8 @@ import {
   ArchiveEntryVo,
   ImportSummaryVo,
 } from '@/modules/pages/export-import/domain/archive.domain';
-import {
-  type IPageArchiveAggregatorPort,
-  type IPageArchiveHydratorPort,
-} from '@/modules/pages/export-import/domain/archive.ports';
+import { PageArchiveAggregatorAdapter } from '@/modules/pages/export-import/adapters/collector.adapter';
+import { PageArchiveHydratorAdapter } from '@/modules/pages/export-import/adapters/hydrator.adapter';
 import { ZipAdapter } from '@/modules/pages/export-import/adapters/zip.adapter';
 import { ExportService } from '@/modules/pages/export-import/services/export.service';
 import { ImportService } from '@/modules/pages/export-import/services/import.service';
@@ -529,10 +527,10 @@ describe('Khối 2 / Tầng 4 — Compiler, SyncTeX, Diagnostics, Spelling, Cita
       const aggregator = {
         collectProjectEntries,
         collectLazyProjectEntries: jest.fn(),
-      } as unknown as IPageArchiveAggregatorPort;
+      } as unknown as PageArchiveAggregatorAdapter;
       const hydrator = {
         hydrateProjectEntries,
-      } as unknown as IPageArchiveHydratorPort;
+      } as unknown as PageArchiveHydratorAdapter;
 
       const exportSvc = new ExportService(aggregator, new ZipAdapter());
       const importSvc = new ImportService(hydrator, new ZipAdapter());

@@ -1,21 +1,33 @@
 /**
  * spelling/types/spelling.types.ts
- * Domain and service type contracts for the Pages Spelling subsystem.
+ * Single source of truth for supported languages and pure domain/service contracts.
  */
 
-export type SupportedLanguage =
-  | 'en'
-  | 'en-us'
-  | 'en-ca'
-  | 'en-gb'
-  | 'vi'
-  | 'vi-vn'
-  | 'fr'
-  | 'fr-fr'
-  | 'de'
-  | 'de-de'
-  | 'es'
-  | 'es-es';
+export const DICTIONARY_PACKAGES = {
+  en: 'dictionary-en',
+  'en-us': 'dictionary-en',
+  'en-ca': 'dictionary-en',
+  'en-gb': 'dictionary-en-gb',
+  vi: 'dictionary-vi',
+  'vi-vn': 'dictionary-vi',
+  fr: 'dictionary-fr',
+  'fr-fr': 'dictionary-fr',
+  de: 'dictionary-de',
+  'de-de': 'dictionary-de',
+  es: 'dictionary-es',
+  'es-es': 'dictionary-es',
+} as const;
+
+export type SupportedLanguage = keyof typeof DICTIONARY_PACKAGES;
+
+export const SUPPORTED_LANGUAGES = Object.keys(
+  DICTIONARY_PACKAGES,
+) as SupportedLanguage[];
+
+export interface CheckSpellingInput {
+  words: readonly string[];
+  language?: string;
+}
 
 export interface MisspelledWord {
   word: string;

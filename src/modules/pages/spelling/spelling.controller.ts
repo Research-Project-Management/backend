@@ -80,7 +80,10 @@ export class SpellingController {
     @Req() req?: AuthenticatedRequest,
   ): Promise<SpellingReportDto> {
     const spaceId = this.resolveSpaceId(spaceIdParam, resolvedSpace, req);
-    return this.spellingService.check(spaceId, body);
+    return this.spellingService.check(spaceId, {
+      words: Array.isArray(body.words) ? body.words : [],
+      language: body.language,
+    });
   }
 
   @Get('dictionary')

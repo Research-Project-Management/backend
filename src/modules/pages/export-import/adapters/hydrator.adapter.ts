@@ -1,28 +1,19 @@
-/**
- * modules/pages/export-import/adapters/hydrator.adapter.ts
- *
- * GoF Adapter + Builder (`ImportSummaryBuilder`) + Cohesive Node Hydration Strategies:
- * Hydrates extracted `ArchiveEntryVo` entries into virtual file tree (`StructureService`),
- * `DocstoreService` text lines, and `FilestoreService` binary objects.
- */
-
 import { Injectable, Optional, Inject } from '@nestjs/common';
 import * as path from 'node:path';
+import { mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   PageDomainEventBus,
 } from '@/modules/pages/core';
-import {
-  ArchiveEntryVo,
-  ImportSummaryBuilder,
-  ImportSummaryVo,
-} from '../domain/archive.domain';
-import { IPageArchiveHydratorPort } from '../domain/archive.ports';
+import { ArchiveEntryVo, ImportSummaryVo } from '../domain/archive.domain';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import type { PageNodeEntity } from '@/modules/pages/structure/domain';
+
+const HYDRATE_CONCURRENCY = 6;
+const WRAPPER_ROOT_TEX_RE = /\.(tex|ltx|rtex|latex)$/i;
 
 const MIME_MAP: Record<string, string> = {
   '.png': 'image/png',
@@ -45,16 +36,35 @@ function inferMimeType(filePath: string): string {
   return MIME_MAP[ext] || 'application/octet-stream';
 }
 
+function countPathDepth(posixPath: string): number {
+  let depth = 0;
+  for (let i = 0; i < posixPath.length; i++) {
+    if (posixPath.charCodeAt(i) === 47) depth++;
+  }
+  return depth;
+}
+
+interface PreparedFileTask {
+  entry: ArchiveEntryVo;
+  cleanRelPath: string;
+  normalizedPath: string;
+  baseName: string;
+}
+
 interface HydrationSession {
   projectId: string;
   pageId?: string;
+  prefetched: boolean;
   createdDirs: Set<string>;
   nodesByPath: Map<string, PageNodeEntity> | null;
-  builder: ImportSummaryBuilder;
+  docContents: Map<string, string[]>;
+  totalDocs: number;
+  totalFiles: number;
+  totalFolders: number;
 }
 
 @Injectable()
-export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
+export class PageArchiveHydratorAdapter {
   constructor(
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
@@ -64,10 +74,15 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
     private readonly liveCollab?: LiveCollaborationPort,
     @Optional()
     private readonly domainEventBus?: PageDomainEventBus,
-  ) {
-    super();
-  }
+  ) {}
 
+  /**
+   * 3-Phase Topological Hydration Pipeline:
+   * - Phase 1 (O(N) in-memory): Strip wrapper folder, deduplicate colliding entry paths (last-wins),
+   *   and prune ancestor directories so `mkdirp` only runs on deepest leaf directories.
+   * - Phase 2 (Bounded Concurrency = 6): Hydrate disjoint doc & binary file entries in parallel.
+   * - Phase 3: Resolve and configure root LaTeX document.
+   */
   public async hydrateProjectEntries(
     projectId: string,
     entries: ArchiveEntryVo[],
@@ -77,14 +92,15 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
   ): Promise<ImportSummaryVo> {
     await this.liveCollab?.flushDocs(projectId, []).catch(() => []);
 
-    const session = await this.openHydrationSession(
-      projectId,
-      entries.length,
-      pageId,
-    );
+    const session = await this.openHydrationSession(projectId, pageId);
     const wrapperPrefix = this.detectSingleWrapperFolder(entries);
 
-    for (const entry of entries) {
+    const requiredDirs = new Set<string>();
+    const explicitDirs = new Set<string>();
+    const uniqueTasksByPath = new Map<string, PreparedFileTask>();
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       const cleanRelPath = this.stripWrapperPrefix(entry.path, wrapperPrefix);
       if (!cleanRelPath) continue;
 
@@ -94,65 +110,101 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
       if (!baseName) continue;
 
       if (parentDir !== '/' && parentDir !== '.') {
-        await this.ensureDirectoryHierarchy(session, parentDir);
+        requiredDirs.add(parentDir);
       }
 
       if (entry.isDirectory) {
-        await this.ensureDirectoryHierarchy(session, normalizedPath);
-        session.builder.recordFolder();
+        requiredDirs.add(normalizedPath);
+        explicitDirs.add(normalizedPath);
         continue;
       }
 
-      const existingNode = await this.resolveExistingNodeByPath(
-        session,
+      uniqueTasksByPath.set(normalizedPath, {
+        entry,
+        cleanRelPath,
         normalizedPath,
-      );
-
-      if (entry.getStorageType() === 'doc') {
-        await this.hydrateDocEntry(
-          session,
-          entry,
-          normalizedPath,
-          baseName,
-          existingNode,
-        );
-      } else {
-        await this.hydrateFileEntry(
-          session,
-          entry,
-          cleanRelPath,
-          normalizedPath,
-          baseName,
-          existingNode,
-        );
-      }
+        baseName,
+      });
     }
 
-    await this.resolveAndConfigureRootDoc(
+    session.totalFolders = explicitDirs.size;
+
+    // Phase 1: Pruned Leaf-First Directory Creation (deepest dirs mark all ancestors in O(depth))
+    const sortedDirs = Array.from(requiredDirs).sort(
+      (a, b) => countPathDepth(b) - countPathDepth(a),
+    );
+    for (let i = 0; i < sortedDirs.length; i++) {
+      await this.ensureDirectoryHierarchy(session, sortedDirs[i]);
+    }
+
+    // Phase 2: Bounded Parallel File & Document Hydration
+    const fileTasks = Array.from(uniqueTasksByPath.values());
+    await mapWithConcurrency<PreparedFileTask, void>(
+      fileTasks,
+      HYDRATE_CONCURRENCY,
+      async (task) => {
+        const existingNode = await this.resolveExistingNodeByPath(
+          session,
+          task.normalizedPath,
+        );
+
+        if (task.entry.getStorageType() === 'doc') {
+          await this.hydrateDocEntry(
+            session,
+            task.entry,
+            task.normalizedPath,
+            task.baseName,
+            existingNode,
+          );
+        } else {
+          await this.hydrateFileEntry(
+            session,
+            task.entry,
+            task.cleanRelPath,
+            task.normalizedPath,
+            task.baseName,
+            existingNode,
+          );
+        }
+      },
+    );
+
+    // Phase 3: Root Document Configuration
+    const { rootDocId, rootDocPath } = await this.resolveAndConfigureRootDoc(
       session,
       preferredRootDoc,
       wrapperPrefix,
     );
 
-    return session.builder.build();
+    return new ImportSummaryVo({
+      projectId,
+      totalEntries: entries.length,
+      totalDocs: session.totalDocs,
+      totalFiles: session.totalFiles,
+      totalFolders: session.totalFolders,
+      rootDocId,
+      rootDocPath,
+    });
   }
 
   private async openHydrationSession(
     projectId: string,
-    totalEntries: number,
     pageId?: string,
   ): Promise<HydrationSession> {
     const createdDirs = new Set<string>(['/']);
     let nodesByPath: Map<string, PageNodeEntity> | null = null;
+    let prefetched = false;
 
     if (typeof this.structureService.getAllNodes === 'function') {
       try {
         const allNodes = pageId
           ? await this.structureService.getAllNodes(projectId, undefined, pageId)
           : await this.structureService.getAllNodes(projectId);
-        if (Array.isArray(allNodes) && allNodes.length > 0) {
+        if (Array.isArray(allNodes)) {
+          prefetched = true;
           nodesByPath = new Map();
-          for (const n of allNodes) {
+          for (let i = 0; i < allNodes.length; i++) {
+            const n = allNodes[i];
             if (n?.path) {
               nodesByPath.set(n.path, n);
               if (n.type === 'FOLDER') createdDirs.add(n.path);
@@ -161,15 +213,20 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
         }
       } catch {
         nodesByPath = null;
+        prefetched = false;
       }
     }
 
     return {
       projectId,
       pageId,
+      prefetched,
       createdDirs,
       nodesByPath,
-      builder: new ImportSummaryBuilder(projectId, totalEntries),
+      docContents: new Map(),
+      totalDocs: 0,
+      totalFiles: 0,
+      totalFolders: 0,
     };
   }
 
@@ -211,6 +268,9 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
     session: HydrationSession,
     normalizedPath: string,
   ): Promise<PageNodeEntity | null> {
+    if (session.prefetched && session.nodesByPath) {
+      return session.nodesByPath.get(normalizedPath) ?? null;
+    }
     if (session.nodesByPath?.has(normalizedPath)) {
       return session.nodesByPath.get(normalizedPath) ?? null;
     }
@@ -290,7 +350,8 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
         nextVersion,
         true,
       );
-      session.builder.recordDoc(existingNode.docId, lines);
+      session.docContents.set(existingNode.docId, lines);
+      session.totalDocs += 1;
       return;
     }
 
@@ -333,7 +394,8 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
       lines,
       doc.version ?? 1,
     );
-    session.builder.recordDoc(doc._id, lines);
+    session.docContents.set(doc._id, lines);
+    session.totalDocs += 1;
   }
 
   private async hydrateFileEntry(
@@ -374,10 +436,16 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
           fileHash,
         )
         .catch(async () => {
-          const recheck = await this.resolveExistingNodeByPath(
-            session,
-            normalizedPath,
-          );
+          const recheck = session.pageId
+            ? await this.structureService.getNodeByPath(
+                session.projectId,
+                normalizedPath,
+                session.pageId,
+              )
+            : await this.structureService.getNodeByPath(
+                session.projectId,
+                normalizedPath,
+              );
           if (recheck) {
             await this.structureService.updateNodeFileId(
               session.projectId,
@@ -394,7 +462,7 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
           .deleteFile?.(session.projectId, previousFileId, true)
           .catch(() => undefined);
       }
-      session.builder.recordFile();
+      session.totalFiles += 1;
       return;
     }
 
@@ -417,22 +485,25 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
           mimeType,
         );
 
-    const alreadyCreated =
-      (session.pageId
-        ? await this.structureService.getNodeByPath(
-            session.projectId,
-            normalizedPath,
-            session.pageId,
-          )
-        : await this.structureService.getNodeByPath(
-            session.projectId,
-            normalizedPath,
-          )) ??
-      (file?.id
-        ? await this.structureService
-            .getNodeById(session.projectId, file.id)
-            .catch(() => null)
-        : null);
+    // Only check for auto-created node when uploadFileFromBuffer may have written directly
+    // AND nodes were not prefetched clean.
+    const alreadyCreated = session.prefetched
+      ? null
+      : ((session.pageId
+          ? await this.structureService.getNodeByPath(
+              session.projectId,
+              normalizedPath,
+              session.pageId,
+            )
+          : await this.structureService.getNodeByPath(
+              session.projectId,
+              normalizedPath,
+            )) ??
+        (file?.id
+          ? await this.structureService
+              .getNodeById(session.projectId, file.id)
+              .catch(() => null)
+          : null));
 
     if (!alreadyCreated) {
       const createdFileNode = await (session.pageId
@@ -461,14 +532,14 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
       session.nodesByPath.set(normalizedPath, alreadyCreated);
     }
 
-    session.builder.recordFile();
+    session.totalFiles += 1;
   }
 
   private async resolveAndConfigureRootDoc(
     session: HydrationSession,
     preferredRootDoc?: string,
     wrapperPrefix?: string | null,
-  ): Promise<void> {
+  ): Promise<{ rootDocId: string | null; rootDocPath: string | null }> {
     let rootDocId: string | null = null;
     let rootDocPath: string | null = null;
 
@@ -479,16 +550,7 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
       );
       if (cleanPreferred) {
         const preferredNorm = '/' + cleanPreferred;
-        const match = session.pageId
-          ? await this.structureService.getNodeByPath(
-              session.projectId,
-              preferredNorm,
-              session.pageId,
-            )
-          : await this.structureService.getNodeByPath(
-              session.projectId,
-              preferredNorm,
-            );
+        const match = await this.resolveExistingNodeByPath(session, preferredNorm);
         if (match && match.type === 'DOC') {
           const updated = await this.structureService.setRootDoc(
             session.projectId,
@@ -501,17 +563,16 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
     }
 
     if (!rootDocId) {
-      const docContentsMap = session.builder.getDocContentsMap();
       const detected = session.pageId
         ? await this.structureService.autoDetectRootDoc(
             session.projectId,
-            docContentsMap,
+            session.docContents,
             undefined,
             session.pageId,
           )
         : await this.structureService.autoDetectRootDoc(
             session.projectId,
-            docContentsMap,
+            session.docContents,
           );
 
       if (detected) {
@@ -520,60 +581,59 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
       }
     }
 
-    session.builder.withRootDoc(rootDocId, rootDocPath);
+    if (rootDocId) {
+      const rootLines = session.docContents.get(rootDocId);
+      const titleMatch = rootLines
+        ?.join('\n')
+        .match(/\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/);
+      if (rootLines && titleMatch?.[1]) {
+        const cleanTitle = titleMatch[1]
+          .replace(/\\[a-zA-Z]+(?:\*|\b)?/g, '')
+          .replace(/[{}]/g, '')
+          .trim();
+        if (cleanTitle) {
+          const current = await this.docstoreService
+            .getDoc(session.projectId, rootDocId)
+            .catch(() => null);
+          if (current) {
+            const currentRanges =
+              current.ranges && typeof current.ranges === 'object'
+                ? (current.ranges as Record<string, unknown>)
+                : {};
+            const nextVersion = (current.version ?? 0) + 1;
+            await this.docstoreService
+              .updateDoc(session.projectId, rootDocId, {
+                lines: rootLines,
+                version: nextVersion,
+                ranges: { ...currentRanges, title: cleanTitle },
+              })
+              .catch(() => undefined);
+            await this.publishDocMutation(
+              session.projectId,
+              rootDocId,
+              rootLines,
+              nextVersion,
+            );
+          }
+        }
+      }
+    }
 
-    if (!rootDocId) return;
-    const rootLines = session.builder.getDocLines(rootDocId);
-    if (!rootLines) return;
-
-    const titleMatch = rootLines
-      .join('\n')
-      .match(/\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/);
-    if (!titleMatch?.[1]) return;
-
-    const cleanTitle = titleMatch[1]
-      .replace(/\\[a-zA-Z]+(?:\*|\b)?/g, '')
-      .replace(/[{}]/g, '')
-      .trim();
-    if (!cleanTitle) return;
-
-    const current = await this.docstoreService
-      .getDoc(session.projectId, rootDocId)
-      .catch(() => null);
-    if (!current) return;
-
-    const currentRanges =
-      current.ranges && typeof current.ranges === 'object'
-        ? (current.ranges as Record<string, unknown>)
-        : {};
-    const nextVersion = (current.version ?? 0) + 1;
-    await this.docstoreService
-      .updateDoc(session.projectId, rootDocId, {
-        lines: rootLines,
-        version: nextVersion,
-        ranges: { ...currentRanges, title: cleanTitle },
-      })
-      .catch(() => undefined);
-    await this.publishDocMutation(
-      session.projectId,
-      rootDocId,
-      rootLines,
-      nextVersion,
-    );
+    return { rootDocId, rootDocPath };
   }
 
   private detectSingleWrapperFolder(entries: ArchiveEntryVo[]): string | null {
-    const fileEntries = entries.filter((e) => !e.isDirectory);
-    if (fileEntries.length === 0) return null;
-
+    let hasFile = false;
     let commonTopFolder: string | null = null;
     let hasRootTexInsideWrapper = false;
 
-    for (const entry of entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       const clean = entry.path.replace(/^\/+/, '').replace(/\/+$/, '');
       if (!clean) continue;
-      const segments = clean.split('/');
-      const firstSegment = segments[0];
+
+      const firstSlash = clean.indexOf('/');
+      const firstSegment = firstSlash === -1 ? clean : clean.slice(0, firstSlash);
 
       if (commonTopFolder === null) {
         commonTopFolder = firstSegment;
@@ -582,16 +642,15 @@ export class PageArchiveHydratorAdapter extends IPageArchiveHydratorPort {
       }
 
       if (!entry.isDirectory) {
-        if (segments.length < 2) return null;
-        if (
-          segments.length === 2 &&
-          /\.(tex|ltx|rtex|latex)$/i.test(segments[1])
-        ) {
+        hasFile = true;
+        if (firstSlash === -1) return null;
+        const remainder = clean.slice(firstSlash + 1);
+        if (!remainder.includes('/') && WRAPPER_ROOT_TEX_RE.test(remainder)) {
           hasRootTexInsideWrapper = true;
         }
       }
     }
 
-    return hasRootTexInsideWrapper ? commonTopFolder : null;
+    return hasFile && hasRootTexInsideWrapper ? commonTopFolder : null;
   }
 }

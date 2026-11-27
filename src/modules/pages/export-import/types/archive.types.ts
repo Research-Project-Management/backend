@@ -4,7 +4,7 @@ import type { ArchiveEntryVo, ArchiveManifest } from '../domain/archive.domain';
 export interface RawZipEntryInput {
   path: string;
   data?: Buffer | string;
-  getData?: () => Promise<Buffer | string>;
+  getData?: () => Promise<Buffer | string | null>;
   date?: Date;
 }
 

@@ -9,10 +9,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import nspell from 'nspell';
 import { LRUCache } from 'lru-cache';
-import type {
-  MisspelledWord,
-  SpellingReport,
-  SupportedLanguage,
+import {
+  DICTIONARY_PACKAGES,
+  SUPPORTED_LANGUAGES,
+  type MisspelledWord,
+  type SpellingReport,
+  type SupportedLanguage,
 } from '../types/spelling.types';
 import {
   InvalidWordException,
@@ -25,21 +27,6 @@ const MAX_CACHE_ENTRIES = 20_000;
 const MAX_SUGGEST_WORD_LENGTH = 40;
 const MAX_SUGGESTIONS_PER_CHECK = 100;
 const DEFAULT_MAX_SUGGESTIONS = 5;
-
-const DICTIONARY_PACKAGES: Record<SupportedLanguage, string> = {
-  en: 'dictionary-en',
-  'en-us': 'dictionary-en',
-  'en-ca': 'dictionary-en',
-  'en-gb': 'dictionary-en-gb',
-  vi: 'dictionary-vi',
-  'vi-vn': 'dictionary-vi',
-  fr: 'dictionary-fr',
-  'fr-fr': 'dictionary-fr',
-  de: 'dictionary-de',
-  'de-de': 'dictionary-de',
-  es: 'dictionary-es',
-  'es-es': 'dictionary-es',
-};
 
 const LATEX_BUILTINS = new Set([
   'latex',
@@ -84,10 +71,6 @@ const SKIP_WORD_RULES: ReadonlyArray<(word: string) => boolean> = [
   isShortUppercaseAcronym,
   (word) => LATEX_BUILTINS.has(word.toLowerCase()),
 ];
-
-export const SUPPORTED_LANGUAGES = Object.keys(
-  DICTIONARY_PACKAGES,
-) as SupportedLanguage[];
 
 export function normalizeLanguageCode(raw?: string): SupportedLanguage {
   if (!raw || !raw.trim()) return 'en-us';
@@ -225,7 +208,7 @@ export class SpellingEngine {
   }
 
   public async checkWords(
-    words: string[],
+    words: readonly string[],
     rawLanguage?: string,
     customWords?: ReadonlySet<string>,
     maxSuggestions = DEFAULT_MAX_SUGGESTIONS,

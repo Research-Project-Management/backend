@@ -1,12 +1,3 @@
-/**
- * modules/pages/export-import/adapters/collector.adapter.ts
- *
- * GoF Adapter + Template Method + Virtual Proxy:
- * Collects virtual file tree nodes, docstore text lines, filestore binary streams,
- * and CLSI build artifacts (.bbl / output.pdf) into Virtual Proxy entries (`getData`),
- * then either streams them lazily (O(1) memory) or materializes them concurrently.
- */
-
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { mapWithConcurrency } from '@/core';
@@ -15,9 +6,11 @@ import {
   LiveCollaborationPort,
   WorkspaceCollectorService,
 } from '@/modules/pages/core';
-import { IPageArchiveAggregatorPort } from '../domain/archive.ports';
 import { resolveExportProfile } from '../domain/archive.policy';
-import type { ExportableFileEntry } from '../types/archive.types';
+import type {
+  ExportableFileEntry,
+  RawZipEntryInput,
+} from '../types/archive.types';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
@@ -26,14 +19,14 @@ import type { PageNodeEntity } from '@/modules/pages/structure/domain';
 
 const COLLECT_CONCURRENCY = 6;
 
-interface VirtualEntryProxy {
+interface DeferredEntry {
   path: string;
   nodeId?: string;
-  loadBuffer: () => Promise<Buffer>;
+  loadBuffer: () => Promise<Buffer | null>;
 }
 
 @Injectable()
-export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
+export class PageArchiveAggregatorAdapter {
   private readonly logger = new Logger(PageArchiveAggregatorAdapter.name);
 
   constructor(
@@ -46,21 +39,16 @@ export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
     private readonly liveCollab?: LiveCollaborationPort,
     @Optional()
     private readonly workspaceCollector?: WorkspaceCollectorService,
-  ) {
-    super();
-  }
+  ) {}
 
-  /**
-   * GoF Template Method: Resolves workspace nodes, flushes live Yjs state, applies polymorphic
-   * `IExportProfileStrategy` filtering, and builds Virtual Proxy thunks (`loadBuffer`).
-   */
-  private async buildVirtualEntryProxies(
+  private async resolveDeferredEntries(
     projectId: string,
     includePdf: boolean,
     cleanArxiv: boolean,
     pageId?: string,
-  ): Promise<VirtualEntryProxy[]> {
-    const profile = resolveExportProfile({ cleanArxiv });
+    prefetchedDocsById?: Map<string, string[]> | null,
+  ): Promise<DeferredEntry[]> {
+    const profile = resolveExportProfile({ cleanArxiv, includePdf });
     const nodes = pageId
       ? await this.structureService.getAllNodes(projectId, undefined, pageId)
       : await this.structureService.getAllNodes(projectId);
@@ -68,25 +56,30 @@ export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
 
     await this.flushLiveWorkspace(projectId, nonFolderNodes);
 
-    const proxies: VirtualEntryProxy[] = [];
+    const entries: DeferredEntry[] = [];
 
-    for (const node of nonFolderNodes) {
+    for (let i = 0; i < nonFolderNodes.length; i++) {
+      const node = nonFolderNodes[i];
       const relPath = node.path.replace(/^\/+/, '');
-      if (!profile.shouldIncludeEntry(relPath)) continue;
+      if (!profile.shouldInclude(relPath)) continue;
 
       if (node.type === 'DOC' && node.docId) {
         const docId = node.docId;
-        proxies.push({
+        entries.push({
           path: relPath,
           nodeId: node.id,
           loadBuffer: async () => {
+            const prefetchedLines = prefetchedDocsById?.get(docId);
+            if (prefetchedLines !== undefined) {
+              return Buffer.from(prefetchedLines.join('\n'), 'utf8');
+            }
             const doc = await this.docstoreService.getDoc(projectId, docId);
             return Buffer.from((doc.lines || []).join('\n'), 'utf8');
           },
         });
       } else if (node.type === 'FILE' && node.fileId) {
         const fileId = node.fileId;
-        proxies.push({
+        entries.push({
           path: relPath,
           nodeId: node.id,
           loadBuffer: async () => {
@@ -100,31 +93,27 @@ export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
       }
     }
 
-    if (profile.includeBblArtifact && this.clsiService) {
-      const hasBbl = proxies.some((p) => p.path.toLowerCase().endsWith('.bbl'));
+    if (profile.includeBbl && this.clsiService) {
+      const hasBbl = entries.some((e) => e.path.toLowerCase().endsWith('.bbl'));
       if (!hasBbl) {
-        const bblProxy = await this.resolveBblArtifactProxy(
-          projectId,
-          nodes,
-          pageId,
-        );
-        if (bblProxy) proxies.push(bblProxy);
+        entries.push(this.createDeferredBblEntry(projectId, nodes, pageId));
       }
     }
 
-    if (profile.shouldIncludeCompiledPdf(includePdf) && this.clsiService) {
-      const pdfBuffer = await this.clsiService
-        .readAuxFileBuffer(projectId, 'output.pdf', pageId)
-        .catch(() => null);
-      if (pdfBuffer && pdfBuffer.length > 0) {
-        proxies.push({
-          path: 'output.pdf',
-          loadBuffer: async () => pdfBuffer,
-        });
-      }
+    if (profile.includePdf && this.clsiService) {
+      const clsi = this.clsiService;
+      entries.push({
+        path: 'output.pdf',
+        loadBuffer: async () => {
+          const buf = await clsi
+            .readAuxFileBuffer(projectId, 'output.pdf', pageId)
+            .catch(() => null);
+          return buf && buf.length > 0 ? buf : null;
+        },
+      });
     }
 
-    return proxies;
+    return entries;
   }
 
   public async collectLazyProjectEntries(
@@ -132,16 +121,17 @@ export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
     includePdf = false,
     cleanArxiv = false,
     pageId?: string,
-  ): Promise<ExportableFileEntry[]> {
-    const proxies = await this.buildVirtualEntryProxies(
+  ): Promise<RawZipEntryInput[]> {
+    const deferred = await this.resolveDeferredEntries(
       projectId,
       includePdf,
       cleanArxiv,
       pageId,
+      null,
     );
-    return proxies.map((proxy) => ({
-      path: proxy.path,
-      getData: proxy.loadBuffer,
+    return deferred.map((item) => ({
+      path: item.path,
+      getData: item.loadBuffer,
     }));
   }
 
@@ -151,30 +141,58 @@ export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
     cleanArxiv = false,
     pageId?: string,
   ): Promise<ExportableFileEntry[]> {
-    const proxies = await this.buildVirtualEntryProxies(
+    const prefetchedDocsById = await this.batchPrefetchDocs(projectId, pageId);
+    const deferred = await this.resolveDeferredEntries(
       projectId,
       includePdf,
       cleanArxiv,
       pageId,
+      prefetchedDocsById,
     );
 
     const materialized = await mapWithConcurrency<
-      VirtualEntryProxy,
+      DeferredEntry,
       ExportableFileEntry | null
-    >(proxies, COLLECT_CONCURRENCY, async (proxy) => {
+    >(deferred, COLLECT_CONCURRENCY, async (item) => {
       try {
-        const data = await proxy.loadBuffer();
-        return { path: proxy.path, data };
+        const data = await item.loadBuffer();
+        if (data === null) return null;
+        return { path: item.path, data };
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Failed to materialize entry ${proxy.nodeId ?? ''} (${proxy.path}): ${errMsg}`,
+          `Failed to collect entry ${item.nodeId ?? ''} (${item.path}): ${errMsg}`,
         );
         return null;
       }
     });
 
-    return materialized.filter((entry): entry is ExportableFileEntry => entry !== null);
+    return materialized.filter((e): e is ExportableFileEntry => e !== null);
+  }
+
+  /**
+   * Batch O(1)-query prefetch of all project documents to eliminate N+1 `getDoc` SQL queries.
+   */
+  private async batchPrefetchDocs(
+    projectId: string,
+    pageId?: string,
+  ): Promise<Map<string, string[]> | null> {
+    if (typeof this.docstoreService.getAllDocs !== 'function') {
+      return null;
+    }
+    try {
+      const allDocs = await this.docstoreService.getAllDocs(projectId, pageId);
+      if (!Array.isArray(allDocs) || allDocs.length === 0) return null;
+      const map = new Map<string, string[]>();
+      for (let i = 0; i < allDocs.length; i++) {
+        const doc = allDocs[i];
+        const id = doc._id || doc.id;
+        if (id) map.set(id, doc.lines || []);
+      }
+      return map;
+    } catch {
+      return null;
+    }
   }
 
   private async flushLiveWorkspace(
@@ -195,43 +213,34 @@ export class PageArchiveAggregatorAdapter extends IPageArchiveAggregatorPort {
     }
   }
 
-  private async resolveBblArtifactProxy(
+  private createDeferredBblEntry(
     projectId: string,
     nodes: PageNodeEntity[],
     pageId?: string,
-  ): Promise<VirtualEntryProxy | null> {
-    if (!this.clsiService) return null;
-    try {
-      const rootNode = nodes.find((n) => n.isRootDoc);
-      const rootRelPath = rootNode ? rootNode.path.replace(/^\/+/, '') : null;
-      const targetBblPath = rootRelPath
-        ? rootRelPath.replace(/\.[^/.]+$/, '') + '.bbl'
-        : 'output.bbl';
+  ): DeferredEntry {
+    const rootNode = nodes.find((n) => n.isRootDoc);
+    const rootRelPath = rootNode ? rootNode.path.replace(/^\/+/, '') : null;
+    const targetBblPath = rootRelPath
+      ? rootRelPath.replace(/\.[^/.]+$/, '') + '.bbl'
+      : 'output.bbl';
+    const clsi = this.clsiService;
 
-      const bblBuffer =
-        (await this.clsiService.readAuxFileBuffer(
-          projectId,
-          targetBblPath,
-          pageId,
-        )) ||
-        (targetBblPath !== 'output.bbl'
-          ? await this.clsiService.readAuxFileBuffer(
-              projectId,
-              'output.bbl',
-              pageId,
-            )
-          : null);
-
-      if (bblBuffer && bblBuffer.length > 0) {
-        return {
-          path: targetBblPath,
-          loadBuffer: async () => bblBuffer,
-        };
-      }
-    } catch {
-      // No compiled .bbl artifact available
-    }
-    return null;
+    return {
+      path: targetBblPath,
+      loadBuffer: async () => {
+        if (!clsi) return null;
+        try {
+          const bblBuffer =
+            (await clsi.readAuxFileBuffer(projectId, targetBblPath, pageId)) ||
+            (targetBblPath !== 'output.bbl'
+              ? await clsi.readAuxFileBuffer(projectId, 'output.bbl', pageId)
+              : null);
+          return bblBuffer && bblBuffer.length > 0 ? bblBuffer : null;
+        } catch {
+          return null;
+        }
+      },
+    };
   }
 
   private async streamToBuffer(stream: Readable): Promise<Buffer> {

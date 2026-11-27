@@ -21,88 +21,77 @@ export const ARXIV_ALLOWED_EXTENSIONS = new Set([
   'eps', 'ps', 'svg', 'csv', 'dat', 'txt',
 ]);
 
+const ARXIV_FORBIDDEN_AUX_RE = /\.(aux|log|out|synctex\.gz|toc|lof|lot|fls|fdb_latexmk)$/i;
+const UNSAFE_DRIVE_RE = /^[a-zA-Z]:/;
+const UNSAFE_SYS_ROOT_RE = /^\/+(etc|var|usr|bin|sbin|proc|sys|dev|root|home|boot|lib)\b/i;
+const PRIVATE_172_HOST_RE = /^172\.(1[6-9]|2\d|3[01])\./;
+const UTF8_FATAL_DECODER = new TextDecoder('utf-8', { fatal: true });
+
 export function isArxivAllowed(relPath: string): boolean {
   const clean = relPath.trim().toLowerCase();
-  const base = clean.split('/').pop() || '';
-  if (base.startsWith('.') || base.startsWith('__macosx')) return false;
-  if (/\.(aux|log|out|synctex\.gz|toc|lof|lot|fls|fdb_latexmk)$/i.test(base)) {
+  const slashIdx = clean.lastIndexOf('/');
+  const base = slashIdx === -1 ? clean : clean.slice(slashIdx + 1);
+  if (!base || base.charCodeAt(0) === 46 || base.startsWith('__macosx')) {
     return false;
   }
-  const ext = base.split('.').pop() || '';
-  return ARXIV_ALLOWED_EXTENSIONS.has(ext);
+  if (ARXIV_FORBIDDEN_AUX_RE.test(base)) {
+    return false;
+  }
+  const dotIdx = base.lastIndexOf('.');
+  if (dotIdx === -1) return false;
+  return ARXIV_ALLOWED_EXTENSIONS.has(base.slice(dotIdx + 1));
 }
 
-/**
- * GoF Strategy Pattern: Polymorphic Export Profile (`StandardExportProfile` vs `ArxivExportProfile`).
- * Eliminates `if (cleanArxiv)` branching across services and collectors.
- */
-export interface IExportProfileStrategy {
-  readonly mode: 'standard' | 'arxiv';
+export interface ExportProfile {
   readonly cleanArxiv: boolean;
-  readonly includeBblArtifact: boolean;
-  shouldIncludeEntry(relPath: string): boolean;
-  shouldIncludeCompiledPdf(requested?: boolean): boolean;
+  readonly includeBbl: boolean;
+  readonly includePdf: boolean;
+  shouldInclude(relPath: string): boolean;
   formatArchiveName(projectName?: string): string;
 }
 
-export class StandardExportProfile implements IExportProfileStrategy {
-  public readonly mode = 'standard' as const;
-  public readonly cleanArxiv = false;
-  public readonly includeBblArtifact = false;
-
-  public shouldIncludeEntry(relPath: string): boolean {
-    return Boolean(relPath);
-  }
-
-  public shouldIncludeCompiledPdf(requested = false): boolean {
-    return requested;
-  }
-
-  public formatArchiveName(projectName?: string): string {
-    return projectName || 'manuscript';
-  }
-}
-
-export class ArxivExportProfile implements IExportProfileStrategy {
-  public readonly mode = 'arxiv' as const;
-  public readonly cleanArxiv = true;
-  public readonly includeBblArtifact = true;
-
-  public shouldIncludeEntry(relPath: string): boolean {
-    return Boolean(relPath) && isArxivAllowed(relPath);
-  }
-
-  public shouldIncludeCompiledPdf(): boolean {
-    return false;
-  }
-
-  public formatArchiveName(projectName?: string): string {
-    const baseName = projectName || 'manuscript';
-    return baseName.startsWith('arxiv-') ? baseName : `arxiv-${baseName}`;
-  }
-}
-
-const STANDARD_EXPORT_PROFILE = new StandardExportProfile();
-const ARXIV_EXPORT_PROFILE = new ArxivExportProfile();
-
 export function resolveExportProfile(options?: {
   cleanArxiv?: boolean;
+  includePdf?: boolean;
   mode?: string;
-}): IExportProfileStrategy {
-  const isArxiv =
+}): ExportProfile {
+  const cleanArxiv =
     Boolean(options?.cleanArxiv) || options?.mode?.toLowerCase() === 'arxiv';
-  return isArxiv ? ARXIV_EXPORT_PROFILE : STANDARD_EXPORT_PROFILE;
+
+  if (cleanArxiv) {
+    return {
+      cleanArxiv: true,
+      includeBbl: true,
+      includePdf: false,
+      shouldInclude: (relPath) => Boolean(relPath) && isArxivAllowed(relPath),
+      formatArchiveName: (projectName) => {
+        const base = projectName || 'manuscript';
+        return base.startsWith('arxiv-') ? base : `arxiv-${base}`;
+      },
+    };
+  }
+
+  return {
+    cleanArxiv: false,
+    includeBbl: false,
+    includePdf: Boolean(options?.includePdf),
+    shouldInclude: (relPath) => Boolean(relPath),
+    formatArchiveName: (projectName) => projectName || 'manuscript',
+  };
 }
 
 export function isUnsafeArchivePath(normalizedPath: string): boolean {
+  if (
+    UNSAFE_DRIVE_RE.test(normalizedPath) ||
+    UNSAFE_SYS_ROOT_RE.test(normalizedPath)
+  ) {
+    return true;
+  }
   const segments = normalizedPath.split('/');
-  return (
-    segments.includes('..') ||
-    /^[a-zA-Z]:/.test(normalizedPath) ||
-    /^\/+(etc|var|usr|bin|sbin|proc|sys|dev|root|home|boot|lib)\b/i.test(
-      normalizedPath,
-    )
-  );
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i] === '..') return true;
+  }
+  return false;
 }
 
 export function isIgnoredSystemArtifactPath(entryPath: string): boolean {
@@ -146,88 +135,41 @@ function isUtf8Buffer(buffer: Buffer): boolean {
     if (buffer[i] === 0) return false;
   }
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(
-      buffer.subarray(0, sampleSize),
-    );
+    UTF8_FATAL_DECODER.decode(buffer.subarray(0, sampleSize));
     return true;
   } catch {
     return false;
   }
 }
 
-/**
- * GoF Chain of Responsibility Pattern: Sequential archive safety & quota validators.
- */
-export abstract class ArchiveValidationHandler {
-  private nextHandler: ArchiveValidationHandler | null = null;
-
-  public setNext(handler: ArchiveValidationHandler): ArchiveValidationHandler {
-    this.nextHandler = handler;
-    return handler;
-  }
-
-  public validate(entries: ArchiveEntryVo[], maxFiles: number): void {
-    this.check(entries, maxFiles);
-    this.nextHandler?.validate(entries, maxFiles);
-  }
-
-  protected abstract check(entries: ArchiveEntryVo[], maxFiles: number): void;
-}
-
-class NonEmptyArchiveValidator extends ArchiveValidationHandler {
-  protected check(entries: ArchiveEntryVo[]): void {
-    if (entries.length === 0) {
-      throw new InvalidZipArchiveException(
-        'Provided ZIP archive contains no usable file entries.',
-      );
-    }
-  }
-}
-
-class EntryCountQuotaValidator extends ArchiveValidationHandler {
-  protected check(entries: ArchiveEntryVo[], maxFiles: number): void {
-    if (entries.length > maxFiles) {
-      throw new ArchiveFileLimitExceededException(maxFiles);
-    }
-  }
-}
-
-class UncompressedSizeQuotaValidator extends ArchiveValidationHandler {
-  protected check(entries: ArchiveEntryVo[]): void {
-    let totalBytes = 0;
-    for (const entry of entries) {
-      if (entry.sizeBytes > MAX_SINGLE_FILE_BYTES) {
-        throw new ArchiveSizeExceededException(
-          entry.sizeBytes,
-          MAX_SINGLE_FILE_BYTES,
-        );
-      }
-      totalBytes += entry.sizeBytes;
-      if (totalBytes > MAX_UNCOMPRESSED_PROJECT_BYTES) {
-        throw new ArchiveSizeExceededException(
-          totalBytes,
-          MAX_UNCOMPRESSED_PROJECT_BYTES,
-        );
-      }
-    }
-  }
-}
-
-function buildArchiveValidationChain(): ArchiveValidationHandler {
-  const head = new NonEmptyArchiveValidator();
-  head
-    .setNext(new EntryCountQuotaValidator())
-    .setNext(new UncompressedSizeQuotaValidator());
-  return head;
-}
-
-const DEFAULT_ARCHIVE_VALIDATOR = buildArchiveValidationChain();
-
 export function validateExtractedArchiveEntries(
   entries: ArchiveEntryVo[],
   maxFiles = 2000,
 ): ArchiveEntryVo[] {
-  DEFAULT_ARCHIVE_VALIDATOR.validate(entries, maxFiles);
+  if (entries.length === 0) {
+    throw new InvalidZipArchiveException(
+      'Provided ZIP archive contains no usable file entries.',
+    );
+  }
+  if (entries.length > maxFiles) {
+    throw new ArchiveFileLimitExceededException(maxFiles);
+  }
+
+  let totalBytes = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const size = entries[i].sizeBytes;
+    if (size > MAX_SINGLE_FILE_BYTES) {
+      throw new ArchiveSizeExceededException(size, MAX_SINGLE_FILE_BYTES);
+    }
+    totalBytes += size;
+    if (totalBytes > MAX_UNCOMPRESSED_PROJECT_BYTES) {
+      throw new ArchiveSizeExceededException(
+        totalBytes,
+        MAX_UNCOMPRESSED_PROJECT_BYTES,
+      );
+    }
+  }
+
   return entries;
 }
 
@@ -251,12 +193,13 @@ export function isBlockedSsrfUrl(rawUrl: string): {
   const isPrivate =
     host === 'localhost' ||
     host === '::1' ||
+    host === '[::1]' ||
     host === '0.0.0.0' ||
     host.startsWith('127.') ||
     host.startsWith('10.') ||
     host.startsWith('192.168.') ||
     host.startsWith('169.254.') ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+    PRIVATE_172_HOST_RE.test(host);
   if (isPrivate) {
     return {
       parsed: null,

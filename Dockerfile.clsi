@@ -18,7 +18,7 @@ RUN pnpm install
 FROM base AS clsi-deps
 WORKDIR /app
 COPY package.json ./package.root.json
-RUN node -e 'const fs=require("fs"),r=require("./package.root.json"),keep=["@nestjs/common","@nestjs/config","@nestjs/core","@nestjs/platform-fastify","@nestjs/swagger","@fastify/swagger","@fastify/swagger-ui","fastify","class-validator","class-transformer","reflect-metadata","rxjs"],deps={};for(const k of keep){if(!r.dependencies?.[k])throw new Error("Missing CLSI dep: "+k);deps[k]=r.dependencies[k];}fs.writeFileSync("package.json",JSON.stringify({name:"flux-clsi-runtime",version:r.version||"0.0.1",private:true,dependencies:deps,pnpm:r.pnpm?.overrides?{overrides:r.pnpm.overrides}:undefined},null,2)+"\n");fs.unlinkSync("package.root.json");' && \
+RUN node -e 'const fs=require("fs"),r=require("./package.root.json"),keep=["@nestjs/common","@nestjs/config","@nestjs/core","@nestjs/platform-fastify","@nestjs/swagger","@fastify/swagger","@fastify/swagger-ui","fastify","class-validator","class-transformer","reflect-metadata","rxjs","fflate"],deps={};for(const k of keep){if(!r.dependencies?.[k])throw new Error("Missing CLSI dep: "+k);deps[k]=r.dependencies[k];}fs.writeFileSync("package.json",JSON.stringify({name:"flux-clsi-runtime",version:r.version||"0.0.1",private:true,dependencies:deps,pnpm:r.pnpm?.overrides?{overrides:r.pnpm.overrides}:undefined},null,2)+"\n");fs.unlinkSync("package.root.json");' && \
     pnpm install --prod --ignore-scripts --no-frozen-lockfile && \
     rm -rf /root/.local/share/pnpm/store /tmp/*
 

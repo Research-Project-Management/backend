@@ -1,34 +1,47 @@
 /**
  * modules/pages/export-import/domain/latex-import.domain.ts
  *
- * GoF Strategy + Registry + Template Method for converting Word (.docx) and Markdown (.md / .markdown)
- * documents into compilable LaTeX project entries without external CLI dependencies.
+ * Pure in-process domain functions converting Markdown (.md / .markdown) and
+ * extracted Word OpenXML (.docx) entries into compilable LaTeX project entries.
+ * Zero framework (`@nestjs/*`) or adapter imports.
  */
 
-import {
-  Injectable,
-  Optional,
-  BadRequestException,
-} from '@nestjs/common';
 import * as path from 'node:path';
 import { ArchiveEntryVo } from './archive.domain';
-import { IDocumentTranspilerPort, IZipEnginePort } from './archive.ports';
+import { InvalidZipArchiveException } from './archive.errors';
 import type { TranspiledProjectResult } from '../types/archive.types';
 import {
   escapeLatex,
   sanitizeLatexUrl,
   unescapeXml,
 } from './latex-export.domain';
-import { ZipAdapter } from '../adapters/zip.adapter';
 
 export { escapeLatex, sanitizeLatexUrl, unescapeXml };
+export type { TranspiledProjectResult };
 
 export type SupportedImportFormat = 'docx' | 'md';
 
-/**
- * GoF Template Method helper: Shared LaTeX article document envelope.
- */
-export function renderLatexArticleEnvelope(params: {
+export function resolveImportFormat(
+  explicitFormat?: string,
+  fileName?: string,
+): SupportedImportFormat | null {
+  const raw = explicitFormat || (fileName ? path.extname(fileName) : '');
+  const clean = raw.trim().replace(/^\./, '').toLowerCase();
+  if (clean === 'docx' || clean === 'word') return 'docx';
+  if (clean === 'md' || clean === 'markdown') return 'md';
+  return null;
+}
+
+export function extractDocxMediaEntries(entries: ArchiveEntryVo[]): ArchiveEntryVo[] {
+  return entries
+    .filter((e) => e.path.startsWith('word/media/') && !e.isDirectory)
+    .map((img) => {
+      const imgFileName = img.path.replace(/^word\/media\//, '');
+      return ArchiveEntryVo.create(`media/${imgFileName}`, img.data, false);
+    });
+}
+
+function renderLatexArticleEnvelope(params: {
   title: string;
   author?: string;
   date?: string;
@@ -67,545 +80,417 @@ ${abstractBlock}${bodyLines.join('\n')}
 `;
 }
 
-/**
- * Extracts embedded `word/media/*` binary image assets from a `.docx` archive into `media/*` entries.
- */
-export function extractDocxMediaEntries(entries: ArchiveEntryVo[]): ArchiveEntryVo[] {
-  return entries
-    .filter((e) => e.path.startsWith('word/media/') && !e.isDirectory)
-    .map((img) => {
-      const imgFileName = img.path.replace(/^word\/media\//, '');
-      return ArchiveEntryVo.create(`media/${imgFileName}`, img.data, false);
-    });
+const UNSHIELD_TOKEN_RE = /@@FLUXTOK(\d+)@@/g;
+
+function transpileInlineMarkdown(text: string): string {
+  const shieldedTokens: string[] = [];
+  const shield = (latexFragment: string): string => {
+    const idx = shieldedTokens.length;
+    shieldedTokens.push(latexFragment);
+    return `@@FLUXTOK${idx}@@`;
+  };
+
+  let out = text;
+  out = out.replace(/`([^`]+)`/g, (_, code: string) =>
+    shield(`\\texttt{${escapeLatex(code)}}`),
+  );
+  out = out.replace(/\$([^$]+)\$/g, (_, math: string) => shield(`$${math}$`));
+  out = out.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)/g,
+    (_, alt: string, url: string) =>
+      shield(
+        `\\begin{figure}[htbp]\\centering\\includegraphics[width=0.8\\textwidth]{${sanitizeLatexUrl(url)}}\\caption{${escapeLatex(alt)}}\\end{figure}`,
+      ),
+  );
+  out = out.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (_, linkText: string, url: string) =>
+      shield(`\\href{${sanitizeLatexUrl(url)}}{${escapeLatex(linkText)}}`),
+  );
+  out = out.replace(/(\*\*\*|___)(.+?)\1/g, (_, __, body: string) =>
+    shield(`\\textbf{\\textit{${escapeLatex(body)}}}`),
+  );
+  out = out.replace(/(\*\*|__)(.+?)\1/g, (_, __, body: string) =>
+    shield(`\\textbf{${escapeLatex(body)}}`),
+  );
+  out = out.replace(/(\*|_)(.+?)\1/g, (_, __, body: string) =>
+    shield(`\\textit{${escapeLatex(body)}}`),
+  );
+
+  out = escapeLatex(out);
+  if (shieldedTokens.length === 0) return out;
+  return out.replace(
+    UNSHIELD_TOKEN_RE,
+    (_, rawIdx: string) => shieldedTokens[Number(rawIdx)] ?? '',
+  );
 }
 
-/**
- * GoF Strategy interface for inbound document format transpilers.
- */
-export interface IDocumentImportStrategy {
-  readonly format: SupportedImportFormat;
-  readonly aliases: readonly string[];
-  transpile(buffer: Buffer, fileName?: string): Promise<TranspiledProjectResult>;
-}
+export function transpileMarkdownToLatex(
+  content: string,
+  fileName?: string,
+): TranspiledProjectResult {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
 
-class MarkdownImportStrategy implements IDocumentImportStrategy {
-  public readonly format = 'md' as const;
-  public readonly aliases = ['markdown'] as const;
+  let title = fileName
+    ? fileName.replace(/\.[^/.]+$/, '')
+    : 'Untitled Document';
+  let author = 'Author';
+  let date = '\\today';
+  let abstractText = '';
+  let startLine = 0;
 
-  public async transpile(
-    buffer: Buffer,
-    fileName?: string,
-  ): Promise<TranspiledProjectResult> {
-    return this.transpileText(buffer.toString('utf8'), fileName);
-  }
-
-  public async transpileText(
-    content: string,
-    fileName?: string,
-  ): Promise<TranspiledProjectResult> {
-    const warnings: string[] = [];
-    const lines = content.replace(/\r\n/g, '\n').split('\n');
-
-    let title = fileName
-      ? fileName.replace(/\.[^/.]+$/, '')
-      : 'Untitled Document';
-    let author = 'Author';
-    let date = '\\today';
-    let abstractText = '';
-    let startLine = 0;
-
-    if (lines[0]?.trim() === '---') {
-      let fmEnd = -1;
-      for (let i = 1; i < lines.length; i++) {
-        if (lines[i].trim() === '---') {
-          fmEnd = i;
-          break;
-        }
-      }
-      if (fmEnd !== -1) {
-        for (let i = 1; i < fmEnd; i++) {
-          const colonIdx = lines[i].indexOf(':');
-          if (colonIdx !== -1) {
-            const key = lines[i].slice(0, colonIdx).trim().toLowerCase();
-            const val = lines[i]
-              .slice(colonIdx + 1)
-              .trim()
-              .replace(/^["']|["']$/g, '');
-            if (key === 'title') title = val;
-            if (key === 'author') author = val;
-            if (key === 'date') date = val;
-            if (key === 'abstract') abstractText = val;
-          }
-        }
-        startLine = fmEnd + 1;
+  if (lines[0]?.trim() === '---') {
+    let fmEnd = -1;
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim() === '---') {
+        fmEnd = i;
+        break;
       }
     }
-
-    const latexBody: string[] = [];
-    let inCodeBlock = false;
-    let inList: 'itemize' | 'enumerate' | null = null;
-    let inQuote = false;
-
-    for (let i = startLine; i < lines.length; i++) {
-      const line = lines[i];
-
-      if (line.trim().startsWith('```')) {
-        if (inCodeBlock) {
-          latexBody.push('\\end{verbatim}\n');
-          inCodeBlock = false;
-        } else {
-          if (inList) {
-            latexBody.push(`\\end{${inList}}\n`);
-            inList = null;
-          }
-          latexBody.push('\\begin{verbatim}');
-          inCodeBlock = true;
+    if (fmEnd !== -1) {
+      for (let i = 1; i < fmEnd; i++) {
+        const colonIdx = lines[i].indexOf(':');
+        if (colonIdx !== -1) {
+          const key = lines[i].slice(0, colonIdx).trim().toLowerCase();
+          const val = lines[i]
+            .slice(colonIdx + 1)
+            .trim()
+            .replace(/^["']|["']$/g, '');
+          if (key === 'title') title = val;
+          if (key === 'author') author = val;
+          if (key === 'date') date = val;
+          if (key === 'abstract') abstractText = val;
         }
-        continue;
       }
+      startLine = fmEnd + 1;
+    }
+  }
+
+  const latexBody: string[] = [];
+  let inCodeBlock = false;
+  let inList: 'itemize' | 'enumerate' | null = null;
+  let inQuote = false;
+
+  for (let i = startLine; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trim().startsWith('```')) {
       if (inCodeBlock) {
-        latexBody.push(line);
-        continue;
-      }
-
-      if (
-        line.trim().startsWith('$$') &&
-        line.trim().endsWith('$$') &&
-        line.trim().length > 4
-      ) {
-        const math = line.trim().slice(2, -2).trim();
-        latexBody.push(`\\begin{equation}\n  ${math}\n\\end{equation}\n`);
-        continue;
-      }
-
-      const unorderedMatch = line.match(/^(\s*)[-*+]\s+(.*)$/);
-      if (unorderedMatch) {
-        if (inList !== 'itemize') {
-          if (inList) latexBody.push(`\\end{${inList}}`);
-          latexBody.push('\\begin{itemize}');
-          inList = 'itemize';
+        latexBody.push('\\end{verbatim}\n');
+        inCodeBlock = false;
+      } else {
+        if (inList) {
+          latexBody.push(`\\end{${inList}}\n`);
+          inList = null;
         }
-        latexBody.push(
-          `  \\item ${this.transpileInlineMarkdown(unorderedMatch[2])}`,
-        );
-        continue;
+        latexBody.push('\\begin{verbatim}');
+        inCodeBlock = true;
       }
-
-      const orderedMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
-      if (orderedMatch) {
-        if (inList !== 'enumerate') {
-          if (inList) latexBody.push(`\\end{${inList}}`);
-          latexBody.push('\\begin{enumerate}');
-          inList = 'enumerate';
-        }
-        latexBody.push(
-          `  \\item ${this.transpileInlineMarkdown(orderedMatch[2])}`,
-        );
-        continue;
-      }
-
-      if (inList && line.trim() === '') {
-        latexBody.push(`\\end{${inList}}\n`);
-        inList = null;
-        continue;
-      }
-
-      if (line.trim().startsWith('>')) {
-        const quoteContent = line.replace(/^\s*>\s?/, '');
-        if (!inQuote) {
-          latexBody.push('\\begin{quote}');
-          inQuote = true;
-        }
-        latexBody.push(this.transpileInlineMarkdown(quoteContent));
-        continue;
-      } else if (inQuote) {
-        latexBody.push('\\end{quote}\n');
-        inQuote = false;
-      }
-
-      const h1Match = line.match(/^#\s+(.*)$/);
-      if (h1Match) {
-        latexBody.push(`\\section{${this.transpileInlineMarkdown(h1Match[1])}}\n`);
-        continue;
-      }
-      const h2Match = line.match(/^##\s+(.*)$/);
-      if (h2Match) {
-        latexBody.push(`\\subsection{${this.transpileInlineMarkdown(h2Match[1])}}\n`);
-        continue;
-      }
-      const h3Match = line.match(/^###\s+(.*)$/);
-      if (h3Match) {
-        latexBody.push(`\\subsubsection{${this.transpileInlineMarkdown(h3Match[1])}}\n`);
-        continue;
-      }
-      const h4Match = line.match(/^####\s+(.*)$/);
-      if (h4Match) {
-        latexBody.push(`\\paragraph{${this.transpileInlineMarkdown(h4Match[1])}}\n`);
-        continue;
-      }
-
-      if (/^(\*{3,}|-{3,}|_{3,})$/.test(line.trim())) {
-        latexBody.push('\\noindent\\rule{\\textwidth}{0.5pt}\n');
-        continue;
-      }
-
-      latexBody.push(line.trim() === '' ? '' : this.transpileInlineMarkdown(line));
+      continue;
+    }
+    if (inCodeBlock) {
+      latexBody.push(line);
+      continue;
     }
 
-    if (inCodeBlock) latexBody.push('\\end{verbatim}');
-    if (inList) latexBody.push(`\\end{${inList}}`);
-    if (inQuote) latexBody.push('\\end{quote}');
-
-    const mainTex = renderLatexArticleEnvelope({
-      title,
-      author,
-      date,
-      abstractText,
-      bodyLines: latexBody,
-    });
-
-    const mainEntry = ArchiveEntryVo.create(
-      'main.tex',
-      Buffer.from(mainTex, 'utf8'),
-      false,
-    );
-
-    return {
-      mainTex,
-      entries: [mainEntry],
-      detectedTitle: title,
-      warnings,
-    };
-  }
-
-  private transpileInlineMarkdown(text: string): string {
-    const shieldedTokens: string[] = [];
-    const shield = (latexFragment: string): string => {
-      const idx = shieldedTokens.length;
-      shieldedTokens.push(latexFragment);
-      return `@@FLUXTOK${idx}@@`;
-    };
-
-    let out = text;
-    out = out.replace(/`([^`]+)`/g, (_, code: string) =>
-      shield(`\\texttt{${escapeLatex(code)}}`),
-    );
-    out = out.replace(/\$([^$]+)\$/g, (_, math: string) => shield(`$${math}$`));
-    out = out.replace(
-      /!\[([^\]]*)\]\(([^)]+)\)/g,
-      (_, alt: string, url: string) =>
-        shield(
-          `\\begin{figure}[htbp]\\centering\\includegraphics[width=0.8\\textwidth]{${sanitizeLatexUrl(url)}}\\caption{${escapeLatex(alt)}}\\end{figure}`,
-        ),
-    );
-    out = out.replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_, linkText: string, url: string) =>
-        shield(`\\href{${sanitizeLatexUrl(url)}}{${escapeLatex(linkText)}}`),
-    );
-    out = out.replace(/(\*\*\*|___)(.+?)\1/g, (_, __, body: string) =>
-      shield(`\\textbf{\\textit{${escapeLatex(body)}}}`),
-    );
-    out = out.replace(/(\*\*|__)(.+?)\1/g, (_, __, body: string) =>
-      shield(`\\textbf{${escapeLatex(body)}}`),
-    );
-    out = out.replace(/(\*|_)(.+?)\1/g, (_, __, body: string) =>
-      shield(`\\textit{${escapeLatex(body)}}`),
-    );
-
-    out = escapeLatex(out);
-    for (let i = shieldedTokens.length - 1; i >= 0; i--) {
-      out = out.replace(`@@FLUXTOK${i}@@`, () => shieldedTokens[i]);
+    if (
+      line.trim().startsWith('$$') &&
+      line.trim().endsWith('$$') &&
+      line.trim().length > 4
+    ) {
+      const math = line.trim().slice(2, -2).trim();
+      latexBody.push(`\\begin{equation}\n  ${math}\n\\end{equation}\n`);
+      continue;
     }
-    return out;
+
+    const unorderedMatch = line.match(/^(\s*)[-*+]\s+(.*)$/);
+    if (unorderedMatch) {
+      if (inList !== 'itemize') {
+        if (inList) latexBody.push(`\\end{${inList}}`);
+        latexBody.push('\\begin{itemize}');
+        inList = 'itemize';
+      }
+      latexBody.push(`  \\item ${transpileInlineMarkdown(unorderedMatch[2])}`);
+      continue;
+    }
+
+    const orderedMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
+    if (orderedMatch) {
+      if (inList !== 'enumerate') {
+        if (inList) latexBody.push(`\\end{${inList}}`);
+        latexBody.push('\\begin{enumerate}');
+        inList = 'enumerate';
+      }
+      latexBody.push(`  \\item ${transpileInlineMarkdown(orderedMatch[2])}`);
+      continue;
+    }
+
+    if (inList && line.trim() === '') {
+      latexBody.push(`\\end{${inList}}\n`);
+      inList = null;
+      continue;
+    }
+
+    if (line.trim().startsWith('>')) {
+      const quoteContent = line.replace(/^\s*>\s?/, '');
+      if (!inQuote) {
+        latexBody.push('\\begin{quote}');
+        inQuote = true;
+      }
+      latexBody.push(transpileInlineMarkdown(quoteContent));
+      continue;
+    } else if (inQuote) {
+      latexBody.push('\\end{quote}\n');
+      inQuote = false;
+    }
+
+    const h1Match = line.match(/^#\s+(.*)$/);
+    if (h1Match) {
+      latexBody.push(`\\section{${transpileInlineMarkdown(h1Match[1])}}\n`);
+      continue;
+    }
+    const h2Match = line.match(/^##\s+(.*)$/);
+    if (h2Match) {
+      latexBody.push(`\\subsection{${transpileInlineMarkdown(h2Match[1])}}\n`);
+      continue;
+    }
+    const h3Match = line.match(/^###\s+(.*)$/);
+    if (h3Match) {
+      latexBody.push(`\\subsubsection{${transpileInlineMarkdown(h3Match[1])}}\n`);
+      continue;
+    }
+    const h4Match = line.match(/^####\s+(.*)$/);
+    if (h4Match) {
+      latexBody.push(`\\paragraph{${transpileInlineMarkdown(h4Match[1])}}\n`);
+      continue;
+    }
+
+    if (/^(\*{3,}|-{3,}|_{3,})$/.test(line.trim())) {
+      latexBody.push('\\noindent\\rule{\\textwidth}{0.5pt}\n');
+      continue;
+    }
+
+    latexBody.push(line.trim() === '' ? '' : transpileInlineMarkdown(line));
   }
+
+  if (inCodeBlock) latexBody.push('\\end{verbatim}');
+  if (inList) latexBody.push(`\\end{${inList}}`);
+  if (inQuote) latexBody.push('\\end{quote}');
+
+  const mainTex = renderLatexArticleEnvelope({
+    title,
+    author,
+    date,
+    abstractText,
+    bodyLines: latexBody,
+  });
+
+  return {
+    mainTex,
+    entries: [ArchiveEntryVo.create('main.tex', Buffer.from(mainTex, 'utf8'), false)],
+    detectedTitle: title,
+    warnings: [],
+  };
 }
 
-class DocxImportStrategy implements IDocumentImportStrategy {
-  public readonly format = 'docx' as const;
-  public readonly aliases = ['word'] as const;
+const DOCX_TEXT_NODE_RE = /<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g;
+const DOCX_RUN_OR_BLIP_RE =
+  /<w:r(?: [^>]*)?>([\s\S]*?)<\/w:r>|<a:blip[^>]*r:embed="([^"]+)"/g;
+const DOCX_BLIP_IN_RUN_RE = /<a:blip[^>]*r:embed="([^"]+)"/g;
+const DOCX_BOLD_RE =
+  /<w:b(?:\s+w:val="(?!0|false|none)[^"]*")?\s*\/>|<w:b>(?:1|true)<\/w:b>/i;
+const DOCX_ITALIC_RE =
+  /<w:i(?:\s+w:val="(?!0|false|none)[^"]*")?\s*\/>|<w:i>(?:1|true)<\/w:i>/i;
+const DOCX_UNDERLINE_RE = /<w:u(?:\s+w:val="(?!0|false|none)[^"]*")?\s*\/>/i;
 
-  constructor(private readonly zipEngine: IZipEnginePort) {}
+function formatDocxFigure(relsMap: Map<string, string>, rId: string): string | null {
+  const target = relsMap.get(rId);
+  if (!target) return null;
+  const rawPath = target.startsWith('media/')
+    ? target
+    : `media/${target.replace(/^.*[\\/]/, '')}`;
+  return `\n\\begin{figure}[htbp]\\centering\\includegraphics[width=0.75\\textwidth]{${sanitizeLatexUrl(rawPath)}}\\end{figure}\n`;
+}
 
-  public async transpile(
-    docxBuffer: Buffer,
-    fileName?: string,
-  ): Promise<TranspiledProjectResult> {
-    const warnings: string[] = [];
-    const entries = this.zipEngine.extractZip(docxBuffer);
+function extractPlainTextFromParagraph(pXml: string): string {
+  DOCX_TEXT_NODE_RE.lastIndex = 0;
+  let tMatch: RegExpExecArray | null;
+  let out = '';
+  while ((tMatch = DOCX_TEXT_NODE_RE.exec(pXml)) !== null) {
+    out += unescapeXml(tMatch[1]);
+  }
+  return out.trim();
+}
 
-    const docXmlEntry = entries.find((e) => e.path === 'word/document.xml');
-    if (!docXmlEntry) {
-      throw new BadRequestException(
-        'Invalid DOCX format: word/document.xml missing.',
-      );
+function parseRunsInParagraph(pXml: string, relsMap: Map<string, string>): string {
+  const parts: string[] = [];
+  DOCX_RUN_OR_BLIP_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = DOCX_RUN_OR_BLIP_RE.exec(pXml)) !== null) {
+    const [, rXml, standaloneEmbedId] = match;
+    if (standaloneEmbedId) {
+      const fig = formatDocxFigure(relsMap, standaloneEmbedId);
+      if (fig) parts.push(fig);
+      continue;
+    }
+    if (!rXml) continue;
+
+    DOCX_BLIP_IN_RUN_RE.lastIndex = 0;
+    let blipMatch: RegExpExecArray | null;
+    while ((blipMatch = DOCX_BLIP_IN_RUN_RE.exec(rXml)) !== null) {
+      const fig = formatDocxFigure(relsMap, blipMatch[1]);
+      if (fig) parts.push(fig);
     }
 
-    const relsEntry = entries.find(
-      (e) => e.path === 'word/_rels/document.xml.rels',
+    DOCX_TEXT_NODE_RE.lastIndex = 0;
+    let tMatch: RegExpExecArray | null;
+    let runText = '';
+    while ((tMatch = DOCX_TEXT_NODE_RE.exec(rXml)) !== null) {
+      runText += tMatch[1];
+    }
+    if (!runText) continue;
+
+    const isBold = DOCX_BOLD_RE.test(rXml);
+    const isItalic = DOCX_ITALIC_RE.test(rXml);
+    const isUnderline = DOCX_UNDERLINE_RE.test(rXml);
+
+    let formatted = escapeLatex(unescapeXml(runText));
+    if (isBold && isItalic) formatted = `\\textbf{\\textit{${formatted}}}`;
+    else if (isBold) formatted = `\\textbf{${formatted}}`;
+    else if (isItalic) formatted = `\\textit{${formatted}}`;
+    else if (isUnderline) formatted = `\\underline{${formatted}}`;
+
+    parts.push(formatted);
+  }
+
+  return parts.join('');
+}
+
+export function transpileDocxEntriesToLatex(
+  entries: ArchiveEntryVo[],
+  fileName?: string,
+): TranspiledProjectResult {
+  const docXmlEntry = entries.find((e) => e.path === 'word/document.xml');
+  if (!docXmlEntry) {
+    throw new InvalidZipArchiveException(
+      'Invalid DOCX format: word/document.xml missing.',
     );
-    const relsMap = new Map<string, string>();
-    if (relsEntry) {
-      const relsXml = relsEntry.data.toString('utf8');
-      const relTagRegex = /<Relationship\b[^>]*>/g;
-      let tagMatch;
-      while ((tagMatch = relTagRegex.exec(relsXml)) !== null) {
-        const tag = tagMatch[0];
-        const idMatch = tag.match(/\bId="([^"]+)"/i);
-        const targetMatch = tag.match(/\bTarget="([^"]+)"/i);
-        if (idMatch && targetMatch) {
-          relsMap.set(idMatch[1], targetMatch[1]);
-        }
+  }
+
+  const relsEntry = entries.find((e) => e.path === 'word/_rels/document.xml.rels');
+  const relsMap = new Map<string, string>();
+  if (relsEntry) {
+    const relsXml = relsEntry.data.toString('utf8');
+    const relTagRegex = /<Relationship\b[^>]*>/g;
+    let tagMatch;
+    while ((tagMatch = relTagRegex.exec(relsXml)) !== null) {
+      const tag = tagMatch[0];
+      const idMatch = tag.match(/\bId="([^"]+)"/i);
+      const targetMatch = tag.match(/\bTarget="([^"]+)"/i);
+      if (idMatch && targetMatch) {
+        relsMap.set(idMatch[1], targetMatch[1]);
       }
     }
+  }
 
-    const mediaEntries = extractDocxMediaEntries(entries);
-    const docXml = docXmlEntry.data.toString('utf8');
-    const defaultTitle = fileName
-      ? fileName.replace(/\.[^/.]+$/, '')
-      : 'Word Imported Document';
-    let detectedTitle = defaultTitle;
-    let isFirstHeading = true;
+  const mediaEntries = extractDocxMediaEntries(entries);
+  const docXml = docXmlEntry.data.toString('utf8');
+  const defaultTitle = fileName
+    ? fileName.replace(/\.[^/.]+$/, '')
+    : 'Word Imported Document';
+  let detectedTitle = defaultTitle;
+  let isFirstHeading = true;
 
-    const latexBody: string[] = [];
-    let inList: 'itemize' | 'enumerate' | null = null;
+  const latexBody: string[] = [];
+  let inList: 'itemize' | 'enumerate' | null = null;
 
-    const pRegex = /<w:p(?: [^>]*)?>([\s\S]*?)<\/w:p>/g;
-    let pMatch;
+  const pRegex = /<w:p(?: [^>]*)?>([\s\S]*?)<\/w:p>/g;
+  let pMatch;
 
-    while ((pMatch = pRegex.exec(docXml)) !== null) {
-      const pXml = pMatch[1];
-      const styleMatch = pXml.match(/<w:pStyle[^>]*w:val="([^"]+)"/);
-      const styleVal = styleMatch ? styleMatch[1].toLowerCase() : '';
-      const isListItem = /<w:numPr[ >]/.test(pXml);
+  while ((pMatch = pRegex.exec(docXml)) !== null) {
+    const pXml = pMatch[1];
+    const styleMatch = pXml.match(/<w:pStyle[^>]*w:val="([^"]+)"/);
+    const styleVal = styleMatch ? styleMatch[1].toLowerCase() : '';
+    const isListItem = /<w:numPr[ >]/.test(pXml);
 
-      const pText = this.parseRunsInParagraph(pXml, relsMap);
-      const rawPlainText = this.extractPlainTextFromParagraph(pXml);
-      if (!pText.trim()) continue;
+    const pText = parseRunsInParagraph(pXml, relsMap);
+    const rawPlainText = extractPlainTextFromParagraph(pXml);
+    if (!pText.trim()) continue;
 
-      if (styleVal.includes('title')) {
-        detectedTitle = rawPlainText || unescapeXml(pText);
-        continue;
-      }
+    if (styleVal.includes('title')) {
+      detectedTitle = rawPlainText || unescapeXml(pText);
+      continue;
+    }
 
-      if (styleVal.includes('heading1') || styleVal === '1') {
-        if (inList) {
-          latexBody.push(`\\end{${inList}}\n`);
-          inList = null;
-        }
-        if (isFirstHeading && !detectedTitle) {
-          detectedTitle = rawPlainText || unescapeXml(pText);
-          isFirstHeading = false;
-        }
-        latexBody.push(`\\section{${pText}}\n`);
-        continue;
-      }
-
-      if (styleVal.includes('heading2') || styleVal === '2') {
-        if (inList) {
-          latexBody.push(`\\end{${inList}}\n`);
-          inList = null;
-        }
-        latexBody.push(`\\subsection{${pText}}\n`);
-        continue;
-      }
-
-      if (styleVal.includes('heading3') || styleVal === '3') {
-        if (inList) {
-          latexBody.push(`\\end{${inList}}\n`);
-          inList = null;
-        }
-        latexBody.push(`\\subsubsection{${pText}}\n`);
-        continue;
-      }
-
-      if (isListItem) {
-        if (!inList) {
-          latexBody.push('\\begin{itemize}');
-          inList = 'itemize';
-        }
-        latexBody.push(`  \\item ${pText}`);
-        continue;
-      }
-
+    if (styleVal.includes('heading1') || styleVal === '1') {
       if (inList) {
         latexBody.push(`\\end{${inList}}\n`);
         inList = null;
       }
+      if (isFirstHeading && !detectedTitle) {
+        detectedTitle = rawPlainText || unescapeXml(pText);
+        isFirstHeading = false;
+      }
+      latexBody.push(`\\section{${pText}}\n`);
+      continue;
+    }
 
-      latexBody.push(`${pText}\n`);
+    if (styleVal.includes('heading2') || styleVal === '2') {
+      if (inList) {
+        latexBody.push(`\\end{${inList}}\n`);
+        inList = null;
+      }
+      latexBody.push(`\\subsection{${pText}}\n`);
+      continue;
+    }
+
+    if (styleVal.includes('heading3') || styleVal === '3') {
+      if (inList) {
+        latexBody.push(`\\end{${inList}}\n`);
+        inList = null;
+      }
+      latexBody.push(`\\subsubsection{${pText}}\n`);
+      continue;
+    }
+
+    if (isListItem) {
+      if (!inList) {
+        latexBody.push('\\begin{itemize}');
+        inList = 'itemize';
+      }
+      latexBody.push(`  \\item ${pText}`);
+      continue;
     }
 
     if (inList) {
       latexBody.push(`\\end{${inList}}\n`);
+      inList = null;
     }
 
-    const mainTex = renderLatexArticleEnvelope({
-      title: detectedTitle,
-      author: 'Imported Author',
-      bodyLines: latexBody,
-    });
-
-    const mainEntry = ArchiveEntryVo.create(
-      'main.tex',
-      Buffer.from(mainTex, 'utf8'),
-      false,
-    );
-
-    return {
-      mainTex,
-      entries: [mainEntry, ...mediaEntries],
-      detectedTitle,
-      warnings,
-    };
+    latexBody.push(`${pText}\n`);
   }
 
-  private extractPlainTextFromParagraph(pXml: string): string {
-    const tRegex = /<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g;
-    let tMatch;
-    let out = '';
-    while ((tMatch = tRegex.exec(pXml)) !== null) {
-      out += unescapeXml(tMatch[1]);
-    }
-    return out.trim();
+  if (inList) {
+    latexBody.push(`\\end{${inList}}\n`);
   }
 
-  private parseRunsInParagraph(
-    pXml: string,
-    relsMap: Map<string, string>,
-  ): string {
-    const parts: string[] = [];
+  const mainTex = renderLatexArticleEnvelope({
+    title: detectedTitle,
+    author: 'Imported Author',
+    bodyLines: latexBody,
+  });
 
-    const blipRegex = /<a:blip[^>]*r:embed="([^"]+)"/g;
-    let blipMatch;
-    while ((blipMatch = blipRegex.exec(pXml)) !== null) {
-      const rId = blipMatch[1];
-      const target = relsMap.get(rId);
-      if (target) {
-        const rawPath = target.startsWith('media/')
-          ? target
-          : `media/${target.replace(/^.*[\\/]/, '')}`;
-        const cleanPath = sanitizeLatexUrl(rawPath);
-        parts.push(
-          `\n\\begin{figure}[htbp]\\centering\\includegraphics[width=0.75\\textwidth]{${cleanPath}}\\end{figure}\n`,
-        );
-      }
-    }
+  const mainEntry = ArchiveEntryVo.create(
+    'main.tex',
+    Buffer.from(mainTex, 'utf8'),
+    false,
+  );
 
-    const rRegex = /<w:r(?: [^>]*)?>([\s\S]*?)<\/w:r>/g;
-    let rMatch;
-
-    while ((rMatch = rRegex.exec(pXml)) !== null) {
-      const rXml = rMatch[1];
-      const isBold =
-        /<w:b(?:\s+w:val="(?!0|false|none)[^"]*")?\s*\/>|<w:b>(?:1|true)<\/w:b>/i.test(
-          rXml,
-        );
-      const isItalic =
-        /<w:i(?:\s+w:val="(?!0|false|none)[^"]*")?\s*\/>|<w:i>(?:1|true)<\/w:i>/i.test(
-          rXml,
-        );
-      const isUnderline =
-        /<w:u(?:\s+w:val="(?!0|false|none)[^"]*")?\s*\/>/i.test(rXml);
-
-      const tRegex = /<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g;
-      let tMatch;
-      let runText = '';
-      while ((tMatch = tRegex.exec(rXml)) !== null) {
-        runText += tMatch[1];
-      }
-      if (!runText) continue;
-
-      let formatted = escapeLatex(unescapeXml(runText));
-      if (isBold && isItalic) formatted = `\\textbf{\\textit{${formatted}}}`;
-      else if (isBold) formatted = `\\textbf{${formatted}}`;
-      else if (isItalic) formatted = `\\textit{${formatted}}`;
-      else if (isUnderline) formatted = `\\underline{${formatted}}`;
-
-      parts.push(formatted);
-    }
-
-    return parts.join('');
-  }
+  return {
+    mainTex,
+    entries: [mainEntry, ...mediaEntries],
+    detectedTitle,
+    warnings: [],
+  };
 }
-
-export class ImportFormatRegistry {
-  private readonly strategies = new Map<string, IDocumentImportStrategy>();
-
-  constructor(strategies: ReadonlyArray<IDocumentImportStrategy>) {
-    for (const s of strategies) {
-      this.register(s);
-    }
-  }
-
-  public register(strategy: IDocumentImportStrategy): this {
-    this.strategies.set(strategy.format.toLowerCase(), strategy);
-    for (const alias of strategy.aliases) {
-      this.strategies.set(alias.toLowerCase(), strategy);
-    }
-    return this;
-  }
-
-  public resolve(formatOrExt?: string): IDocumentImportStrategy | null {
-    if (!formatOrExt) return null;
-    const key = formatOrExt.trim().replace(/^\./, '').toLowerCase();
-    return this.strategies.get(key) ?? null;
-  }
-}
-
-export function resolveImportFormat(
-  explicitFormat?: string,
-  fileName?: string,
-): SupportedImportFormat | null {
-  const raw = explicitFormat || (fileName ? path.extname(fileName) : '');
-  const clean = raw.trim().replace(/^\./, '').toLowerCase();
-  if (clean === 'docx' || clean === 'word') return 'docx';
-  if (clean === 'md' || clean === 'markdown') return 'md';
-  return null;
-}
-
-@Injectable()
-export class LatexImportTranspiler extends IDocumentTranspilerPort {
-  private readonly markdownStrategy: MarkdownImportStrategy;
-  private readonly docxStrategy: DocxImportStrategy;
-  private readonly registry: ImportFormatRegistry;
-
-  constructor(@Optional() zipEngine?: IZipEnginePort) {
-    super();
-    const resolvedZip = zipEngine ?? new ZipAdapter();
-    this.markdownStrategy = new MarkdownImportStrategy();
-    this.docxStrategy = new DocxImportStrategy(resolvedZip);
-    this.registry = new ImportFormatRegistry([
-      this.markdownStrategy,
-      this.docxStrategy,
-    ]);
-  }
-
-  public async transpileByFormat(
-    format: SupportedImportFormat,
-    buffer: Buffer,
-    fileName?: string,
-  ): Promise<TranspiledProjectResult> {
-    const strategy = this.registry.resolve(format);
-    if (!strategy) {
-      throw new BadRequestException(`Unsupported import format: "${format}"`);
-    }
-    return strategy.transpile(buffer, fileName);
-  }
-
-  public async transpileMarkdown(
-    content: string,
-    fileName?: string,
-  ): Promise<TranspiledProjectResult> {
-    return this.markdownStrategy.transpileText(content, fileName);
-  }
-
-  public async transpileDocx(
-    docxBuffer: Buffer,
-    fileName?: string,
-  ): Promise<TranspiledProjectResult> {
-    return this.docxStrategy.transpile(docxBuffer, fileName);
-  }
-}
-
-export type { TranspiledProjectResult };
