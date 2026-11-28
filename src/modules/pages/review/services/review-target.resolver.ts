@@ -2,8 +2,8 @@ import { PrismaService, isUuid } from '@/core';
 import {
   getRecordSpaceId,
   resolveActiveProjectId,
-} from '@/modules/pages/core/page-scope.helper';
-import { PageService } from '@/modules/pages/core/services/page.service';
+} from '@/modules/pages/core/utils/page-scope';
+import { PageService } from '@/modules/pages/page/services/page.service';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 
 export async function resolveReviewTarget(params: {
@@ -42,6 +42,9 @@ export async function resolveReviewTarget(params: {
       }),
     ).catch(() => null);
     if (page && !page.deletedAt && page.rootDocId) {
+      if (activeSpaceId && page.spaceId !== activeSpaceId) {
+        return { spaceId: activeSpaceId };
+      }
       return {
         docId: page.rootDocId,
         spaceId: page.spaceId || activeSpaceId,
@@ -51,5 +54,11 @@ export async function resolveReviewTarget(params: {
   }
 
   const resolvedSpace = await pageService.resolveProjectId(targetId);
-  return { docId: targetId, spaceId: resolvedSpace || activeSpaceId };
+  if (activeSpaceId && resolvedSpace && resolvedSpace !== activeSpaceId) {
+    return { spaceId: activeSpaceId };
+  }
+  return {
+    docId: targetId,
+    spaceId: activeSpaceId || resolvedSpace || undefined,
+  };
 }

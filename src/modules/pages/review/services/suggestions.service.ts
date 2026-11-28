@@ -10,7 +10,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ChangeType } from '@prisma/client';
 import { AuthenticatedRequest, isUuid } from '@/core';
-import { PageService } from '@/modules/pages/core/services/page.service';
+import { PageService } from '@/modules/pages/page/services/page.service';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 import { DocPatcher } from '../adapters/doc-patcher.adapter';
@@ -494,6 +494,7 @@ export class SuggestionsService {
     const { docId, spaceId } = await this.resolveTarget(targetId, authSpace);
     if (!spaceId) return 0;
     const targetDocId = docId || targetId;
+    await this.assertDocNotLocked(targetDocId);
 
     const pending = await this.repo.listChanges(
       spaceId,

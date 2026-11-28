@@ -11,7 +11,7 @@ import {
   ensureCanonicalPageId,
   filterRecordsByPageScope,
   resolveCanonicalPageId,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import {
@@ -449,14 +449,61 @@ export class FilestoreRepository extends IPageBinaryAssetRepository {
   public async findByProjectAndId(
     projectId: string,
     id: string,
+    pageId?: string | null,
   ): Promise<PageBinaryAsset | null> {
+    const trimmedPageId = pageId?.trim() || undefined;
     const record = await this.prisma.pageFile.findFirst({
       where: {
         id,
         spaceId: projectId,
+        ...(trimmedPageId ? { pageId: trimmedPageId } : {}),
       },
     });
     return record ? PageBinaryAssetMapper.toDomain(record) : null;
+  }
+
+  public async findManyByProjectAndIds(
+    projectId: string,
+    ids: string[],
+  ): Promise<PageBinaryAsset[]> {
+    if (!ids.length || !this.prisma?.pageFile?.findMany) {
+      return [];
+    }
+    const records = await this.prisma.pageFile.findMany({
+      where: {
+        spaceId: projectId,
+        id: { in: ids },
+      },
+    });
+    return records.map(PageBinaryAssetMapper.toDomain);
+  }
+
+  public async markDeletedIfActive(
+    projectId: string,
+    fileId: string,
+    pageId?: string | null,
+  ): Promise<boolean | null> {
+    if (!this.prisma?.pageFile?.updateMany) return null;
+    const trimmedPageId = pageId?.trim() || undefined;
+    const now = new Date();
+    const result = await this.prisma.pageFile.updateMany({
+      where: {
+        id: fileId,
+        spaceId: projectId,
+        ...(trimmedPageId ? { pageId: trimmedPageId } : {}),
+        deletedAt: null,
+      },
+      data: { deletedAt: now },
+    });
+    if (result.count > 0 && this.prisma.pageNode?.deleteMany) {
+      await this.prisma.pageNode.deleteMany({
+        where: {
+          spaceId: projectId,
+          fileId,
+        },
+      });
+    }
+    return result.count > 0;
   }
 
   public async findByProjectAndName(

@@ -46,12 +46,6 @@ import { IBinaryStoragePort } from './filestore.types';
     FilestoreRepository,
     FilestoreService,
   ],
-  exports: [
-    FilestoreService,
-    FilestoreRepository,
-    ContentHasherAdapter,
-    PlatformBinaryStorageAdapter,
-    IBinaryStoragePort,
-  ],
+  exports: [FilestoreService, FilestoreRepository, IBinaryStoragePort],
 })
 export class FilestoreModule {}

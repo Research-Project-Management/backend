@@ -28,6 +28,8 @@ model PageFile {
   @@unique([id, pageId], map: "uq_page_files_id_page")
   @@index([pageId, deletedAt, lastKnownPath], map: "idx_page_files_page_del_path")
   @@index([pageId, deletedAt, createdAt(sort: Desc)], map: "idx_page_files_page_del_created")
+  @@index([spaceId, deletedAt, createdAt(sort: Desc)], map: "idx_page_files_space_del_created")
+  @@index([spaceId, deletedAt, updatedAt(sort: Desc)], map: "idx_page_files_space_del_updated")
   @@index([spaceId, hash], map: "idx_page_files_space_hash")
   @@index([hash, deletedAt], map: "idx_page_files_hash_deleted")
   @@index([blobId], map: "idx_page_files_blob_id")

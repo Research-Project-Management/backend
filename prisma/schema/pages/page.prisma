@@ -1,23 +1,29 @@
 // ============================================================================
-// Pages Subsystem: Page Aggregate Root Sub-Domain
-// Self-managed domain schema: Page
+// Pages Subsystem: Page Aggregate Root Sub-Domain (3NF Normalized)
+// Self-managed domain schema: Page, PageStatus, PageLabel
 // ============================================================================
 
-model Page {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  spaceId     String   @map("space_id") @db.Uuid
-  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_pages_space_id")
-  rootDocId   String?  @map("root_doc_id") @db.Uuid
-  rootDoc     PageDoc? @relation("PageRootDoc", fields: [rootDocId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_pages_root_doc_id")
-  title       String   @default("Untitled") @db.VarChar(500)
-  description String?  @db.Text
-  status      String   @default("draft") @db.VarChar(50) // draft, published, archived
+enum PageStatus {
+  draft
+  published
+  archived
+}
 
-  compiler           String  @default("pdflatex") @db.VarChar(32)
-  texLiveVersion     String  @default("2024") @map("tex_live_version") @db.VarChar(16)
-  spellCheckLanguage String  @default("en_US") @map("spell_check_language") @db.VarChar(16)
-  pdfThumbnail       String? @map("pdf_thumbnail") @db.Text
-  settings           Json    @default("{}") @db.JsonB
+model Page {
+  id          String     @id @default(uuid(7)) @db.Uuid
+  spaceId     String     @map("space_id") @db.Uuid
+  space       Space      @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_pages_space_id")
+  rootDocId   String?    @map("root_doc_id") @db.Uuid
+  rootDoc     PageDoc?   @relation("PageRootDoc", fields: [rootDocId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_pages_root_doc_id")
+  title       String     @default("Untitled") @db.VarChar(500)
+  description String?    @db.Text
+  status      PageStatus @default(draft)
+
+  compiler  String  @default("pdflatex") @db.VarChar(32)
+  texlive   String  @default("2025") @db.VarChar(16)
+  spellLang String  @default("en_US") @map("spell_lang") @db.VarChar(16)
+  thumbnail String? @db.Text
+  settings  Json    @default("{}") @db.JsonB
 
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdById String?   @map("created_by_id") @db.Uuid
@@ -28,13 +34,31 @@ model Page {
   docs           PageDoc[]
   nodes          PageNode[]
   files          PageFile[]
+  labels         PageLabel[]
   snapshots      PageSnapshot[]
   referenceLinks PageReferenceLink[]
   githubLink     PageGithubLink?
+  gitRepo        PageGitRepo?
 
   @@unique([id, spaceId], map: "uq_pages_id_space")
   @@index([spaceId, deletedAt, updatedAt(sort: Desc)], map: "idx_pages_space_updated")
+  @@index([spaceId, deletedAt, createdAt], map: "idx_pages_space_del_created")
+  @@index([spaceId, deletedAt, status], map: "idx_pages_space_del_status")
   @@index([spaceId, deletedAt, title], map: "idx_pages_space_title")
   @@index([rootDocId], map: "idx_pages_root_doc_id")
+  @@index([createdById], map: "idx_pages_created_by")
   @@map("pages")
+}
+
+model PageLabel {
+  pageId    String   @map("page_id") @db.Uuid
+  labelId   String   @map("label_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  page  Page       @relation(fields: [pageId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_labels_page_id")
+  label SpaceLabel @relation(fields: [labelId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_labels_label_id")
+
+  @@id([pageId, labelId], map: "pk_page_labels")
+  @@index([labelId], map: "idx_page_labels_label_id")
+  @@map("page_labels")
 }

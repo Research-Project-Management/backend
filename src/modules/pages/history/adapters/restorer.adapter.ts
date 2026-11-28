@@ -7,14 +7,14 @@ import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import * as pathPosix from 'node:path/posix';
 import { Prisma } from '@prisma/client';
 import { PrismaService, mapWithConcurrency } from '@/core';
-import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
+import { ensureCanonicalPageId } from '@/modules/pages/core/utils/page-scope';
 import {
   LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
   NOOP_LIVE_COLLABORATION,
-  PageDomainEventBus,
-  IDistributedLockPort,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
+import { IDistributedLockPort } from '@/modules/pages/core/ports/distributed-lock.port';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';

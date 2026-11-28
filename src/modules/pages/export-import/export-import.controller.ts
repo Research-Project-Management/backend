@@ -26,17 +26,15 @@ import {
   ResolvedSpace,
   Role,
 } from '@/modules/project/access';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 
 import { ExportService } from './services/export.service';
 import { ImportService } from './services/import.service';
 import { ConvertService } from './services/convert.service';
-import { ScaffoldService } from './services/scaffold.service';
 
 import { ExportDocumentDto, ExportZipQueryDto } from './dto/export.dto';
 import { ImportSummaryResponseDto, ImportUrlDto } from './dto/import.dto';
-import { ScaffoldTemplateDto } from './dto/scaffold.dto';
 
 async function readUploadPayload(
   req: FastifyRequest,
@@ -101,7 +99,6 @@ export class ExportImportController {
     private readonly exportService: ExportService,
     private readonly importService: ImportService,
     private readonly convertService: ConvertService,
-    private readonly scaffoldService: ScaffoldService,
   ) {}
 
   @Get('spaces/:spaceId/export/zip')
@@ -181,35 +178,6 @@ export class ExportImportController {
       zipBuffer,
       undefined,
       preferredRootDoc,
-      pageId,
-    );
-  }
-
-  @Post('spaces/:spaceId/templates/:templateId/scaffold')
-  @RequireRole(Role.CONTRIBUTOR)
-  @ApiOperation({
-    summary: 'Initialize project structure and files from an academic template',
-  })
-  @ApiResponse({ status: 201, type: ImportSummaryResponseDto })
-  public async scaffoldFromTemplate(
-    @Param('spaceId') routeSpaceId: string,
-    @Param('templateId') templateId: string,
-    @Body() dto?: ScaffoldTemplateDto,
-    @Query('pageId') queryPageId?: string,
-    @ResolvedSpace() authorizedSpace?: string | { id?: string },
-    @Req() req?: FastifyRequest,
-  ): Promise<ImportSummaryResponseDto> {
-    const { spaceId, pageId } = resolvePageControllerCoordinates(
-      { spaceId: routeSpaceId },
-      authorizedSpace,
-      queryPageId ?? dto?.pageId,
-      req,
-    );
-    const targetTemplateId = templateId || dto?.templateId || '';
-    return this.scaffoldService.scaffoldTemplate(
-      spaceId,
-      targetTemplateId,
-      undefined,
       pageId,
     );
   }

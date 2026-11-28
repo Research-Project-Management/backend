@@ -11,8 +11,8 @@ import {
   IDistributedLockPort,
   IDistributedLockHandle,
 } from '../ports/distributed-lock.port';
-import { DistributedLockTimeoutError } from '../domain/pages-domain.error';
-import { PAGES_CACHE_KEYS } from '../pages.cache-keys';
+import { DistributedLockTimeoutError } from '../domain/errors';
+import { PAGES_CACHE_KEYS } from '../config/cache-keys';
 
 @Injectable()
 export class RedisLockAdapter extends IDistributedLockPort {
@@ -36,12 +36,30 @@ export class RedisLockAdapter extends IDistributedLockPort {
     }
 
     let released = false;
+    const heartbeatMs = Math.max(1000, Math.floor(ttlMs / 3));
+
+    const renewalTimer =
+      typeof this.lockService.extendLock === 'function' && ttlMs >= 3000
+        ? setInterval(() => {
+            if (released) return;
+            void this.lockService
+              .extendLock(key, token, ttlMs)
+              .catch(() => undefined);
+          }, heartbeatMs)
+        : null;
+    if (renewalTimer && typeof renewalTimer.unref === 'function') {
+      renewalTimer.unref();
+    }
+
     return {
       resource,
       acquiredAt,
       release: async () => {
         if (released) return;
         released = true;
+        if (renewalTimer) {
+          clearInterval(renewalTimer);
+        }
         await this.lockService.releaseLock(key, token);
       },
     };
@@ -55,13 +73,15 @@ export class RedisLockAdapter extends IDistributedLockPort {
     const startTime = Date.now();
     const maxWaitMs = Math.max(ttlMs, 30000);
     let handle = await this.acquire(resource, ttlMs);
+    let attempt = 0;
 
     while (!handle) {
       if (Date.now() - startTime >= maxWaitMs) {
         throw new DistributedLockTimeoutError(resource, maxWaitMs);
       }
-      // Exponential jittered backoff between 50ms and 200ms
-      const delay = Math.floor(50 + Math.random() * 150);
+      const baseDelay = Math.min(50 * 2 ** attempt, 1000);
+      const delay = Math.floor(baseDelay * (0.5 + Math.random() * 0.5));
+      attempt += 1;
       await new Promise((resolve) => setTimeout(resolve, delay));
       handle = await this.acquire(resource, ttlMs);
     }

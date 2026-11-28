@@ -15,8 +15,8 @@ import {
 import { PageDoc, PageNode } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { Role, RoleHierarchy } from '@/modules/project/access';
-import { PageService } from '@/modules/pages/core/services/page.service';
-import { isRecordDeleted } from '@/modules/pages/core/page-scope.helper';
+import { PageService } from '@/modules/pages/page/services/page.service';
+import { isRecordDeleted } from '@/modules/pages/core/utils/page-scope';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   findPageRecordWithNode,
@@ -162,7 +162,11 @@ export class EditorBootstrapService {
     const resolvedAuthProjectId = this.pageService.resolveActiveProjectId(
       params.authorizedProjectId as string | { id: string } | null | undefined,
     );
-    const coalesceKey = `editor-boot:${resolvedAuthProjectId || 'auto'}:${params.userId || 'anon'}:${params.pageOrProjectId}:${requestedFileKey}`;
+    if (!params.userId) {
+      return this.executeBootstrap(params, resolvedAuthProjectId);
+    }
+    const roleKey = String(params.role || 'viewer').toLowerCase();
+    const coalesceKey = `editor-boot:${resolvedAuthProjectId || 'auto'}:${params.userId}:${roleKey}:${params.pageOrProjectId}:${requestedFileKey}`;
 
     return this.coalescer.run(coalesceKey, () =>
       this.executeBootstrap(params, resolvedAuthProjectId),
@@ -226,6 +230,7 @@ export class EditorBootstrapService {
             this.prisma.pageGithubLink?.findFirst?.({
               where: {
                 pageId: params.pageOrProjectId,
+                page: { spaceId, deletedAt: null },
               },
               select: {
                 id: true,
@@ -638,7 +643,13 @@ export class EditorBootstrapService {
         })
         .catch(() => null);
       if (!candidate) return null;
-      return matchesPageScope(candidate, spaceId, canonicalPageId, rootDocId, isScopedPage)
+      return matchesPageScope(
+        candidate,
+        spaceId,
+        canonicalPageId,
+        rootDocId,
+        isScopedPage,
+      )
         ? candidate
         : null;
     }
@@ -680,7 +691,13 @@ export class EditorBootstrapService {
       })
       .catch(() => null);
     if (!legacyCandidate) return null;
-    return matchesPageScope(legacyCandidate, spaceId, canonicalPageId, rootDocId, isScopedPage)
+    return matchesPageScope(
+      legacyCandidate,
+      spaceId,
+      canonicalPageId,
+      rootDocId,
+      isScopedPage,
+    )
       ? legacyCandidate
       : null;
   }

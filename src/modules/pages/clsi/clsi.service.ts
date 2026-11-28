@@ -14,13 +14,10 @@ import {
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import { RedisCacheService } from '@/core';
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
-import { PAGES_CACHE_KEYS } from '@/modules/pages/core/pages.cache-keys';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PAGES_CACHE_KEYS } from '@/modules/pages/core/config/cache-keys';
 import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
-import {
-  CompilePageDto,
-  ClsiWordCountDto,
-} from './dto/compile.dto';
+import { CompilePageDto, ClsiWordCountDto } from './dto/compile.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 import { WordCountStats } from './domain/ports';
 import {

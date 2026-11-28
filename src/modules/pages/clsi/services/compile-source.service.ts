@@ -18,7 +18,7 @@ import {
   filterRecordsByPageScope,
   resolveSpaceRootDocIds,
   type PageScopeDbClient,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { CompilePageDto } from '../dto/compile.dto';
@@ -83,7 +83,12 @@ export class CompileSourceService {
     let resolvedSpaceId: string | undefined;
     let resolvedPageId: string | undefined;
 
-    if (dto.pageId && dto.pageId !== 'default' && this.prisma && isUuid(dto.pageId)) {
+    if (
+      dto.pageId &&
+      dto.pageId !== 'default' &&
+      this.prisma &&
+      isUuid(dto.pageId)
+    ) {
       const page = await Promise.resolve(
         this.prisma.page?.findUnique?.({
           where: { id: dto.pageId },
@@ -545,5 +550,4 @@ export class CompileSourceService {
 
     return out;
   }
-
 }

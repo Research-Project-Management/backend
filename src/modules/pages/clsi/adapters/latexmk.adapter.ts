@@ -53,7 +53,10 @@ export class LatexmkEngine implements ILatexEngine {
   public async isAvailable(): Promise<boolean> {
     if (this.availableCache) {
       if (this.availableCache.value) return true;
-      if (Date.now() - this.availableCache.checkedAt < LatexmkEngine.NEGATIVE_PROBE_TTL_MS) {
+      if (
+        Date.now() - this.availableCache.checkedAt <
+        LatexmkEngine.NEGATIVE_PROBE_TTL_MS
+      ) {
         return false;
       }
     }
@@ -163,7 +166,7 @@ export class LatexmkEngine implements ILatexEngine {
       signal: options.signal,
       onLogChunk: options.onLogChunk,
       env: envWithInputs,
-      openinAny: compiler === 'lualatex' ? 'r' : 'p',
+      openinAny: 'p',
       texLiveVersion: options.texLiveVersion,
     });
 

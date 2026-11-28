@@ -7,9 +7,12 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { LRUCache } from 'lru-cache';
 import { RedisCacheService } from '@/core';
-import { PageDomainEventBus } from '@/modules/pages/core';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { CitationsRepository } from '../repositories/citations.repository';
-import { CitationEntryDto, ListCitationsResponseDto } from '../dto/citations.dto';
+import {
+  CitationEntryDto,
+  ListCitationsResponseDto,
+} from '../dto/citations.dto';
 
 const INDEX_CACHE_PREFIX = 'citation:index:v1';
 const L1_TTL_MS = 15_000;
@@ -34,11 +37,14 @@ export class CitationIndexService implements OnModuleInit {
       this.domainEventBus &&
       typeof this.domainEventBus.subscribe === 'function'
     ) {
-      this.domainEventBus.subscribe('manuscript.document.mutated', async (event) => {
-        if (event?.projectId) {
-          await this.invalidateSpace(event.projectId);
-        }
-      });
+      this.domainEventBus.subscribe(
+        'manuscript.document.mutated',
+        async (event) => {
+          if (event?.projectId) {
+            await this.invalidateSpace(event.projectId);
+          }
+        },
+      );
     }
   }
 
@@ -81,7 +87,10 @@ export class CitationIndexService implements OnModuleInit {
     };
   }
 
-  public async invalidateSpace(spaceId: string, pageId?: string): Promise<void> {
+  public async invalidateSpace(
+    spaceId: string,
+    pageId?: string,
+  ): Promise<void> {
     const exactKey = this.buildCacheKey(spaceId, pageId);
     const allKey = this.buildCacheKey(spaceId, undefined);
     this.l1Cache.delete(exactKey);
@@ -137,7 +146,9 @@ export class CitationIndexService implements OnModuleInit {
 
     this.l1Cache.set(cacheKey, flattened);
     if (this.redisCache) {
-      await this.redisCache.set(cacheKey, flattened, L2_TTL_SEC).catch(() => {});
+      await this.redisCache
+        .set(cacheKey, flattened, L2_TTL_SEC)
+        .catch(() => {});
     }
 
     return flattened;

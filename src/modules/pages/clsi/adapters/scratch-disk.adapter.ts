@@ -11,7 +11,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 import { DiscoveredOutputFile } from '../domain/ports';
 
 export interface LockOptions {
@@ -182,10 +182,7 @@ export class DiskUsageCleaner implements OnModuleInit, OnModuleDestroy {
     this.gcTimer = setInterval(() => {
       if (this.gcInFlight) return;
       this.gcInFlight = true;
-      void Promise.all([
-        this.cleanStaleWorkspaces(),
-        this.enforceDiskQuota(),
-      ])
+      void Promise.all([this.cleanStaleWorkspaces(), this.enforceDiskQuota()])
         .then(([stale, quota]) => {
           const totalCleaned =
             stale.cleanedWorkspaces + quota.cleanedWorkspaces;

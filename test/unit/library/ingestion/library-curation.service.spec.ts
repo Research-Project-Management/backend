@@ -359,7 +359,6 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         {
           primaryItemId: 'primary-no-authors',
           duplicateItemIds: ['dup-with-authors'],
-          projectId: mockProjectId,
         },
         mockProjectId,
       );
@@ -401,7 +400,6 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         {
           primaryItemId: 'primary-1',
           duplicateItemIds: ['dup-2'],
-          projectId: mockProjectId,
         },
         mockProjectId,
       );
@@ -471,7 +469,6 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         {
           primaryItemId: 'primary-pub-item',
           duplicateItemIds: ['dup-pub-item'],
-          projectId: mockProjectId,
         },
         mockProjectId,
       );
@@ -523,7 +520,6 @@ describe('Library Curation — Deduplication Engine & Auto-Resolver Suite', () =
         {
           primaryItemId: 'primary-meta-item',
           duplicateItemIds: ['dup-meta-item'],
-          projectId: mockProjectId,
         },
         mockProjectId,
       );

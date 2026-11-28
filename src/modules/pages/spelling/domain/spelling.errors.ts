@@ -3,7 +3,7 @@
  * Domain exceptions for the Pages Spelling subsystem.
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export class InvalidWordException extends PagesDomainError {
   constructor(word: string, reason?: string) {

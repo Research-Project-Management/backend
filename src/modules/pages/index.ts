@@ -6,7 +6,11 @@
 
 export * from './pages.module';
 export * from './pages.facade';
-export * from './core';
+export { PagesCoreModule } from './core/core.module';
+export { PagesConfigService } from './core/config/pages.config';
+export { PageModule } from './page/page.module';
+export { PageService } from './page/services/page.service';
+export { PageScaffoldService } from './page/services/scaffold.service';
 
 // Subsystem 1: Virtual File System & Storage
 export * from './filestore';
@@ -46,8 +50,6 @@ export * from './history/dto/label.dto';
 export * from './history/dto/restore.dto';
 export * from './history/domain/diff';
 export * from './history/domain/snapshot';
-export * from './history/domain/snapshot';
-export * from './history/domain/snapshot';
 export * from './history/domain/label';
 export * from './history/domain/errors';
 export * from './history/domain/ports';
@@ -59,13 +61,11 @@ export * from './spelling/dto/spelling.dto';
 export { CitationsModule } from './citations/citations.module';
 export { CitationsService } from './citations/services/citations.service';
 export * from './citations/dto/citations.dto';
-export * from './templates';
+export { TemplatesModule } from './templates/templates.module';
 export * from './export-import/export-import.module';
 export * from './export-import/services/export.service';
 export * from './export-import/services/import.service';
 export * from './export-import/services/convert.service';
-export * from './export-import/services/scaffold.service';
 export * from './export-import/dto/export.dto';
 export * from './export-import/dto/import.dto';
-export * from './export-import/dto/scaffold.dto';
-export * from './git-bridge';
+export { GitBridgeModule } from './git-bridge/git-bridge.module';

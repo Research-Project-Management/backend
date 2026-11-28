@@ -40,12 +40,7 @@ export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
 export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
 
 @Module({
-  imports: [
-    AppCoreModule,
-    DocstoreModule,
-    FilestoreModule,
-    HistoryModule,
-  ],
+  imports: [AppCoreModule, DocstoreModule, FilestoreModule, HistoryModule],
   controllers: [ClsiController],
   providers: [
     RemoteClsiClientAdapter,
@@ -69,15 +64,26 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
     {
       provide: CLSI_SANDBOX_RUNNER,
       useFactory: (sandboxConfig: ClsiSandboxConfig): ISandboxRunner => {
-        return sandboxConfig.mode === 'container'
-          ? new DockerSandboxRunner(
-              sandboxConfig.image,
-              `${sandboxConfig.memoryMb}m`,
-              `${sandboxConfig.cpus}`,
-              undefined,
-              buildSandboxProfileFromConfig(sandboxConfig),
-            )
-          : new LocalProcessRunner();
+        if (sandboxConfig.mode === 'container') {
+          return new DockerSandboxRunner(
+            sandboxConfig.image,
+            `${sandboxConfig.memoryMb}m`,
+            `${sandboxConfig.cpus}`,
+            undefined,
+            buildSandboxProfileFromConfig(sandboxConfig),
+          );
+        }
+        if (sandboxConfig.mode === 'remote') {
+          return {
+            name: 'disabled-remote-sandbox',
+            run: async () => {
+              throw new Error(
+                'Local LaTeX execution is disabled when CLSI remote mode is active.',
+              );
+            },
+          };
+        }
+        return new LocalProcessRunner();
       },
       inject: [CLSI_SANDBOX_CONFIG],
     },
@@ -117,10 +123,8 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
     },
     {
       provide: CompileService,
-      useFactory: (
-        workspace: ClsiRepository,
-        latexmkEngine: LatexmkEngine,
-      ) => new CompileService(workspace, latexmkEngine),
+      useFactory: (workspace: ClsiRepository, latexmkEngine: LatexmkEngine) =>
+        new CompileService(workspace, latexmkEngine),
       inject: [ClsiRepository, LatexmkEngine],
     },
     ClsiMetrics,
@@ -148,10 +152,6 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
     OutputService,
     ClsiService,
   ],
-  exports: [
-    ClsiService,
-    RemoteClsiClientAdapter,
-    CompileSourceService,
-  ],
+  exports: [ClsiService],
 })
 export class ClsiModule {}

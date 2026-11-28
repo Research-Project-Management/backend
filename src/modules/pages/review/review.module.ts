@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
+import { PageModule } from '@/modules/pages/page/page.module';
 import { CommentsController } from './controllers/comments.controller';
 import { ReviewStatusController } from './controllers/status.controller';
 import { SuggestionsController } from './controllers/suggestions.controller';
@@ -11,7 +12,7 @@ import { ReviewStatusService } from './services/status.service';
 import { SuggestionsService } from './services/suggestions.service';
 
 @Module({
-  imports: [PrismaModule, DocstoreModule],
+  imports: [PrismaModule, DocstoreModule, PageModule],
   controllers: [
     CommentsController,
     SuggestionsController,

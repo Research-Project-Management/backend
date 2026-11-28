@@ -59,8 +59,13 @@ export class FilestoreService {
     projectId: string,
     fileId: string,
     rangeHeader?: string,
+    pageId?: string | null,
   ): Promise<StreamPageBinaryAssetOutput> {
-    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    const file = await this.repository.findByProjectAndId(
+      projectId,
+      fileId,
+      pageId,
+    );
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
     }
@@ -364,8 +369,13 @@ export class FilestoreService {
   public async getFileHead(
     projectId: string,
     fileId: string,
+    pageId?: string | null,
   ): Promise<GetFileHeadOutput> {
-    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    const file = await this.repository.findByProjectAndId(
+      projectId,
+      fileId,
+      pageId,
+    );
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
     }
@@ -442,14 +452,31 @@ export class FilestoreService {
     projectId: string,
     fileId: string,
     purgeBlob = false,
+    pageId?: string | null,
   ): Promise<void> {
-    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    const file = await this.repository.findByProjectAndId(
+      projectId,
+      fileId,
+      pageId,
+    );
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
     }
 
-    file.markDeleted();
-    await this.repository.save(file);
+    const atomicDeleteResult =
+      typeof this.repository.markDeletedIfActive === 'function'
+        ? await this.repository.markDeletedIfActive(projectId, fileId, pageId)
+        : null;
+
+    if (atomicDeleteResult === false) {
+      throw new FileNotFoundException(fileId, projectId);
+    }
+    if (atomicDeleteResult === true) {
+      file.markDeleted();
+    } else {
+      file.markDeleted();
+      await this.repository.save(file);
+    }
 
     // Reclaim unified platform Space StorageQuota upon deletion
     if (
@@ -542,11 +569,16 @@ export class FilestoreService {
     if (!fileIds || fileIds.length === 0) return;
 
     let totalReclaimedBytes = 0n;
-    const blobIdsToRelease = new Set<string>();
+    const blobIdsToRelease: string[] = [];
     const hashesToRelease: string[] = [];
 
     if (deletedNodes && deletedNodes.length > 0) {
       const seenFileIds = new Set<string>();
+      const nodesMissingBlob: Array<{
+        fileId: string;
+        hash?: string | null;
+      }> = [];
+
       for (const n of deletedNodes) {
         if (!n.fileId || seenFileIds.has(n.fileId)) continue;
         seenFileIds.add(n.fileId);
@@ -554,38 +586,67 @@ export class FilestoreService {
           totalReclaimedBytes += BigInt(n.sizeBytes);
         }
         if (n.blobId) {
-          blobIdsToRelease.add(n.blobId);
+          blobIdsToRelease.push(n.blobId);
+        } else {
+          nodesMissingBlob.push({ fileId: n.fileId, hash: n.hash });
+        }
+      }
+
+      if (nodesMissingBlob.length > 0) {
+        const missingIds = nodesMissingBlob.map((n) => n.fileId);
+        const fetchedById = new Map<string, PageBinaryAsset>();
+        if (typeof this.repository.findManyByProjectAndIds === 'function') {
+          const batch = await this.repository
+            .findManyByProjectAndIds(projectId, missingIds)
+            .catch(() => []);
+          for (const f of batch) {
+            fetchedById.set(f.id, f);
+          }
         } else if (typeof this.repository.findByProjectAndId === 'function') {
-          const f = await this.repository
-            .findByProjectAndId(projectId, n.fileId)
-            .catch(() => null);
+          for (const id of missingIds) {
+            const f = await this.repository
+              .findByProjectAndId(projectId, id)
+              .catch(() => null);
+            if (f) fetchedById.set(f.id, f);
+          }
+        }
+
+        for (const n of nodesMissingBlob) {
+          const f = fetchedById.get(n.fileId);
           if (f?.blobId) {
-            blobIdsToRelease.add(f.blobId);
+            blobIdsToRelease.push(f.blobId);
           } else if (
             typeof n.hash === 'string' &&
             /^[a-f0-9]{64}$/i.test(n.hash)
           ) {
             hashesToRelease.push(n.hash);
           }
-        } else if (
-          typeof n.hash === 'string' &&
-          /^[a-f0-9]{64}$/i.test(n.hash)
-        ) {
-          hashesToRelease.push(n.hash);
         }
       }
     } else {
-      for (const fileId of fileIds) {
-        const f = await this.repository
-          .findByProjectAndId(projectId, fileId)
-          .catch(() => null);
-        if (f && f.sizeBytes > 0) {
+      const uniqueIds = Array.from(new Set(fileIds));
+      let files: PageBinaryAsset[] = [];
+      if (typeof this.repository.findManyByProjectAndIds === 'function') {
+        files = await this.repository
+          .findManyByProjectAndIds(projectId, uniqueIds)
+          .catch(() => []);
+      } else {
+        for (const fileId of uniqueIds) {
+          const f = await this.repository
+            .findByProjectAndId(projectId, fileId)
+            .catch(() => null);
+          if (f) files.push(f);
+        }
+      }
+
+      for (const f of files) {
+        if (f.sizeBytes > 0) {
           totalReclaimedBytes += BigInt(f.sizeBytes);
         }
-        if (f?.blobId) {
-          blobIdsToRelease.add(f.blobId);
+        if (f.blobId) {
+          blobIdsToRelease.push(f.blobId);
         } else {
-          const rawHash = f?.hash?.getValue?.();
+          const rawHash = f.hash?.getValue?.();
           if (rawHash && /^[a-f0-9]{64}$/i.test(rawHash)) {
             hashesToRelease.push(rawHash);
           }
@@ -691,8 +752,13 @@ export class FilestoreService {
     projectId: string,
     fileId: string,
     expiresIn = 3600,
+    pageId?: string | null,
   ): Promise<string | null> {
-    const file = await this.repository.findByProjectAndId(projectId, fileId);
+    const file = await this.repository.findByProjectAndId(
+      projectId,
+      fileId,
+      pageId,
+    );
     if (!file || file.deleted) {
       throw new FileNotFoundException(fileId, projectId);
     }

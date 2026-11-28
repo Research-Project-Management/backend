@@ -122,7 +122,7 @@ export class DistributedLockService {
     return false;
   }
 
-  private async extendLock(
+  public async extendLock(
     resource: string,
     token: string,
     ttlMs: number = 30000,

@@ -31,6 +31,7 @@ model PageDoc {
   @@index([pageId, deletedAt, updatedAt(sort: Desc)], map: "idx_page_docs_page_del_updated")
   @@index([pageId, deletedAt, lastKnownPath], map: "idx_page_docs_page_del_path")
   @@index([spaceId, deletedAt], map: "idx_page_docs_space_deleted")
+  @@index([spaceId, deletedAt, lastKnownPath], map: "idx_page_docs_space_del_path")
   @@index([spaceId, inStorage], map: "idx_page_docs_space_storage")
   @@map("page_docs")
 }

@@ -82,6 +82,7 @@ model DocChange {
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([docId, status, createdAt(sort: Desc)], map: "idx_doc_changes_doc_status")
+  @@index([docId, groupId, status], map: "idx_doc_changes_doc_group_status")
   @@index([groupId], map: "idx_doc_changes_group_id")
   @@index([createdById], map: "idx_doc_changes_author")
   @@map("doc_changes")

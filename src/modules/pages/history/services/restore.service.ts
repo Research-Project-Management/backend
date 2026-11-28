@@ -98,10 +98,18 @@ export class RestoreService {
         effectivePageId,
       );
     } catch (err: unknown) {
-      throw new NotFoundException(
-        (err as Error)?.message ||
-          `File ${dto.pathname} not found in version ${targetVersion}`,
-      );
+      if (
+        err instanceof NotFoundException ||
+        (err instanceof Error &&
+          (err.name === 'SnapshotFileNotFoundException' ||
+            err.message.toLowerCase().includes('not found')))
+      ) {
+        throw new NotFoundException(
+          err.message ||
+            `File ${dto.pathname} not found in version ${targetVersion}`,
+        );
+      }
+      throw err;
     }
 
     const newSnapshot = await this.snapshots.createSnapshotDirect({

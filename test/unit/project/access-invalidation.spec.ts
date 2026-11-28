@@ -13,9 +13,6 @@ describe('Zero-Latency Access Revocation & Cache Invalidation', () => {
     mockRedis = {
       del: jest.fn().mockResolvedValue(1),
       delPattern: jest.fn().mockResolvedValue(1),
-      invalidateUser: jest.fn().mockResolvedValue(undefined),
-      invalidateProject: jest.fn().mockResolvedValue(undefined),
-      invalidateSpace: jest.fn().mockResolvedValue(undefined),
     };
     listener = new CacheInvalidationListener(mockRedis as RedisCacheService);
   });
@@ -65,7 +62,7 @@ describe('Zero-Latency Access Revocation & Cache Invalidation', () => {
       entityId: projectId,
       oldValue: targetUserId,
       newValue: newOwnerId,
-    } as any);
+    });
 
     // Evicts previous owner
     expect(mockRedis.del).toHaveBeenCalledWith(

@@ -13,8 +13,11 @@ import {
   PageNodeEntity,
   RootDocNotFoundError,
 } from '../domain';
-import { CompilationPayload, WorkspaceFile } from '@/modules/pages/core';
-import { filterRecordsByPageScope } from '@/modules/pages/core/page-scope.helper';
+import {
+  CompilationPayload,
+  WorkspaceFile,
+} from '@/modules/pages/core/types/workspace-file';
+import { filterRecordsByPageScope } from '@/modules/pages/core/utils/page-scope';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { BibtexParser } from '@/modules/pages/citations/domain/bibtex.domain';

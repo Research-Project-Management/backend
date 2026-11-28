@@ -1,38 +1,99 @@
 // ============================================================================
-// Pages Subsystem: Templates & Starters Sub-Domain
-// Self-managed domain schema: PageTemplate
+// Pages Subsystem: Templates & Gallery Sub-Domain (Normalized 1NF -> BCNF / 4NF)
+// Models:
+//   1. TemplateBlob     — Content-Addressed Storage for text & binary template assets (PK: {contentHash})
+//   2. PageTemplate     — Template Aggregate Root (CK: {id}, {versionId}, {slug})
+//   3. PageTemplateFile — Normalized File Tree per Template (PK: {templateId, pathname})
+//   4. PageTemplateTag  — Normalized 1NF Tag Relation (PK: {templateId, tag})
 // ============================================================================
 
-enum PageTemplateCategory {
+enum TemplateCategory {
   journal
   conference
-  thesis
-  cv
+  book
+  letter
+  assignment
+  poster
   presentation
   report
+  cv
+  thesis
   other
 }
 
-model PageTemplate {
-  id            String               @id @default(uuid(7)) @db.Uuid
-  versionId     String               @unique @map("version_id") @db.VarChar(64)
-  name          String               @db.VarChar(255)
-  category      PageTemplateCategory @default(other)
-  description   String?              @db.Text
-  compiler      String               @default("pdflatex") @db.VarChar(32)
-  imageName     String?              @map("image_name") @db.VarChar(128)
-  mainFile      String               @default("main.tex") @map("main_file") @db.VarChar(255)
-  thumbnailUrl  String?              @map("thumbnail_url") @db.Text
-  author        String               @default("Flux Community") @db.VarChar(255)
-  tags          String[]             @default([])
-  isOfficial    Boolean              @default(false) @map("is_official")
-  downloadCount Int                  @default(0) @map("download_count")
-  files         Json                 @default("{}") @db.JsonB
-  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+enum TemplateVisibility {
+  official
+  workspace
+  private
+}
 
-  @@index([category, isOfficial, downloadCount(sort: Desc)], map: "idx_page_templates_cat")
-  @@index([isOfficial(sort: Desc), downloadCount(sort: Desc)], map: "idx_page_templates_official_downloads")
-  @@index([downloadCount(sort: Desc)], map: "idx_page_templates_downloads")
+model TemplateBlob {
+  contentHash String   @id @map("content_hash") @db.Char(64)
+  textContent String?  @map("text_content") @db.Text
+  binaryData  Bytes?   @map("binary_data")
+  mimeType    String   @default("text/plain") @map("mime_type") @db.VarChar(128)
+  sizeBytes   Int      @default(0) @map("size_bytes")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  templateFiles PageTemplateFile[]
+
+  @@map("template_blobs")
+}
+
+model PageTemplate {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  slug           String?            @unique(map: "uq_page_templates_slug") @db.VarChar(100)
+  versionId      String             @unique(map: "uq_page_templates_version") @map("version_id") @db.VarChar(64)
+  name           String             @db.VarChar(255)
+  category       TemplateCategory   @default(other)
+  visibility     TemplateVisibility @default(private)
+  description    String?            @db.Text
+  compiler       String             @default("pdflatex") @db.VarChar(32)
+  texLiveVersion String             @default("2024") @map("tex_live_version") @db.VarChar(16)
+  mainFile       String             @default("main.tex") @map("main_file") @db.VarChar(255)
+  badge          String             @default("article") @db.VarChar(64)
+  author         String             @default("Flux Community") @db.VarChar(255)
+  license        String?            @default("LPPL-1.3c") @db.VarChar(64)
+  sourceUrl      String?            @map("source_url") @db.VarChar(512)
+  thumbnailUrl   String?            @map("thumbnail_url") @db.Text
+  downloadCount  Int                @default(0) @map("download_count")
+
+  spaceId     String? @map("space_id") @db.Uuid
+  space       Space?  @relation("SpacePageTemplates", fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_templates_space")
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("UserPageTemplates", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_page_templates_creator")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  files PageTemplateFile[]
+  tags  PageTemplateTag[]
+
+  @@index([visibility, category, downloadCount(sort: Desc)], map: "idx_page_templates_vis_cat_dl")
+  @@index([spaceId, category, createdAt(sort: Desc)], map: "idx_page_templates_space_cat")
+  @@index([createdById, createdAt(sort: Desc)], map: "idx_page_templates_creator")
   @@map("page_templates")
+}
+
+model PageTemplateFile {
+  templateId  String       @map("template_id") @db.Uuid
+  template    PageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_template_files_template")
+  pathname    String       @db.VarChar(512)
+  kind        String       @default("doc") @db.VarChar(16) // 'doc' | 'file'
+  contentHash String       @map("content_hash") @db.Char(64)
+  blob        TemplateBlob @relation(fields: [contentHash], references: [contentHash], onDelete: Restrict, onUpdate: Cascade, map: "fk_page_template_files_blob")
+
+  @@id([templateId, pathname])
+  @@index([contentHash], map: "idx_page_template_files_hash")
+  @@map("page_template_files")
+}
+
+model PageTemplateTag {
+  templateId String       @map("template_id") @db.Uuid
+  template   PageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_page_template_tags_template")
+  tag        String       @db.VarChar(64)
+
+  @@id([templateId, tag])
+  @@index([tag, templateId], map: "idx_page_template_tags_lookup")
+  @@map("page_template_tags")
 }

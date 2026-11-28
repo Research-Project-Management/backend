@@ -8,8 +8,8 @@ import {
   assertExpectedVersionAndRev,
   executeDocstoreUpdateWithOcc,
 } from '@/modules/pages/docstore/services/doc-occ.helper';
-import { PageScaffoldService } from '@/modules/pages/docstore/services/page-scaffold.service';
-import { PageService } from '@/modules/pages/core/services/page.service';
+import { PageScaffoldService } from '@/modules/pages/page/services/scaffold.service';
+import { PageService } from '@/modules/pages/page/services/page.service';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
 const PAGE_ID = '22222222-2222-4222-8222-222222222222';

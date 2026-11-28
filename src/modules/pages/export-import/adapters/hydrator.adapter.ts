@@ -4,8 +4,8 @@ import { mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  PageDomainEventBus,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { ArchiveEntryVo, ImportSummaryVo } from '../domain/archive.domain';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
@@ -198,7 +198,11 @@ export class PageArchiveHydratorAdapter {
     if (typeof this.structureService.getAllNodes === 'function') {
       try {
         const allNodes = pageId
-          ? await this.structureService.getAllNodes(projectId, undefined, pageId)
+          ? await this.structureService.getAllNodes(
+              projectId,
+              undefined,
+              pageId,
+            )
           : await this.structureService.getAllNodes(projectId);
         if (Array.isArray(allNodes)) {
           prefetched = true;
@@ -506,24 +510,25 @@ export class PageArchiveHydratorAdapter {
           : null));
 
     if (!alreadyCreated) {
-      const createdFileNode = await (session.pageId
-        ? this.structureService.createNode(
-            session.projectId,
-            {
+      const createdFileNode = await (
+        session.pageId
+          ? this.structureService.createNode(
+              session.projectId,
+              {
+                path: normalizedPath,
+                name: baseName,
+                type: 'FILE',
+                fileId: file.id,
+                pageId: session.pageId,
+              },
+              session.pageId,
+            )
+          : this.structureService.createNode(session.projectId, {
               path: normalizedPath,
               name: baseName,
               type: 'FILE',
               fileId: file.id,
-              pageId: session.pageId,
-            },
-            session.pageId,
-          )
-        : this.structureService.createNode(session.projectId, {
-            path: normalizedPath,
-            name: baseName,
-            type: 'FILE',
-            fileId: file.id,
-          })
+            })
       ).catch(() => undefined);
       if (createdFileNode && session.nodesByPath) {
         session.nodesByPath.set(normalizedPath, createdFileNode);
@@ -550,7 +555,10 @@ export class PageArchiveHydratorAdapter {
       );
       if (cleanPreferred) {
         const preferredNorm = '/' + cleanPreferred;
-        const match = await this.resolveExistingNodeByPath(session, preferredNorm);
+        const match = await this.resolveExistingNodeByPath(
+          session,
+          preferredNorm,
+        );
         if (match && match.type === 'DOC') {
           const updated = await this.structureService.setRootDoc(
             session.projectId,
@@ -633,7 +641,8 @@ export class PageArchiveHydratorAdapter {
       if (!clean) continue;
 
       const firstSlash = clean.indexOf('/');
-      const firstSegment = firstSlash === -1 ? clean : clean.slice(0, firstSlash);
+      const firstSegment =
+        firstSlash === -1 ? clean : clean.slice(0, firstSlash);
 
       if (commonTopFolder === null) {
         commonTopFolder = firstSegment;

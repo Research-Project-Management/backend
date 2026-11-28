@@ -29,7 +29,7 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
 import { SpellingService } from './spelling.service';
 import {
   CheckSpellingDto,
@@ -69,7 +69,8 @@ export class SpellingController {
   @UserRateLimit('search-replace')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Check unique words extracted from LaTeX prose and return suggestions',
+    summary:
+      'Check unique words extracted from LaTeX prose and return suggestions',
   })
   @ApiResponse({ status: 200, type: SpellingReportDto })
   @ApiResponse({ status: 400, description: 'Unsupported language' })
@@ -111,7 +112,11 @@ export class SpellingController {
   ) {
     const spaceId = this.resolveSpaceId(spaceIdParam, resolvedSpace, req);
     const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
-    const word = await this.spellingService.learnWord(spaceId, body.word, userId);
+    const word = await this.spellingService.learnWord(
+      spaceId,
+      body.word,
+      userId,
+    );
     return { success: true, word };
   }
 

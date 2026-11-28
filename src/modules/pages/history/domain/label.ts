@@ -4,7 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export interface CreateVersionLabelProps {
   id?: string;

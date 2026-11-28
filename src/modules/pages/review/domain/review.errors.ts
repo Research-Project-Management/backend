@@ -1,4 +1,4 @@
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export class ChangeNotFoundError extends PagesDomainError {
   constructor(public readonly changeId: string) {

@@ -20,7 +20,12 @@ import {
   UserRateLimitGuard,
   UserRateLimitRule,
 } from '@/core';
-import { BlobStatus, StorageBlobRecord, UploadSessionRecord, UploadSessionStatus } from '@/modules/files/types/files.type';
+import {
+  BlobStatus,
+  StorageBlobRecord,
+  UploadSessionRecord,
+  UploadSessionStatus,
+} from '@/modules/files/types/files.type';
 import {
   FILE_JOBS,
   MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER,
@@ -522,10 +527,7 @@ describe('FilesModule P0 Production Hardening', () => {
 
       const payload = Buffer.from('%PDF-1.7\npresigned-idempotent');
       const stagingKey = 'uploads/staging/user-1/idem-doc.pdf';
-      await localAdapter.put(stagingKey, payload, {
-        mimeType: 'application/pdf',
-        size: payload.length,
-      });
+      await localAdapter.put(stagingKey, payload);
 
       const first = await uploadService.completePresignedUpload({
         userId: 'user-1',
@@ -678,8 +680,8 @@ describe('FilesModule P0 Production Hardening', () => {
 
       const key1 = 'uploads/staging/u1/copy1.pdf';
       const key2 = 'uploads/staging/u2/copy2.pdf';
-      await localAdapter.put(key1, payload, { mimeType: 'application/pdf' });
-      await localAdapter.put(key2, payload, { mimeType: 'application/pdf' });
+      await localAdapter.put(key1, payload);
+      await localAdapter.put(key2, payload);
 
       const fast1 = await blobService.registerStagingObjectFast({
         storageKey: key1,

@@ -165,8 +165,12 @@ describe('Enterprise Session Governance & Multi-Device Token Invalidation', () =
       const current = result.find((s) => s.id === currentSessionId);
       const other = result.find((s) => s.id === phoneSessionId);
 
-      expect(current?.isCurrent).toBe(true);
-      expect(other?.isCurrent).toBe(false);
+      expect((current as { isCurrent?: boolean } | undefined)?.isCurrent).toBe(
+        true,
+      );
+      expect((other as { isCurrent?: boolean } | undefined)?.isCurrent).toBe(
+        false,
+      );
     });
 
     it('should revoke all other sessions in DB and blacklist their sessionIds in Redis', async () => {

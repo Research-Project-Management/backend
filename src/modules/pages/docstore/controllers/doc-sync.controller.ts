@@ -29,13 +29,13 @@ import { isUuid } from '@/core';
 import {
   getRecordSpaceId,
   resolveActiveProjectId,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core';
-import { PageService } from '@/modules/pages/core/services/page.service';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { PageService } from '@/modules/pages/page/services/page.service';
 import { DocstoreService } from '../docstore.service';
 import { ScopeRepository } from '../repositories/scope.repository';
 
@@ -143,7 +143,13 @@ export class DocSyncController {
   @Post('spaces/:spaceId/updater/flush')
   @RequireRole(Role.CONTRIBUTOR)
   @HttpCode(HttpStatus.OK)
-  async flushProject(@Param('spaceId') spaceId: string) {
+  async flushProject(
+    @Param('spaceId') routeSpaceId: string,
+    @ResolvedSpace() resolvedSpace?: string | { id?: string },
+  ) {
+    const spaceId =
+      (typeof resolvedSpace === 'string' ? resolvedSpace : resolvedSpace?.id) ||
+      routeSpaceId;
     const startedAt = Date.now();
     const flushed = await this.liveCollab.flushDocs(spaceId, []);
     return {

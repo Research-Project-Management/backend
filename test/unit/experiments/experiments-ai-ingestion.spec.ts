@@ -98,6 +98,9 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       cancelThread: jest.fn(),
       deleteThread: jest.fn(),
       deleteSpaceThreads: jest.fn(),
+      revertTurn: jest.fn(),
+      listThreadCheckpoints: jest.fn(),
+      rewindThread: jest.fn(),
       ingestDocument: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn().mockResolvedValue({
@@ -120,15 +123,19 @@ describe('Storage AI Knowledge Sync & BullMQ Ingestion Suite', () => {
       mockStoragePort,
       fromPartial<ILibraryFacade>(mockLibraryFacade),
     );
-  const eagerConfig = fromPartial<ConfigService>({
-    get: jest.fn((key: string) =>
-      key === 'FLUX_AI_EAGER_INGEST_ON_UPLOAD' || key === 'FLUX_AI_ENABLED'
-        ? 'true'
-        : undefined,
-    ),
-  });
+    const eagerConfig = fromPartial<ConfigService>({
+      get: jest.fn((key: string) =>
+        key === 'FLUX_AI_EAGER_INGEST_ON_UPLOAD' || key === 'FLUX_AI_ENABLED'
+          ? 'true'
+          : undefined,
+      ),
+    });
 
-  listener = new KnowledgeEventListener(ingestService, undefined, eagerConfig);
+    listener = new KnowledgeEventListener(
+      ingestService,
+      undefined,
+      eagerConfig,
+    );
   });
 
   it('ignores non-textual files such as images and archives', async () => {

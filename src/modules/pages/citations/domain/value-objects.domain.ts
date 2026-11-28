@@ -47,7 +47,6 @@ export class CitationKeyVo {
   }
 }
 
-
 /**
  * citations/domain/value-objects/author-list.ts
  * Value Object parsing and formatting BibTeX author strings for human display.
@@ -110,6 +109,7 @@ export class AuthorListVo {
     let start = 0;
     let i = 0;
 
+    const andRe = /\s+and\s+/iy;
     while (i < raw.length) {
       const ch = raw[i];
       if (ch === '\\') {
@@ -127,8 +127,8 @@ export class AuthorListVo {
         continue;
       }
       if (braceDepth === 0 && /\s/.test(ch)) {
-        const rest = raw.slice(i);
-        const match = rest.match(/^\s+and\s+/i);
+        andRe.lastIndex = i;
+        const match = andRe.exec(raw);
         if (match) {
           result.push(raw.slice(start, i));
           i += match[0].length;
@@ -161,7 +161,6 @@ export class AuthorListVo {
     return this.authors.map((a) => a.fullName);
   }
 }
-
 
 /**
  * citations/domain/identifier.ts
@@ -229,4 +228,3 @@ export class IdentifierVo {
 }
 
 export { IdentifierVo as AcademicIdentifierVo };
-

@@ -10,9 +10,11 @@ import {
   LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
   NOOP_LIVE_COLLABORATION,
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import {
   createZipStream,
   type ZipEntry,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/utils/zip-builder';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';

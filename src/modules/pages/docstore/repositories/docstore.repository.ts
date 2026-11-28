@@ -11,7 +11,7 @@ import { PrismaService, isUuid } from '@/core';
 import {
   ensureCanonicalPageId,
   filterRecordsByPageScope,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import {
@@ -272,6 +272,7 @@ export class DocstoreRepository {
           id: docId,
           spaceId: projectId,
           rev: data.expectedRev,
+          deletedAt: null,
         },
         data: {
           lines: data.lines,
@@ -324,36 +325,46 @@ export class DocstoreRepository {
       return { doc: updatedDoc, modified: true };
     }
 
-    // 2. Direct atomic update in 1 single roundtrip when OCC revision check is not requested
-    try {
-      const updated = await this.prisma.pageDoc.update({
-        where: { id: docId },
-        data: {
-          lines: data.lines,
-          version: data.version,
-          ...(data.ranges !== undefined
-            ? {
-                ranges: data.ranges as unknown as Prisma.InputJsonValue,
-              }
-            : {}),
-          ...(data.hash ? { hash: data.hash } : {}),
-          sizeBytes,
-          inStorage: false,
-          storageKey: null,
-          rev: { increment: 1 },
-        },
-      });
+    // 2. Direct tenant-scoped atomic update when OCC revision check is not requested
+    const directResult = await this.prisma.pageDoc.updateMany({
+      where: {
+        id: docId,
+        spaceId: projectId,
+        deletedAt: null,
+      },
+      data: {
+        lines: data.lines,
+        version: data.version,
+        ...(data.ranges !== undefined
+          ? {
+              ranges: data.ranges as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
+        ...(data.hash ? { hash: data.hash } : {}),
+        sizeBytes,
+        inStorage: false,
+        storageKey: null,
+        rev: { increment: 1 },
+      },
+    });
 
-      DocstoreMetrics.recordWrite(sizeBytes);
-      return { doc: this.mapToEntity(updated), modified: true };
-    } catch (err: unknown) {
-      if ((err as { code?: string })?.code === 'P2025') {
-        throw new DocNotFoundError(
-          `Document ${docId} not found in project ${projectId}`,
-        );
-      }
-      throw err;
+    if (directResult.count === 0) {
+      throw new DocNotFoundError(
+        `Document ${docId} not found in space ${projectId}`,
+      );
     }
+
+    const updated = await this.prisma.pageDoc.findFirst({
+      where: { id: docId, spaceId: projectId, deletedAt: null },
+    });
+    if (!updated) {
+      throw new DocNotFoundError(
+        `Document ${docId} not found in space ${projectId}`,
+      );
+    }
+
+    DocstoreMetrics.recordWrite(sizeBytes);
+    return { doc: this.mapToEntity(updated), modified: true };
   }
 
   public async patchDoc(
@@ -527,14 +538,12 @@ export class DocstoreRepository {
     const current = await this.prisma.pageDoc.findFirst({
       where: { id: docId, spaceId: projectId },
     });
-    if (current) {
-      return this.mapToEntity(current);
+    if (!current) {
+      throw new DocNotFoundError(
+        `Document ${docId} not found in space ${projectId}`,
+      );
     }
-
-    const fallback = await this.prisma.pageDoc.findUnique({
-      where: { id: docId },
-    });
-    return this.mapToEntity(fallback!);
+    return this.mapToEntity(current);
   }
 
   public async destroyDoc(projectId: string, docId: string): Promise<boolean> {

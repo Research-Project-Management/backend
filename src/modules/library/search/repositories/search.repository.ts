@@ -195,14 +195,29 @@ export class SearchRepository implements OnModuleInit {
                   ftsRows = await rawRunner.$queryRawUnsafe<
                     Array<{ id: string }>
                   >(trgmBuilt.sql, ...trgmBuilt.params);
-                } catch {
-                  // pg_trgm extension may not be installed in all environments; ignore silently
+                } catch (err) {
+                  // pg_trgm may be missing. Inside a transaction the failed
+                  // statement aborts the tx, so we must not continue using it.
+                  if (client !== this.prisma) throw err;
+                  this.logger.warn(
+                    `Trigram fallback failed (pg_trgm missing?): ${
+                      err instanceof Error ? err.message : String(err)
+                    }`,
+                  );
                 }
               }
             }
             textWhere = { id: { in: ftsRows.map((r) => r.id) } };
           }
-        } catch {
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // A failed raw query aborts an enclosing transaction; falling back
+          // would only produce "current transaction is aborted" errors.
+          if (client !== this.prisma) {
+            this.logger.error(`FTS query failed inside transaction: ${msg}`);
+            throw err;
+          }
+          this.logger.warn(`FTS query failed, falling back to ILIKE: ${msg}`);
           textWhere = this.buildTextWhereIlike(q, resolvedOptions.searchMode);
         }
       } else {

@@ -15,7 +15,7 @@ import {
   StructureError,
 } from '../domain';
 import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from '../dto/node.dto';
-import { PageDomainEventBus } from '@/modules/pages/core';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';

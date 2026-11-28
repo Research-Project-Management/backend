@@ -96,15 +96,36 @@ export class InMemoryDistributedLockAdapter implements IDistributedLockPort {
     action: () => Promise<T>,
     ttlMs: number = 30000,
   ): Promise<T> {
+    const startTime = Date.now();
+    const maxWaitMs = Math.max(ttlMs, 30000);
     let handle = await this.acquire(resource, ttlMs);
     while (!handle) {
+      const remaining = maxWaitMs - (Date.now() - startTime);
+      if (remaining <= 0) {
+        throw new Error(
+          `Distributed lock timeout after ${maxWaitMs}ms for resource '${resource}'`,
+        );
+      }
       await new Promise<void>((resolve) => {
         let queue = this.waiters.get(resource);
         if (!queue) {
           queue = [];
           this.waiters.set(resource, queue);
         }
-        queue.push(resolve);
+        let settled = false;
+        const wake = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          const idx = queue.indexOf(wake);
+          if (idx !== -1) queue.splice(idx, 1);
+          wake();
+        }, remaining);
+        if (typeof timer.unref === 'function') timer.unref();
+        queue.push(wake);
       });
       handle = await this.acquire(resource, ttlMs);
     }

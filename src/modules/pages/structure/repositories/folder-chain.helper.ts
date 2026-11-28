@@ -7,7 +7,7 @@ import { PageNode, Prisma } from '@prisma/client';
 import {
   ensureCanonicalPageId,
   type PageScopeDbClient,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import {
   PageNodeEntity,
   NodePathVo,

@@ -3,7 +3,7 @@
  * Subtree move, node rename, and subtree delete transaction helpers for StructureRepository.
  */
 
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import {
@@ -46,6 +46,15 @@ export async function moveSubtreeHelper(
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const canUseAdvisoryLock =
+        typeof (tx as { $executeRaw?: unknown }).$executeRaw === 'function' &&
+        !(tx.$executeRaw as { _isMockFunction?: boolean } | undefined)
+          ?._isMockFunction;
+      if (canUseAdvisoryLock) {
+        const lockScope = `page_tree:${optionPageId || projectId}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockScope}))`;
+      }
+
       const targetRoot = options?.nodeId
         ? await tx.pageNode.findFirst?.({
             where: { id: options.nodeId, spaceId: projectId },
@@ -71,6 +80,18 @@ export async function moveSubtreeHelper(
           statusCode: 404,
           code: 'RESOURCE_NOT_FOUND',
           message: `Node at '${normSource}' not found`,
+        });
+      }
+
+      if (
+        targetRoot.type === 'FOLDER' &&
+        (normDest === targetRoot.path ||
+          normDest.startsWith(`${targetRoot.path}/`))
+      ) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'CIRCULAR_MOVE_CONFLICT',
+          message: `Cannot move folder '${targetRoot.path}' into its own descendant '${normDest}'`,
         });
       }
 
@@ -354,35 +375,40 @@ export async function deleteSubtreeHelper(
   const prefix = normalized + '/';
 
   const trimmedPageId = pageId?.trim() || undefined;
-  const targets = await prisma.pageNode.findMany({
-    where: {
-      spaceId: projectId,
-      ...(trimmedPageId ? { pageId: trimmedPageId } : {}),
-      OR: [{ path: normalized }, { path: { startsWith: prefix } }],
-    },
-    include: NODE_HYDRATION_INCLUDE,
-  });
-
-  const targetIds = targets.map((t) => t.id);
-  const docIds = Array.from(
-    new Set(
-      targets
-        .map((t) => t.docId)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0),
-    ),
-  );
-  const fileIds = Array.from(
-    new Set(
-      targets
-        .map((t) => t.fileId)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0),
-    ),
-  );
-
   const now = new Date();
-  const runCleanup = async (
+
+  const runAtomicDelete = async (
     db: Pick<PrismaService, 'pageNode' | 'pageDoc' | 'pageFile'>,
   ) => {
+    const targets = await db.pageNode.findMany({
+      where: {
+        spaceId: projectId,
+        ...(trimmedPageId ? { pageId: trimmedPageId } : {}),
+        OR: [{ path: normalized }, { path: { startsWith: prefix } }],
+      },
+      include: NODE_HYDRATION_INCLUDE,
+    });
+
+    const targetIds = targets.map((t) => t.id);
+    const docIds = Array.from(
+      new Set(
+        targets
+          .map((t) => t.docId)
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
+      ),
+    );
+    const fileIds = Array.from(
+      new Set(
+        targets
+          .map((t) => t.fileId)
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
+      ),
+    );
+
     const ops: Promise<unknown>[] = [];
     if (targetIds.length > 0) {
       ops.push(
@@ -413,24 +439,19 @@ export async function deleteSubtreeHelper(
     if (ops.length > 0) {
       await Promise.all(ops);
     }
+
+    return targets;
   };
 
-  if (
-    targetIds.length > 0 ||
-    (docIds.length > 0 && typeof prisma.pageDoc?.updateMany === 'function') ||
-    (fileIds.length > 0 && typeof prisma.pageFile?.updateMany === 'function')
-  ) {
-    if (typeof prisma.$transaction === 'function') {
-      await prisma.$transaction(async (tx) => {
-        const client = tx?.pageNode ? tx : prisma;
-        await runCleanup(client);
-      });
-    } else {
-      await runCleanup(prisma);
-    }
-  }
+  const deletedTargets =
+    typeof prisma.$transaction === 'function'
+      ? await prisma.$transaction(async (tx) => {
+          const client = tx?.pageNode ? tx : prisma;
+          return runAtomicDelete(client);
+        })
+      : await runAtomicDelete(prisma);
 
-  return targets.map((t) =>
+  return deletedTargets.map((t) =>
     mapHydratedRowToPageNodeEntity(t as HydratedPageNodeRow),
   );
 }

@@ -9,7 +9,7 @@ import { PrismaService } from '@/core';
 import {
   ensureCanonicalPageId,
   filterRecordsByPageScope,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import {
   IStructureRepository,
   CreateNodeParams,

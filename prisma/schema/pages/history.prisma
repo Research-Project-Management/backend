@@ -28,8 +28,9 @@ model PageSnapshot {
   totalBytes  Int      @default(0) @map("total_bytes")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  files  PageSnapshotFile[]
-  labels PageSnapshotLabel[]
+  files        PageSnapshotFile[]
+  labels       PageSnapshotLabel[]
+  gitPushEvent GitPushEvent?
 
   @@unique([id, pageId], map: "uq_page_snapshots_id_page")
   @@unique([pageId, version], map: "uq_page_snapshots_page_version")

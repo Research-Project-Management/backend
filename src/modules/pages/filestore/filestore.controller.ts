@@ -31,14 +31,52 @@ import {
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { PageBinaryAssetResponseDto } from './dto/file-response.dto';
 import {
   FileNotFoundException,
   InvalidByteRangeException,
 } from './filestore.types';
 import { FilestoreService } from './filestore.service';
-import { resolvePageControllerCoordinates } from '../core/page-scope.helper';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+
+const STRICT_MIME_REGEX = /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i;
+
+const ACTIVE_DANGEROUS_MIME_TYPES = new Set([
+  'text/html',
+  'application/xhtml+xml',
+  'image/svg+xml',
+  'text/javascript',
+  'application/javascript',
+  'application/x-javascript',
+  'text/xml',
+  'application/xml',
+]);
+
+function sanitizeMimeType(raw?: string): string {
+  const base = (raw || '').split(';')[0].trim().toLowerCase().slice(0, 128);
+  if (!base || !STRICT_MIME_REGEX.test(base)) {
+    return 'application/octet-stream';
+  }
+  return base;
+}
+
+function resolveSafeDownloadContentType(
+  mimeType: string,
+  filename: string,
+): string {
+  const safe = sanitizeMimeType(mimeType);
+  const lowerName = (filename || '').toLowerCase();
+  const isActiveExtension =
+    lowerName.endsWith('.html') ||
+    lowerName.endsWith('.htm') ||
+    lowerName.endsWith('.xhtml') ||
+    lowerName.endsWith('.svg');
+
+  if (ACTIVE_DANGEROUS_MIME_TYPES.has(safe) || isActiveExtension) {
+    return 'application/octet-stream';
+  }
+  return safe;
+}
 
 @ApiTags('Pages - Binary Assets & Filestore')
 @ApiBearerAuth('JWT-auth')
@@ -109,9 +147,7 @@ export class FilestoreController {
         mimeType = contentType.split(';')[0].trim();
       }
     }
-    const safeMimeType = (mimeType || 'application/octet-stream')
-      .trim()
-      .slice(0, 128);
+    const safeMimeType = sanitizeMimeType(mimeType);
 
     const { spaceId, pageId } = this.resolveCoordinates(
       { spaceId: routeSpaceId, pageId: paramPageId },
@@ -142,18 +178,26 @@ export class FilestoreController {
     @Req() req?: FastifyRequest,
   ): Promise<void> {
     try {
-      const { spaceId } = this.resolveCoordinates(
+      const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
         undefined,
         req,
       );
-      const { file } = await this.filestoreService.getFileHead(spaceId, fileId);
+      const { file } = await this.filestoreService.getFileHead(
+        spaceId,
+        fileId,
+        pageId,
+      );
 
       res.header('Content-Length', file.sizeBytes.toString());
-      res.header('Content-Type', file.mimeType);
+      res.header(
+        'Content-Type',
+        resolveSafeDownloadContentType(file.mimeType, file.name),
+      );
       res.header('Accept-Ranges', 'bytes');
       res.header('X-Content-Type-Options', 'nosniff');
+      res.header('Content-Security-Policy', 'sandbox');
       res.header(
         'Content-Disposition',
         `attachment; filename="${encodeURIComponent(file.name)}"`,
@@ -245,7 +289,7 @@ export class FilestoreController {
     @Req() req?: FastifyRequest,
   ): Promise<void> {
     try {
-      const { spaceId } = this.resolveCoordinates(
+      const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
         undefined,
@@ -255,28 +299,20 @@ export class FilestoreController {
         spaceId,
         fileId,
         rangeHeader,
+        pageId,
       );
 
       const { file, stream, byteRange, isPartialContent, contentLength } =
         result;
 
-      const isMobileSafari =
-        userAgent &&
-        (userAgent.includes('iPhone') || userAgent.includes('iPad'));
-      const isHtml =
-        file.name.endsWith('.html') ||
-        file.name.endsWith('.htm') ||
-        file.name.endsWith('.xhtml');
-
-      if (isMobileSafari && isHtml) {
-        res.header('Content-Type', 'text/plain; charset=utf-8');
-      } else {
-        res.header('Content-Type', file.mimeType);
-      }
-
+      res.header(
+        'Content-Type',
+        resolveSafeDownloadContentType(file.mimeType, file.name),
+      );
       res.header('Cache-Control', 'private, max-age=3600, immutable');
       res.header('Accept-Ranges', 'bytes');
       res.header('X-Content-Type-Options', 'nosniff');
+      res.header('Content-Security-Policy', 'sandbox');
       res.header(
         'Content-Disposition',
         `attachment; filename="${encodeURIComponent(file.name)}"`,
@@ -291,7 +327,7 @@ export class FilestoreController {
         res.header('Content-Length', contentLength.toString());
       }
 
-      await pipeline(stream, res.raw);
+      return res.send(stream);
     } catch (err) {
       if (err instanceof FileNotFoundException) {
         throw new NotFoundException(err.message);
@@ -317,13 +353,13 @@ export class FilestoreController {
     @Req() req?: FastifyRequest,
   ): Promise<void> {
     try {
-      const { spaceId } = this.resolveCoordinates(
+      const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
         undefined,
         req,
       );
-      await this.filestoreService.deleteFile(spaceId, fileId, false);
+      await this.filestoreService.deleteFile(spaceId, fileId, false, pageId);
     } catch (err) {
       if (err instanceof FileNotFoundException) {
         throw new NotFoundException(err.message);
@@ -342,7 +378,7 @@ export class FilestoreController {
     @Req() req?: FastifyRequest,
   ): Promise<{ signedUrl: string | null }> {
     try {
-      const { spaceId } = this.resolveCoordinates(
+      const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
         undefined,
@@ -356,6 +392,7 @@ export class FilestoreController {
         spaceId,
         fileId,
         ttl,
+        pageId,
       );
       return { signedUrl };
     } catch (err) {

@@ -1,7 +1,9 @@
+import * as dns from 'node:dns/promises';
 import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { ArchiveEntryVo, ImportSummaryVo } from '../domain/archive.domain';
 import {
   isBlockedSsrfUrl,
+  isPrivateIpAddress,
   MAX_SINGLE_FILE_BYTES,
   validateExtractedArchiveEntries,
 } from '../domain/archive.policy';
@@ -50,9 +52,8 @@ export class ImportService {
     preferredRootDoc?: string,
     pageId?: string,
   ): Promise<ImportSummaryResponseDto> {
-    const entries = validateExtractedArchiveEntries(
-      this.zipEngine.extractZip(zipBuffer),
-    );
+    const extracted = await this.zipEngine.extractZip(zipBuffer);
+    const entries = validateExtractedArchiveEntries(extracted);
     const summary = await this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
@@ -85,7 +86,13 @@ export class ImportService {
           .replace(/[^\w.-]/g, '_')
           .slice(0, 128) || 'imported-file.tex';
 
-      await this.ingestFetchedPayload(spaceId, safeName, buffer, pageId, userId);
+      await this.ingestFetchedPayload(
+        spaceId,
+        safeName,
+        buffer,
+        pageId,
+        userId,
+      );
 
       return { filename: safeName, sizeBytes: buffer.length, imported: true };
     } finally {
@@ -106,6 +113,21 @@ export class ImportService {
       const { parsed, reason } = isBlockedSsrfUrl(currentRaw);
       if (!parsed) {
         throw new BadRequestException(reason || 'Invalid URL.');
+      }
+
+      // Resolve DNS and block hostnames pointing to private/loopback IPs (anti-SSRF)
+      try {
+        const resolved = await dns.lookup(parsed.hostname, { all: true });
+        if (resolved.some((r) => isPrivateIpAddress(r.address))) {
+          throw new BadRequestException(
+            'Resolved host points to a private or loopback IP address.',
+          );
+        }
+      } catch (err) {
+        if (err instanceof BadRequestException) throw err;
+        throw new BadRequestException(
+          `Unable to resolve remote hostname '${parsed.hostname}'.`,
+        );
       }
 
       const response = await fetch(parsed.toString(), {
@@ -133,7 +155,9 @@ export class ImportService {
       return { response, finalUrl: parsed };
     }
 
-    throw new BadRequestException('Too many HTTP redirects while fetching URL.');
+    throw new BadRequestException(
+      'Too many HTTP redirects while fetching URL.',
+    );
   }
 
   /**
@@ -147,7 +171,10 @@ export class ImportService {
     const contentLengthHeader = response.headers.get('content-length');
     if (contentLengthHeader !== null) {
       const declaredLength = Number(contentLengthHeader);
-      if (Number.isFinite(declaredLength) && declaredLength > MAX_URL_IMPORT_BYTES) {
+      if (
+        Number.isFinite(declaredLength) &&
+        declaredLength > MAX_URL_IMPORT_BYTES
+      ) {
         controller.abort();
         throw new BadRequestException('Fetched file exceeds 25 MB limit.');
       }
@@ -183,7 +210,9 @@ export class ImportService {
           throw new BadRequestException('Fetched file exceeds 25 MB limit.');
         }
 
-        chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+        chunks.push(
+          Buffer.from(value.buffer, value.byteOffset, value.byteLength),
+        );
       }
     } finally {
       reader.releaseLock();

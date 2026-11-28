@@ -19,7 +19,13 @@ export type PandocImportFormat = 'docx' | 'md';
 
 const EXPORT_META: Record<
   PandocExportFormat,
-  { ext: string; pandocTo: string; mimeType: string; isBinary: boolean; extraArgs: string[] }
+  {
+    ext: string;
+    pandocTo: string;
+    mimeType: string;
+    isBinary: boolean;
+    extraArgs: string[];
+  }
 > = {
   docx: {
     ext: '.docx',
@@ -78,8 +84,10 @@ export class PandocAdapter {
 
     const meta = EXPORT_META[targetFormat];
     const baseName =
-      path.basename(params.rawFilename || 'document.tex', path.extname(params.rawFilename || 'document.tex')) ||
-      'document';
+      path.basename(
+        params.rawFilename || 'document.tex',
+        path.extname(params.rawFilename || 'document.tex'),
+      ) || 'document';
     const outFilename = `${baseName}${meta.ext}`;
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'flux-pandoc-exp-'));
@@ -91,6 +99,7 @@ export class PandocAdapter {
       await execFileAsync(
         this.bin,
         [
+          '--sandbox',
           '-f',
           'latex',
           '-t',
@@ -145,7 +154,17 @@ export class PandocAdapter {
 
       await execFileAsync(
         this.bin,
-        ['-f', fromFormat, '-t', 'latex', '--standalone', '-o', outPath, inPath],
+        [
+          '--sandbox',
+          '-f',
+          fromFormat,
+          '-t',
+          'latex',
+          '--standalone',
+          '-o',
+          outPath,
+          inPath,
+        ],
         {
           cwd: tmpDir,
           timeout: params.timeoutMs ?? 30_000,

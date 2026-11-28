@@ -117,9 +117,8 @@ export function parseTexcountBriefOutput(
       continue;
     }
 
-    const secMatch = /^(Section|Subsection|Subsubsection|Chapter|Part):\s*(.*)$/i.exec(
-      label,
-    );
+    const secMatch =
+      /^(Section|Subsection|Subsubsection|Chapter|Part):\s*(.*)$/i.exec(label);
     if (secMatch) {
       sections.push({
         level: secMatch[1].toLowerCase(),
@@ -172,7 +171,15 @@ export class TexcountCliAdapter {
   }): Promise<WordCountStats | null> {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'flux-texcount-'));
     try {
-      const normalizedRoot = SafePath.normalizeRelPath(params.rootFile || 'main.tex') || 'main.tex';
+      const normalizedRoot =
+        SafePath.normalizeRelPath(params.rootFile || 'main.tex') || 'main.tex';
+      if (
+        normalizedRoot.startsWith('-') ||
+        normalizedRoot.includes('..') ||
+        normalizedRoot.startsWith('/')
+      ) {
+        return null;
+      }
       let combinedText = '';
 
       for (const [rawPath, content] of Object.entries(params.files)) {
@@ -189,8 +196,8 @@ export class TexcountCliAdapter {
         '-utf8',
         '-brief',
         '-sub=section',
-        '-inc',
         ...(params.includeBib ? ['-incbib'] : []),
+        '--',
         normalizedRoot,
       ];
 
@@ -198,6 +205,12 @@ export class TexcountCliAdapter {
         cwd: tmpDir,
         timeout: params.timeoutMs ?? 10_000,
         maxBuffer: 2 * 1024 * 1024,
+        env: {
+          PATH: process.env.PATH || '',
+          HOME: tmpDir,
+          TMPDIR: tmpDir,
+          LANG: 'C.UTF-8',
+        },
       });
 
       const parsed = parseTexcountBriefOutput(stdout, normalizedRoot);
@@ -222,7 +235,8 @@ export class TexcountCliAdapter {
         charactersWithSpaces,
         charactersNoSpaces,
         cjkCharacters,
-        readingTimeMinutes: totalWords > 0 ? Math.max(1, Math.ceil(totalWords / 200)) : 0,
+        readingTimeMinutes:
+          totalWords > 0 ? Math.max(1, Math.ceil(totalWords / 200)) : 0,
         sections: parsed.sections,
         perFileStats: parsed.perFileStats,
         rawOutput: stdout.trim(),

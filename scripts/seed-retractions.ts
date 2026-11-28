@@ -1,11 +1,13 @@
-import 'dotenv/config';
+﻿import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { RetractionRepository } from '../src/modules/library/ingestion/repositories/retraction.repository';
 import { RetractionDatabaseService } from '../src/modules/library/ingestion/services/retraction-database.service';
-import { RetractionSeederService } from '../src/modules/library/ingestion/services/retraction-seeder.service';
-import { SeedRetractionsCommand } from '../src/modules/library/ingestion/commands/seed-retractions.command';
+import {
+  RetractionSeederService,
+  SeedRetractionsCommand,
+} from '../src/modules/library/ingestion/services/retraction-seeder.service';
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -36,9 +38,9 @@ async function main() {
     }
   }
 
-  console.log('🔄 Starting Retraction Watch Seeder...');
+  console.log('ðŸ”„ Starting Retraction Watch Seeder...');
   const result = await command.execute({ filePath, url });
-  console.log('✅ Seeding completed successfully:', result);
+  console.log('âœ… Seeding completed successfully:', result);
 
   await pool.end();
   process.exit(0);
@@ -46,7 +48,7 @@ async function main() {
 
 if (require.main === module) {
   main().catch((err) => {
-    console.error('❌ Seeder failed:', err);
+    console.error('âŒ Seeder failed:', err);
     process.exit(1);
   });
 }

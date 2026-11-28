@@ -18,17 +18,27 @@ describe('AI Module Deepening: Batched Document Resolution & SQL Pagination', ()
 
   describe('DocumentAccessService.resolveChatDocuments & ChatService batched turn lookup', () => {
     it('queries libraryItem and fileNode once per chat turn when both documentIds and attached_sources are present', async () => {
-      const fileNodeFindMany = jest.fn().mockImplementation(async (args?: { where?: { id?: { in?: string[] } } }) => {
-        const ids = args?.where?.id?.in ?? [];
-        const rows: Array<{ id: string; metadata: unknown }> = [];
-        if (ids.includes('file-direct-1')) {
-          rows.push({ id: 'file-direct-1', metadata: { ragDocId: 'rag-direct-1' } });
-        }
-        if (ids.includes('file-att-2')) {
-          rows.push({ id: 'file-att-2', metadata: { ragDocId: 'rag-att-2' } });
-        }
-        return rows;
-      });
+      const fileNodeFindMany = jest
+        .fn()
+        .mockImplementation(
+          async (args?: { where?: { id?: { in?: string[] } } }) => {
+            const ids = args?.where?.id?.in ?? [];
+            const rows: Array<{ id: string; metadata: unknown }> = [];
+            if (ids.includes('file-direct-1')) {
+              rows.push({
+                id: 'file-direct-1',
+                metadata: { ragDocId: 'rag-direct-1' },
+              });
+            }
+            if (ids.includes('file-att-2')) {
+              rows.push({
+                id: 'file-att-2',
+                metadata: { ragDocId: 'rag-att-2' },
+              });
+            }
+            return rows;
+          },
+        );
 
       const libraryItemFindMany = jest.fn().mockResolvedValue([
         {
@@ -94,10 +104,14 @@ describe('AI Module Deepening: Batched Document Resolution & SQL Pagination', ()
       const accessRepo = new AccessRepository(mockPrisma);
       const spaceAccess = new SpaceAccessService(accessRepo);
       const documentAccess = new DocumentAccessService(accessRepo, spaceAccess);
-      const accessService = new AccessService(spaceAccess, documentAccess, accessRepo);
+      const accessService = new AccessService(
+        spaceAccess,
+        documentAccess,
+        accessRepo,
+      );
       const chatRepo = new ChatRepository(mockPrisma);
       const sessionService = new SessionService(chatRepo, spaceAccess);
-      const titleService = new TitleService(chatRepo);
+      const titleService = new TitleService(chatRepo, sessionService);
 
       const chatSync = jest.fn().mockResolvedValue({
         content: 'Synthesized answer',
@@ -132,15 +146,23 @@ describe('AI Module Deepening: Batched Document Resolution & SQL Pagination', ()
       // Core invariant: libraryItem.findMany is queried ONCE for the union of all candidate IDs
       expect(libraryItemFindMany).toHaveBeenCalledTimes(1);
       const queriedItemIds = (
-        libraryItemFindMany.mock.calls[0]?.[0] as { where: { id: { in: string[] } } }
+        libraryItemFindMany.mock.calls[0]?.[0] as {
+          where: { id: { in: string[] } };
+        }
       ).where.id.in;
-      expect(queriedItemIds).toEqual(expect.arrayContaining(['item-1', 'item-2']));
+      expect(queriedItemIds).toEqual(
+        expect.arrayContaining(['item-1', 'item-2']),
+      );
       expect(queriedItemIds).not.toContain('file-direct-1');
 
       // fileNode.findMany is called once for direct documentIds and once for unresolved attachment file-att-2 (never duplicated)
       expect(fileNodeFindMany).toHaveBeenCalledTimes(2);
       expect(
-        (fileNodeFindMany.mock.calls[1]?.[0] as { where: { id: { in: string[] } } }).where.id.in,
+        (
+          fileNodeFindMany.mock.calls[1]?.[0] as {
+            where: { id: { in: string[] } };
+          }
+        ).where.id.in,
       ).toEqual(['file-att-2']);
 
       // Engine request receives both resolved document IDs and enriched attached_sources
@@ -378,7 +400,9 @@ describe('AI Module Deepening: Batched Document Resolution & SQL Pagination', ()
         },
       });
 
-      const spaceAccess = new SpaceAccessService(new AccessRepository(mockPrisma));
+      const spaceAccess = new SpaceAccessService(
+        new AccessRepository(mockPrisma),
+      );
       const resolveSpaceSpy = jest.spyOn(spaceAccess, 'resolveSpace');
       const resolvePageScopeSpy = jest.spyOn(spaceAccess, 'resolvePageScope');
       const sessionService = new SessionService(
@@ -427,7 +451,7 @@ describe('AI Module Deepening: Batched Document Resolution & SQL Pagination', ()
       );
       const chatRepo = new ChatRepository(mockPrisma);
       const sessionService = new SessionService(chatRepo, spaceAccess);
-      const titleService = new TitleService(chatRepo);
+      const titleService = new TitleService(chatRepo, sessionService);
       const mockEngine = fromPartial<IAiEnginePort>({
         cancelThread: jest.fn().mockResolvedValue(undefined),
         listThreadCheckpoints: jest.fn().mockResolvedValue({
@@ -488,7 +512,7 @@ describe('AI Module Deepening: Batched Document Resolution & SQL Pagination', ()
       );
       const chatRepo = new ChatRepository(mockPrisma);
       const sessionService = new SessionService(chatRepo, spaceAccess);
-      const titleService = new TitleService(chatRepo);
+      const titleService = new TitleService(chatRepo, sessionService);
       const mockEngine = fromPartial<IAiEnginePort>({
         resumeSync: jest.fn().mockResolvedValue({
           content: 'Resumed response',

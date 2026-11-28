@@ -1,4 +1,4 @@
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export class InvalidLogFormatException extends PagesDomainError {
   constructor(message = 'The provided compilation log is empty or invalid') {
@@ -310,7 +310,6 @@ export class DiagnosticItem {
  * diagnostics/core/domain/entities/diagnostic-report.entity.ts
  * Aggregate Root modeling a complete compilation or linting diagnostic report.
  */
-
 
 export interface DiagnosticReportProps {
   id?: string;

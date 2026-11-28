@@ -1,627 +1,333 @@
 /**
  * templates/templates.repository.ts
- * Direct @Injectable() Repository for Manuscripts Templates.
- *
- * Encapsulates the real seam between PostgreSQL (Prisma) and the in-memory
- * OfficialTemplateCatalog stand-in, as well as Prisma project instantiation.
+ * BCNF Prisma Repository for `TemplateBlob`, `PageTemplate`, `PageTemplateFile`, `PageTemplateTag`:
+ * - Single-flight lazy seeding of `OFFICIAL_TEMPLATES` into PostgreSQL so SQL handles 100% of
+ *   filtering, sorting, pagination, and `downloadCount` increments (zero dual-source RAM merge!).
+ * - Virtual Proxy summary queries (`findSummaries`) that never load `TemplateBlob` payloads.
  */
 
-import {
-  Injectable,
-  Logger,
-  Optional,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import { Prisma, PageTemplateCategory, PageTemplate } from '@prisma/client';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { SagaRunner } from '@/modules/pages/core/utils/saga-runner';
-import {
-  ITemplateRepositoryPort,
-  FindTemplatesFilter,
-  SearchTemplatesFilter,
-  FindTemplatesResult,
-  IProjectInstantiatorPort,
-  InstantiateProjectInput,
-  InstantiatedProjectResult,
-  PageTemplateEntity,
-  TemplateCategoryString,
-  TemplateCategoryVo,
-  CompilerType,
-  TEMPLATE_CATALOG,
-} from './domain';
+import { OFFICIAL_TEMPLATES } from './domain/catalog.domain';
+import { TemplateFileVo } from './domain/file.domain';
+import { TemplateManifest } from './domain/manifest.domain';
+import { TemplateCategory, TemplateVisibility } from './domain/policy';
+
+export interface BrowseTemplatesFilter {
+  readonly userId?: string;
+  readonly spaceId?: string;
+  readonly category?: TemplateCategory;
+  readonly visibility?: TemplateVisibility;
+  readonly tag?: string;
+  readonly search?: string;
+  readonly limit: number;
+  readonly offset: number;
+}
 
 @Injectable()
-export class TemplatesRepository
-  implements ITemplateRepositoryPort, IProjectInstantiatorPort
-{
-  private readonly logger = new Logger(TemplatesRepository.name);
-  private readonly officialCatalog = new Map<string, PageTemplateEntity>();
-  private readonly aliasIndex = new Map<string, string>();
+export class TemplatesRepository {
+  private seedPromise: Promise<void> | null = null;
+  private seeded = false;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    @Optional()
-    private readonly structureService?: StructureService,
-    @Optional()
-    private readonly docstoreService?: DocstoreService,
-  ) {
-    this.seedOfficialCatalog();
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
-  private seedOfficialCatalog(): void {
-    for (const d of TEMPLATE_CATALOG) {
-      const entity = PageTemplateEntity.create({
-        id: d.id,
-        versionId: d.versionId,
-        name: d.name,
-        category: d.category,
-        description: d.description,
-        compiler: d.compiler,
-        imageName: d.imageName,
-        mainFile: d.mainFile,
-        author: d.author,
-        tags: [...d.tags],
-        isOfficial: d.isOfficial,
-        downloadCount: d.downloadCount,
-        files: { ...d.files },
-      });
-      this.officialCatalog.set(entity.id, entity);
-      this.aliasIndex.set(entity.id.toLowerCase(), entity.id);
-      this.aliasIndex.set(entity.versionId.toLowerCase(), entity.id);
-      this.aliasIndex.set(d.slug.toLowerCase(), entity.id);
-      for (const alias of d.aliases) {
-        this.aliasIndex.set(alias.toLowerCase(), entity.id);
-      }
-    }
-  }
+  private ensureSeeded(): Promise<void> {
+    if (this.seeded) return Promise.resolve();
+    if (this.seedPromise) return this.seedPromise;
 
-  private resolveOfficialCatalogTemplate(
-    idOrAlias: string,
-  ): PageTemplateEntity | null {
-    if (!idOrAlias) return null;
-    const direct = this.officialCatalog.get(idOrAlias);
-    if (direct) return direct;
-    const resolvedId =
-      this.aliasIndex.get(idOrAlias) ??
-      this.aliasIndex.get(idOrAlias.toLowerCase().trim());
-    return resolvedId ? this.officialCatalog.get(resolvedId) || null : null;
-  }
-
-  async findById(id: string): Promise<PageTemplateEntity | null> {
-    if (!id) return null;
-    if (this.prisma) {
-      if (isUuid(id)) {
-        const record = await this.prisma.pageTemplate.findUnique({
-          where: { id },
-        });
-        if (record) {
-          return this.mapToEntity(record);
-        }
-      } else {
-        const recordByVersion = await this.prisma.pageTemplate.findUnique({
-          where: { versionId: id },
-        });
-        if (recordByVersion) {
-          return this.mapToEntity(recordByVersion);
-        }
-      }
-    }
-    return this.resolveOfficialCatalogTemplate(id);
-  }
-
-  async findByVersionId(versionId: string): Promise<PageTemplateEntity | null> {
-    if (!versionId) return null;
-    if (this.prisma) {
-      const record = await this.prisma.pageTemplate.findUnique({
-        where: { versionId },
-      });
-      if (record) {
-        return this.mapToEntity(record);
-      }
-    }
-    return this.resolveOfficialCatalogTemplate(versionId);
-  }
-
-  async findAll(filter?: FindTemplatesFilter): Promise<FindTemplatesResult> {
-    const where: Prisma.PageTemplateWhereInput = {};
-    if (
-      filter?.category &&
-      filter.category !== 'all' &&
-      TemplateCategoryVo.isValid(filter.category)
-    ) {
-      where.category = this.toPrismaCategory(filter.category);
-    }
-    if (filter?.isOfficial !== undefined) {
-      where.isOfficial = filter.isOfficial;
-    }
-    if (filter?.tag) {
-      where.tags = { has: filter.tag };
-    }
-
-    const [total, records] = await Promise.all([
-      this.prisma.pageTemplate.count({ where }),
-      this.prisma.pageTemplate.findMany({
-        where,
-        orderBy: [{ isOfficial: 'desc' }, { downloadCount: 'desc' }],
-        skip: filter?.offset ?? 0,
-        take: filter?.limit ?? 50,
-      }),
-    ]);
-
-    const matchingOfficial = Array.from(this.officialCatalog.values()).filter(
-      (t) => {
-        if (
-          filter?.category &&
-          filter.category !== 'all' &&
-          t.category !== filter.category
-        ) {
-          return false;
-        }
-        if (
-          filter?.isOfficial !== undefined &&
-          t.isOfficial !== filter.isOfficial
-        ) {
-          return false;
-        }
-        if (filter?.tag && !t.tags.includes(filter.tag)) {
-          return false;
-        }
-        return true;
-      },
-    );
-
-    const offset = filter?.offset ?? 0;
-    const limit = filter?.limit ?? 50;
-
-    if (total === 0) {
-      return {
-        templates: matchingOfficial.slice(offset, offset + limit),
-        total: matchingOfficial.length,
-      };
-    }
-
-    const dbEntities = records.map((r: PageTemplate) => this.mapToEntity(r));
-    const dbIdsAndSlugs = new Set<string>();
-    for (const e of dbEntities) {
-      dbIdsAndSlugs.add(e.id.toLowerCase());
-      dbIdsAndSlugs.add(e.versionId.toLowerCase());
-    }
-    const nonDuplicateOfficial = matchingOfficial.filter((t) => {
-      const def = TEMPLATE_CATALOG.find((d) => d.id === t.id);
-      return (
-        !dbIdsAndSlugs.has(t.id.toLowerCase()) &&
-        !dbIdsAndSlugs.has(t.versionId.toLowerCase()) &&
-        !(def && dbIdsAndSlugs.has(def.slug.toLowerCase()))
-      );
-    });
-    const remaining = Math.max(0, limit - dbEntities.length);
-    const officialOffset = Math.max(0, offset - total);
-    const slicedOfficial =
-      remaining > 0
-        ? nonDuplicateOfficial.slice(officialOffset, officialOffset + remaining)
-        : [];
-    const merged = [...dbEntities, ...slicedOfficial];
-
-    return {
-      templates: merged,
-      total: total + nonDuplicateOfficial.length,
-    };
-  }
-
-  async search(filter: SearchTemplatesFilter): Promise<FindTemplatesResult> {
-    const q = filter.query.trim();
-    const where: Prisma.PageTemplateWhereInput = {};
-    if (
-      filter.category &&
-      filter.category !== 'all' &&
-      TemplateCategoryVo.isValid(filter.category)
-    ) {
-      where.category = this.toPrismaCategory(filter.category);
-    }
-    if (q) {
-      where.OR = [
-        { name: { contains: q, mode: 'insensitive' } },
-        { description: { contains: q, mode: 'insensitive' } },
-        { author: { contains: q, mode: 'insensitive' } },
-        { tags: { has: q.toLowerCase() } },
-      ];
-    }
-
-    const [total, records] = await Promise.all([
-      this.prisma.pageTemplate.count({ where }),
-      this.prisma.pageTemplate.findMany({
-        where,
-        orderBy: { downloadCount: 'desc' },
-        skip: filter.offset ?? 0,
-        take: filter.limit ?? 50,
-      }),
-    ]);
-
-    const qLower = q.toLowerCase();
-    const matchingOfficial = Array.from(this.officialCatalog.values()).filter(
-      (t) => {
-        if (
-          filter.category &&
-          filter.category !== 'all' &&
-          t.category !== filter.category
-        ) {
-          return false;
-        }
-        if (!qLower) return true;
-        return (
-          t.name.toLowerCase().includes(qLower) ||
-          (t.description ?? '').toLowerCase().includes(qLower) ||
-          t.author.toLowerCase().includes(qLower) ||
-          t.tags.some((tag) => tag.toLowerCase().includes(qLower))
-        );
-      },
-    );
-
-    const offset = filter.offset ?? 0;
-    const limit = filter.limit ?? 50;
-
-    if (total === 0) {
-      return {
-        templates: matchingOfficial.slice(offset, offset + limit),
-        total: matchingOfficial.length,
-      };
-    }
-
-    const dbEntities = records.map((r: PageTemplate) => this.mapToEntity(r));
-    const dbIdsAndSlugs = new Set<string>();
-    for (const e of dbEntities) {
-      dbIdsAndSlugs.add(e.id.toLowerCase());
-      dbIdsAndSlugs.add(e.versionId.toLowerCase());
-    }
-    const nonDuplicateOfficial = matchingOfficial.filter((t) => {
-      const def = TEMPLATE_CATALOG.find((d) => d.id === t.id);
-      return (
-        !dbIdsAndSlugs.has(t.id.toLowerCase()) &&
-        !dbIdsAndSlugs.has(t.versionId.toLowerCase()) &&
-        !(def && dbIdsAndSlugs.has(def.slug.toLowerCase()))
-      );
-    });
-    const remaining = Math.max(0, limit - dbEntities.length);
-    const officialOffset = Math.max(0, offset - total);
-    const slicedOfficial =
-      remaining > 0
-        ? nonDuplicateOfficial.slice(officialOffset, officialOffset + remaining)
-        : [];
-    const merged = [...dbEntities, ...slicedOfficial];
-
-    return {
-      templates: merged,
-      total: total + nonDuplicateOfficial.length,
-    };
-  }
-
-  async save(template: PageTemplateEntity): Promise<PageTemplateEntity> {
-    const data: Prisma.PageTemplateCreateInput = {
-      id: template.id,
-      versionId: template.versionId,
-      name: template.name,
-      category: this.toPrismaCategory(template.category),
-      description: template.description,
-      compiler: template.compiler,
-      imageName: template.imageName,
-      mainFile: template.mainFile,
-      thumbnailUrl: template.thumbnailUrl,
-      author: template.author,
-      tags: template.tags,
-      isOfficial: template.isOfficial,
-      downloadCount: template.downloadCount,
-      files: template.files,
-      createdAt: template.createdAt,
-      updatedAt: template.updatedAt,
-    };
-
-    const record = await this.prisma.pageTemplate.upsert({
-      where: { id: template.id },
-      create: data,
-      update: data,
-    });
-
-    return this.mapToEntity(record);
-  }
-
-  async delete(id: string): Promise<boolean> {
-    const result = await this.prisma.pageTemplate.deleteMany({
-      where: { id },
-    });
-    return result.count > 0;
-  }
-
-  async incrementDownloadCount(id: string): Promise<void> {
-    await this.prisma.pageTemplate.updateMany({
-      where: { id },
-      data: {
-        downloadCount: { increment: 1 },
-      },
-    });
-  }
-
-  /**
-   * Collects all text documents (.tex, .bib, .sty, .cls, .bst, .def, .cfg, .md)
-   * of an existing project from DocstoreService & StructureService to snapshot as a template.
-   */
-  async collectProjectTemplateFiles(
-    projectId: string,
-    pageId?: string,
-  ): Promise<Record<string, string>> {
-    const collected: Record<string, string> = {};
-    if (!this.docstoreService) {
-      return collected;
-    }
-
-    const pathByDocId = new Map<string, string>();
-    const [nodesResult, docsResult] = await Promise.all([
-      this.structureService
-        ? this.structureService
-            .getAllNodes(projectId, undefined, pageId)
-            .catch(() => [])
-        : Promise.resolve([]),
-      this.docstoreService
-        .getAllDocs(projectId, pageId)
-        .catch((err: unknown) => {
-          this.logger.warn(
-            `Failed to collect project files for template from ${projectId}: ${(err as Error)?.message}`,
-          );
-          return [];
-        }),
-    ]);
-
-    for (const n of nodesResult) {
-      if (n.isDoc() && n.docId) {
-        const cleanPath = (n.path || n.name || '').replace(/^\/+/, '');
-        if (cleanPath) {
-          pathByDocId.set(n.docId, cleanPath);
-        }
-      }
-    }
-
-    const allowedExt = new Set([
-      'tex',
-      'latex',
-      'bib',
-      'sty',
-      'cls',
-      'bst',
-      'def',
-      'cfg',
-      'md',
-      'rnw',
-      'qmd',
-    ]);
-    for (const doc of docsResult) {
-      const rawPath =
-        pathByDocId.get(doc._id) || (doc.path || '').replace(/^\/+/, '');
-      if (!rawPath) continue;
-      const ext = rawPath.split('.').pop()?.toLowerCase() || '';
-      if (allowedExt.has(ext) || !rawPath.includes('.')) {
-        collected[rawPath] = (doc.lines || []).join('\n');
-      }
-    }
-
-    return collected;
-  }
-
-  async instantiate(
-    input: InstantiateProjectInput,
-  ): Promise<InstantiatedProjectResult> {
-    const { template, projectName, userId } = input;
-    const generatedProjectId = crypto.randomUUID();
-    const cleanName = projectName.trim() || template.name;
-    const baseSlug =
-      cleanName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 30) || 'manuscript';
-    const identifier = `${baseSlug}-${generatedProjectId.slice(0, 6)}`;
-
-    const fileEntries = Object.entries(template.files);
-    const filePaths = Object.keys(template.files);
-
-    let finalProjectId: string = generatedProjectId;
-
-    try {
-      const createProjectAndOwner = async (
-        tx: Prisma.TransactionClient | PrismaService,
-      ) => {
-        const project = await tx.project.create({
-          data: {
-            id: generatedProjectId,
-            name: cleanName,
-            identifier,
-            description: `Created from template: ${template.name}`,
-            createdById: userId,
-            modules: ['overview', 'work-items', 'pages'],
-            settings: {
-              manuscript: {
-                compiler: template.compiler,
-                mainFile: template.mainFile,
-                imageName: template.imageName,
-                fromTemplateId: template.id,
-                fromTemplateVersionId: template.versionId,
-              },
-            },
-          },
-        });
-
-        const projectId = project?.id || generatedProjectId;
-        await tx.projectMember.create({
-          data: {
-            projectId,
-            userId,
-            role: 'owner',
-          },
-        });
-        return projectId;
-      };
-
-      finalProjectId = await this.prisma.$transaction(async (tx) =>
-        createProjectAndOwner(tx),
-      );
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Prisma project creation failed: ${msg}`);
-      throw new InternalServerErrorException(
-        `Failed to create project from template: ${msg}`,
-      );
-    }
-
-    if (this.structureService && this.docstoreService) {
-      const structureService = this.structureService;
-      const docstoreService = this.docstoreService;
-      const saga = new SagaRunner({
-        logger: this.logger,
-        contextName: `TemplatesRepository.createProjectFromTemplate(${finalProjectId})`,
-      });
-
-      // Register compensation for the Prisma project if subsequent file hydration fails critically
-      await saga.step(
-        'EnsureProjectCompensation',
-        async () => finalProjectId,
-        async (pid) => {
-          if (typeof this.prisma?.project?.delete === 'function') {
-            await this.prisma.project
-              .delete({ where: { id: pid } })
-              .catch(() => undefined);
-          }
-        },
-      );
-
+    this.seedPromise = (async () => {
       try {
-        const folderIdCache = new Map<string, string>();
-        for (const [filePath, content] of fileEntries) {
-          const normalizedPath = filePath.startsWith('/')
-            ? filePath
-            : `/${filePath}`;
-          const parts = normalizedPath.split('/').filter(Boolean);
-          const fileName = parts.pop() || filePath;
-          let parentFolderId: string | undefined = undefined;
-
-          if (parts.length > 0) {
-            const dirPath = `/${parts.join('/')}`;
-            const cachedDirId = folderIdCache.get(dirPath);
-            if (cachedDirId) {
-              parentFolderId = cachedDirId;
-            } else {
-              const dirNode = await structureService.mkdirp(
-                finalProjectId,
-                dirPath,
-              );
-              parentFolderId = dirNode.id;
-              if (dirNode?.id) {
-                folderIdCache.set(dirPath, dirNode.id);
-              }
-            }
+        const count = await this.prisma.pageTemplate.count({
+          where: { visibility: 'official' },
+        });
+        if (count < OFFICIAL_TEMPLATES.length) {
+          for (const tmpl of OFFICIAL_TEMPLATES) {
+            await this.save(tmpl);
           }
-
-          const isRootDoc =
-            normalizedPath === `/${template.mainFile.replace(/^\//, '')}`;
-
-          const createdDoc = await saga.step(
-            `CreateDoc(${normalizedPath})`,
-            async () =>
-              docstoreService.createDoc(finalProjectId, {
-                path: normalizedPath,
-                lines: content.split('\n'),
-                version: 1,
-              }),
-            async (doc) => {
-              if (doc?._id && typeof docstoreService.deleteDoc === 'function') {
-                await docstoreService.deleteDoc(finalProjectId, doc._id);
-              }
-            },
-          );
-
-          await saga.step(
-            `CreateNode(${normalizedPath})`,
-            async () =>
-              structureService.createNode(finalProjectId, {
-                name: fileName,
-                path: normalizedPath,
-                type: 'DOC',
-                parentId: parentFolderId,
-                docId: createdDoc._id,
-                isRootDoc,
-              }),
-            async (node) => {
-              if (
-                node?.id &&
-                typeof structureService.deleteNode === 'function'
-              ) {
-                await structureService.deleteNode(finalProjectId, node.id);
-              }
-            },
-          );
         }
-      } catch (err: unknown) {
-        await saga.compensateAll();
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.error(
-          `Template hydration failed for project ${finalProjectId}; rolled back via Saga: ${msg}`,
-        );
-        throw new InternalServerErrorException(
-          `Failed to hydrate template files for project: ${msg}`,
-        );
+        this.seeded = true;
+      } finally {
+        this.seedPromise = null;
       }
-    }
+    })();
 
-    return {
-      projectId: finalProjectId,
-      projectName: cleanName,
-      ownerId: userId,
-      compiler: template.compiler,
-      mainFile: template.mainFile,
-      fileCount: filePaths.length,
-      files: filePaths,
-      fromTemplateId: template.id,
-      fromTemplateVersionId: template.versionId,
-      createdAt: new Date(),
-    };
+    return this.seedPromise;
   }
 
-  private mapToEntity(record: PageTemplate): PageTemplateEntity {
-    return new PageTemplateEntity({
-      id: record.id,
-      versionId: record.versionId,
-      name: record.name,
-      category: record.category,
-      description: record.description,
-      compiler: record.compiler as CompilerType,
-      imageName: record.imageName,
-      mainFile: record.mainFile,
-      thumbnailUrl: record.thumbnailUrl,
-      author: record.author,
-      tags: Array.isArray(record.tags) ? record.tags : [],
-      isOfficial: record.isOfficial,
-      downloadCount: record.downloadCount,
-      files:
-        typeof record.files === 'object' && record.files !== null
-          ? (record.files as Record<string, string>)
-          : {},
-      createdAt: new Date(record.createdAt),
-      updatedAt: new Date(record.updatedAt),
+  public async findSummaries(
+    filter: BrowseTemplatesFilter,
+  ): Promise<{ items: TemplateManifest[]; total: number }> {
+    await this.ensureSeeded();
+
+    const where = this.buildWhereClause(filter);
+    const [total, rows] = await Promise.all([
+      this.prisma.pageTemplate.count({ where }),
+      this.prisma.pageTemplate.findMany({
+        where,
+        include: {
+          tags: { select: { tag: true } },
+          _count: { select: { files: true } },
+        },
+        orderBy: [{ downloadCount: 'desc' }, { createdAt: 'desc' }],
+        skip: filter.offset,
+        take: filter.limit,
+      }),
+    ]);
+
+    const items = rows.map((r) =>
+      TemplateManifest.create({
+        id: r.id,
+        slug: r.slug,
+        versionId: r.versionId,
+        name: r.name,
+        category: r.category,
+        visibility: r.visibility,
+        description: r.description,
+        compiler: r.compiler,
+        texLiveVersion: r.texLiveVersion,
+        mainFile: r.mainFile,
+        badge: r.badge,
+        author: r.author,
+        license: r.license,
+        sourceUrl: r.sourceUrl,
+        thumbnailUrl: r.thumbnailUrl,
+        downloadCount: r.downloadCount,
+        fileCount: r._count.files,
+        tags: r.tags.map((t) => t.tag),
+        spaceId: r.spaceId,
+        createdById: r.createdById,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }),
+    );
+
+    return { items, total };
+  }
+
+  /** Loads full `TemplateManifest` + `TemplateBlob` payloads by canonical UUID or `slug`. */
+  public async findDetail(
+    identifier: string,
+  ): Promise<TemplateManifest | null> {
+    const clean = identifier?.trim();
+    if (!clean) return null;
+
+    await this.ensureSeeded();
+
+    const where: Prisma.PageTemplateWhereInput = isUuid(clean)
+      ? { id: clean }
+      : { slug: clean.toLowerCase() };
+
+    const row = await this.prisma.pageTemplate.findFirst({
+      where,
+      include: {
+        tags: { select: { tag: true } },
+        files: {
+          include: { blob: true },
+          orderBy: { pathname: 'asc' },
+        },
+      },
+    });
+
+    if (!row) return null;
+
+    const files = row.files.map((f) =>
+      f.kind === 'file' && f.blob.binaryData
+        ? TemplateFileVo.fromBuffer(
+            f.pathname,
+            Buffer.from(f.blob.binaryData),
+            f.blob.mimeType,
+          )
+        : TemplateFileVo.fromText(f.pathname, f.blob.textContent ?? ''),
+    );
+
+    return TemplateManifest.create({
+      id: row.id,
+      slug: row.slug,
+      versionId: row.versionId,
+      name: row.name,
+      category: row.category,
+      visibility: row.visibility,
+      description: row.description,
+      compiler: row.compiler,
+      texLiveVersion: row.texLiveVersion,
+      mainFile: row.mainFile,
+      badge: row.badge,
+      author: row.author,
+      license: row.license,
+      sourceUrl: row.sourceUrl,
+      thumbnailUrl: row.thumbnailUrl,
+      downloadCount: row.downloadCount,
+      fileCount: files.length,
+      tags: row.tags.map((t) => t.tag),
+      files,
+      spaceId: row.spaceId,
+      createdById: row.createdById,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     });
   }
 
-  private toPrismaCategory(
-    category: TemplateCategoryString,
-  ): PageTemplateCategory {
-    switch (category) {
-      case 'journal':
-      case 'conference':
-      case 'thesis':
-      case 'cv':
-      case 'presentation':
-      case 'report':
-        return category;
-      default:
-        return PageTemplateCategory.other;
+  /** Atomically persists `TemplateManifest` across the 4 BCNF tables. */
+  public async save(manifest: TemplateManifest): Promise<TemplateManifest> {
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Upsert deduplicated CAS blobs (skipDuplicates on PK `content_hash`)
+      if (manifest.files.length > 0) {
+        const uniqueBlobs = new Map<string, TemplateFileVo>();
+        for (const f of manifest.files) {
+          uniqueBlobs.set(f.contentHash, f);
+        }
+        await tx.templateBlob.createMany({
+          data: Array.from(uniqueBlobs.values()).map((b) => ({
+            contentHash: b.contentHash,
+            textContent: b.textContent,
+            binaryData: b.binaryData ? new Uint8Array(b.binaryData) : null,
+            mimeType: b.mimeType,
+            sizeBytes: b.sizeBytes,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      // 2. Upsert aggregate root `PageTemplate`
+      const coreData = {
+        slug: manifest.slug,
+        versionId: manifest.versionId,
+        name: manifest.name,
+        category: manifest.category,
+        visibility: manifest.visibility,
+        description: manifest.description,
+        compiler: manifest.compiler,
+        texLiveVersion: manifest.texLiveVersion,
+        mainFile: manifest.mainFile,
+        badge: manifest.badge,
+        author: manifest.author,
+        license: manifest.license,
+        sourceUrl: manifest.sourceUrl,
+        thumbnailUrl: manifest.thumbnailUrl,
+        spaceId: manifest.spaceId,
+        createdById: manifest.createdById,
+      };
+
+      await tx.pageTemplate.upsert({
+        where: { id: manifest.id },
+        create: {
+          id: manifest.id,
+          ...coreData,
+          downloadCount: manifest.downloadCount,
+        },
+        update: coreData,
+      });
+
+      // 3. Replace normalized file tree & 1NF tags when files/tags provided
+      if (manifest.files.length > 0) {
+        await tx.pageTemplateFile.deleteMany({
+          where: { templateId: manifest.id },
+        });
+        await tx.pageTemplateFile.createMany({
+          data: manifest.files.map((f) => ({
+            templateId: manifest.id,
+            pathname: f.path,
+            kind: f.kind,
+            contentHash: f.contentHash,
+          })),
+        });
+      }
+
+      await tx.pageTemplateTag.deleteMany({
+        where: { templateId: manifest.id },
+      });
+      if (manifest.tags.length > 0) {
+        await tx.pageTemplateTag.createMany({
+          data: manifest.tags.map((tag) => ({
+            templateId: manifest.id,
+            tag,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
+
+    return manifest;
+  }
+
+  public async deleteById(id: string): Promise<boolean> {
+    if (!isUuid(id)) return false;
+    const res = await this.prisma.pageTemplate.deleteMany({ where: { id } });
+    return res.count > 0;
+  }
+
+  public async incrementDownloads(id: string): Promise<void> {
+    if (!isUuid(id)) return;
+    await this.prisma.pageTemplate
+      .update({
+        where: { id },
+        data: { downloadCount: { increment: 1 } },
+      })
+      .catch(() => undefined);
+  }
+
+  private buildWhereClause(
+    filter: BrowseTemplatesFilter,
+  ): Prisma.PageTemplateWhereInput {
+    const conditions: Prisma.PageTemplateWhereInput[] = [];
+
+    if (filter.visibility) {
+      if (filter.visibility === 'official') {
+        conditions.push({ visibility: 'official' });
+      } else if (filter.visibility === 'private') {
+        conditions.push({
+          visibility: 'private',
+          createdById: filter.userId ?? '__none__',
+        });
+      } else if (filter.visibility === 'workspace') {
+        conditions.push({
+          visibility: 'workspace',
+          ...(filter.spaceId ? { spaceId: filter.spaceId } : {}),
+        });
+      }
+    } else {
+      const allowedScopes: Prisma.PageTemplateWhereInput[] = [
+        { visibility: 'official' },
+      ];
+      if (filter.userId && isUuid(filter.userId)) {
+        allowedScopes.push({
+          visibility: 'private',
+          createdById: filter.userId,
+        });
+      }
+      if (filter.spaceId && isUuid(filter.spaceId)) {
+        allowedScopes.push({
+          visibility: 'workspace',
+          spaceId: filter.spaceId,
+        });
+      }
+      conditions.push({ OR: allowedScopes });
     }
+
+    if (filter.category) {
+      conditions.push({ category: filter.category });
+    }
+
+    if (filter.tag?.trim()) {
+      conditions.push({
+        tags: { some: { tag: filter.tag.trim().toLowerCase() } },
+      });
+    }
+
+    const q = filter.search?.trim();
+    if (q) {
+      conditions.push({
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { description: { contains: q, mode: 'insensitive' } },
+          { author: { contains: q, mode: 'insensitive' } },
+          { badge: { contains: q, mode: 'insensitive' } },
+          { tags: { some: { tag: { contains: q.toLowerCase() } } } },
+        ],
+      });
+    }
+
+    return conditions.length === 1 ? conditions[0] : { AND: conditions };
   }
 }

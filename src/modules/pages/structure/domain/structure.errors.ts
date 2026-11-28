@@ -3,7 +3,7 @@
  * Domain errors for Page Virtual Tree & Structure.
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export class StructureError extends PagesDomainError {
   constructor(message: string, httpStatus = 400, code = 'STRUCTURE_ERROR') {

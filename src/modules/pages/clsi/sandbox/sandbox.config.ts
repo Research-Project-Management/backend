@@ -12,7 +12,7 @@ import {
   SandboxProfile,
 } from '../domain/sandbox.policy';
 import {
-  getRawPagesEnv,
+  getClsiSandboxEnv,
   readPagesConfig,
 } from '../../core/config/pages.config';
 
@@ -64,7 +64,7 @@ export function parseSandboxConfig(
   options: ParseSandboxConfigOptions = {},
 ): ClsiSandboxConfig {
   const defaultConfig = readPagesConfig();
-  const env = options.env ?? getRawPagesEnv();
+  const env = options.env ?? getClsiSandboxEnv();
   const isProduction =
     options.isProduction ??
     (env.NODE_ENV === 'production' || defaultConfig.isProduction);

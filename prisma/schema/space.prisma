@@ -22,6 +22,7 @@ model Space {
   // Pages Domain Relations
   pages             Page[]
   spellingWords     SpellingWord[]
+  pageTemplates     PageTemplate[]    @relation("SpacePageTemplates")
 
   // Library Domain Relations
   libraryItems         LibraryItem[]

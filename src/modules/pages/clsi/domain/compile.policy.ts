@@ -78,39 +78,34 @@ export class DraftModeManager {
    */
   public static detectShellEscapeUsage(source: string): string[] {
     if (!source) return [];
-    const detected: string[] = [];
+    const detected = new Set<string>();
 
-    if (
-      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*minted\s*(?:,[^}]*)?\}/i.test(
-        source,
-      )
-    ) {
-      detected.push('minted');
+    const SHELL_ESCAPE_PACKAGES = new Set(['minted', 'pythontex', 'svg']);
+    const pkgRegex = /\\usepackage(?:\[[^\]]*\])?\{([^}]*)\}/gi;
+    let match: RegExpExecArray | null;
+    while ((match = pkgRegex.exec(source)) !== null) {
+      for (const part of match[1].split(',')) {
+        const pkg = part.trim().toLowerCase();
+        if (SHELL_ESCAPE_PACKAGES.has(pkg)) {
+          detected.add(pkg);
+        }
+      }
     }
-    if (
-      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*pythontex\s*(?:,[^}]*)?\}/i.test(
-        source,
-      )
-    ) {
-      detected.push('pythontex');
+
+    const tikzRegex = /\\usetikzlibrary\{([^}]*)\}/gi;
+    while ((match = tikzRegex.exec(source)) !== null) {
+      for (const part of match[1].split(',')) {
+        if (part.trim().toLowerCase() === 'external') {
+          detected.add('tikz-external');
+        }
+      }
     }
-    if (
-      /\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*svg\s*(?:,[^}]*)?\}/i.test(
-        source,
-      )
-    ) {
-      detected.push('svg');
-    }
-    if (
-      /\\usetikzlibrary\{(?:[^}]*,)?\s*external\s*(?:,[^}]*)?\}/i.test(source)
-    ) {
-      detected.push('tikz-external');
-    }
+
     if (/\\(?:immediate\\)?write18\b/.test(source)) {
-      detected.push('write18');
+      detected.add('write18');
     }
 
-    return detected;
+    return Array.from(detected);
   }
 }
 
@@ -119,7 +114,6 @@ export class DraftModeManager {
  * Pure in-process domain logic inspecting TeX source code for TeX magic comments
  * (% !TEX program = ...) and package hints (fontspec, luacode) to select the compiler.
  */
-
 
 export type SupportedEngine = 'pdflatex' | 'xelatex' | 'lualatex';
 
@@ -545,7 +539,10 @@ export function resolveCompileTimeout(
     typeof input.requestedMs === 'number' &&
     Number.isFinite(input.requestedMs)
   ) {
-    return Math.min(Math.max(Math.floor(input.requestedMs), limits.minMs), effectiveCap);
+    return Math.min(
+      Math.max(Math.floor(input.requestedMs), limits.minMs),
+      effectiveCap,
+    );
   }
 
   return effectiveCap;

@@ -11,8 +11,8 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core';
-import { resolveActiveProjectId } from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { resolveActiveProjectId } from '@/modules/pages/core/utils/page-scope';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { ArchiveEntryVo } from '../domain/archive.domain';
 import {
@@ -99,7 +99,7 @@ export class ConvertService {
     fileName: string,
   ): Promise<TranspiledProjectResult> {
     const docxEntries =
-      format === 'docx' ? this.zipEngine.extractZip(buffer) : null;
+      format === 'docx' ? await this.zipEngine.extractZip(buffer) : null;
 
     const pandocLatex = await this.pandoc.importToLatex({ buffer, format });
     if (pandocLatex) {
@@ -123,15 +123,6 @@ export class ConvertService {
       return transpileDocxEntriesToLatex(docxEntries!, fileName);
     }
     return transpileMarkdownToLatex(buffer.toString('utf8'), fileName);
-  }
-
-  public exportDocumentFormat(params: {
-    rawFilename: string;
-    content: string;
-    format: string;
-    projectDocs?: IncludedProjectDoc[];
-  }): ExportFormattedDocResult {
-    return transpileLatexDocument(params);
   }
 
   public async exportSingleDocument(params: {
@@ -162,12 +153,11 @@ export class ConvertService {
     }
 
     const docProjectId = doc.projectId || activeProjectId;
-    const docPageId =
-      (doc as { pageId?: string | null }).pageId ?? undefined;
+    const docPageId = (doc as { pageId?: string | null }).pageId ?? undefined;
 
     if (docProjectId) {
       const flushed = await this.liveCollab
-        .flushDocs(docProjectId, [])
+        .flushDocs(docProjectId, [pageId])
         .catch(() => []);
       if (flushed.length > 0) {
         doc =
@@ -229,6 +219,8 @@ export class ConvertService {
       content,
       format,
     });
-    return pandocExport ?? transpileLatexDocument({ rawFilename, content, format });
+    return (
+      pandocExport ?? transpileLatexDocument({ rawFilename, content, format })
+    );
   }
 }

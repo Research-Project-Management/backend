@@ -928,7 +928,9 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       expect(storedByok.apiKeyHint).toBe('sk-o••••4321');
 
       const clientSafe = sanitizeEditorConfigForClient(
-        fromPartial(stored),
+        stored as unknown as Parameters<
+          typeof sanitizeEditorConfigForClient
+        >[0],
       ) as Record<string, unknown>;
       expect(clientSafe.aiByok).toEqual({
         enabled: true,
@@ -954,7 +956,8 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         authors: ['Diederik P. Kingma', 'Jimmy Ba'],
         year: 2015,
         doi: '10.48550/arXiv.1412.6980',
-        abstract: 'We introduce Adam, an algorithm for first-order gradient-based optimization.',
+        abstract:
+          'We introduce Adam, an algorithm for first-order gradient-based optimization.',
         itemId: 'paper-adam-1',
         fileId: 'file-adam-1',
         ragDocId: 'file-adam-1',
@@ -981,7 +984,10 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         mockReply,
       );
 
-      expect(resolvePaperTarget).toHaveBeenCalledWith(mockUserId, 'paper-adam-1');
+      expect(resolvePaperTarget).toHaveBeenCalledWith(
+        mockUserId,
+        'paper-adam-1',
+      );
       expect(mockPrisma.aiChat.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({

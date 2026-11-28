@@ -28,12 +28,14 @@ import { PageArchiveHydratorAdapter } from '@/modules/pages/export-import/adapte
 import { ExportService } from '@/modules/pages/export-import/services/export.service';
 import { ImportService } from '@/modules/pages/export-import/services/import.service';
 import { ConvertService } from '@/modules/pages/export-import/services/convert.service';
-import { ScaffoldService } from '@/modules/pages/export-import/services/scaffold.service';
 
 describe('Export-Import Deep Module Suite', () => {
   describe('1. Domain Value Objects & Policies', () => {
     it('enforces Zip-Slip invariants on ArchiveEntryVo creation and serializes ArchiveManifest', () => {
-      const entry = ArchiveEntryVo.create('./sections/intro.tex', Buffer.from('Hi'));
+      const entry = ArchiveEntryVo.create(
+        './sections/intro.tex',
+        Buffer.from('Hi'),
+      );
       expect(entry.path).toBe('sections/intro.tex');
 
       expect(() => ArchiveEntryVo.create('../etc/passwd')).toThrow(
@@ -50,8 +52,14 @@ describe('Export-Import Deep Module Suite', () => {
     });
 
     it('evaluates standard vs arxiv ExportProfile and quota validation rules', () => {
-      const standard = resolveExportProfile({ mode: 'standard', includePdf: true });
-      const arxiv = resolveExportProfile({ cleanArxiv: true, includePdf: true });
+      const standard = resolveExportProfile({
+        mode: 'standard',
+        includePdf: true,
+      });
+      const arxiv = resolveExportProfile({
+        cleanArxiv: true,
+        includePdf: true,
+      });
 
       expect(standard.shouldInclude('paper.aux')).toBe(true);
       expect(standard.includePdf).toBe(true);
@@ -82,10 +90,16 @@ describe('Export-Import Deep Module Suite', () => {
       const rootTex =
         '\\documentclass{article}\n\\title{My Paper}\n\\begin{document}\n\\maketitle\n\\input{intro}\n\\end{document}';
       const childDocs = [
-        { id: 'c1', path: 'intro.tex', lines: ['\\section{Intro}', 'Hello **world**'] },
+        {
+          id: 'c1',
+          path: 'intro.tex',
+          lines: ['\\section{Intro}', 'Hello **world**'],
+        },
       ];
 
-      expect(resolveIncludedLatexContent(rootTex, childDocs)).toContain('\\section{Intro}');
+      expect(resolveIncludedLatexContent(rootTex, childDocs)).toContain(
+        '\\section{Intro}',
+      );
 
       const md = transpileLatexDocument({
         rawFilename: 'main.tex',
@@ -129,13 +143,13 @@ describe('Export-Import Deep Module Suite', () => {
   });
 
   describe('3. ZipAdapter Security & Deferred Collector Streaming', () => {
-    it('round-trips STORE and DEFLATE entries while blocking Zip-Bombs', () => {
+    it('round-trips STORE and DEFLATE entries while blocking Zip-Bombs', async () => {
       const zip = new ZipAdapter();
       const archive = zip.buildZip([
         { path: 'empty.tex', data: Buffer.alloc(0) },
         { path: 'main.tex', data: Buffer.from('\\section{Hello}', 'utf8') },
       ]);
-      const extracted = zip.extractZip(archive);
+      const extracted = await zip.extractZip(archive);
       expect(extracted).toHaveLength(2);
       expect(extracted[1].data.toString('utf8')).toBe('\\section{Hello}');
 
@@ -169,25 +183,44 @@ describe('Export-Import Deep Module Suite', () => {
       eocd.writeUInt32LE(cd.length, 12);
       eocd.writeUInt32LE(cdOffset, 16);
 
-      expect(() =>
+      await expect(
         zip.extractZip(Buffer.concat([lfh, compressed, cd, eocd])),
-      ).toThrow(InvalidZipArchiveException);
+      ).rejects.toThrow(InvalidZipArchiveException);
     });
 
     it('defers docstore reads in collectLazyProjectEntries until getData() is consumed', async () => {
-      const getDoc = jest.fn().mockResolvedValue({ lines: ['\\documentclass{article}'] });
+      const getDoc = jest
+        .fn()
+        .mockResolvedValue({ lines: ['\\documentclass{article}'] });
       const collector = new PageArchiveAggregatorAdapter(
         {
           getAllNodes: jest.fn().mockResolvedValue([
-            { id: 'n1', path: '/main.tex', type: 'DOC', docId: 'd1', isRootDoc: true },
-            { id: 'n2', path: '/main.aux', type: 'DOC', docId: 'd2', isRootDoc: false },
+            {
+              id: 'n1',
+              path: '/main.tex',
+              type: 'DOC',
+              docId: 'd1',
+              isRootDoc: true,
+            },
+            {
+              id: 'n2',
+              path: '/main.aux',
+              type: 'DOC',
+              docId: 'd2',
+              isRootDoc: false,
+            },
           ]),
         } as never,
         { getDoc } as never,
         {} as never,
       );
 
-      const lazyEntries = await collector.collectLazyProjectEntries('space-1', false, true, 'page-1');
+      const lazyEntries = await collector.collectLazyProjectEntries(
+        'space-1',
+        false,
+        true,
+        'page-1',
+      );
       expect(lazyEntries).toHaveLength(1);
       expect(lazyEntries[0].path).toBe('main.tex');
       expect(getDoc).not.toHaveBeenCalled();
@@ -211,7 +244,9 @@ describe('Export-Import Deep Module Suite', () => {
           rootDocPath: '/main.tex',
         }),
       );
-      const hydrator = { hydrateProjectEntries } as unknown as PageArchiveHydratorAdapter;
+      const hydrator = {
+        hydrateProjectEntries,
+      } as unknown as PageArchiveHydratorAdapter;
       const pandoc = new PandocAdapter('__nonexistent_pandoc_binary__');
       const convertSvc = new ConvertService(
         hydrator,
@@ -230,9 +265,12 @@ describe('Export-Import Deep Module Suite', () => {
 
       expect(summary.rootDocId).toBe('doc-main');
       expect(hydrateProjectEntries).toHaveBeenCalledTimes(1);
-      const hydratedEntries = hydrateProjectEntries.mock.calls[0][1] as ArchiveEntryVo[];
+      const hydratedEntries = hydrateProjectEntries.mock
+        .calls[0][1] as ArchiveEntryVo[];
       expect(hydratedEntries[0].path).toBe('main.tex');
-      expect(hydratedEntries[0].data.toString('utf8')).toContain('\\section{Markdown Heading}');
+      expect(hydratedEntries[0].data.toString('utf8')).toContain(
+        '\\section{Markdown Heading}',
+      );
     });
 
     it('exports, imports, and scaffolds through concise service interfaces', async () => {
@@ -263,24 +301,25 @@ describe('Export-Import Deep Module Suite', () => {
       expect(out.manifest.projectName).toBe('arxiv-quantum');
       expect(out.manifest.fileCount).toBe(1);
 
-      const scaffoldSvc = new ScaffoldService(hydrator, {
-        getTemplate: jest.fn().mockResolvedValue({
-          id: 'ieee',
-          mainFile: 'main.tex',
-          files: { 'main.tex': '\\documentclass{IEEEtran}' },
-        }),
-      } as never);
-      await scaffoldSvc.scaffoldTemplate('space-1', 'ieee', 'user-1', 'page-1');
-      expect(hydrator.hydrateProjectEntries).toHaveBeenCalledWith(
+      const importSvc = new ImportService(hydrator, new ZipAdapter());
+      const entry = ArchiveEntryVo.create(
+        'main.tex',
+        Buffer.from('\\documentclass{IEEEtran}'),
+      );
+      await importSvc.hydrateProjectEntries(
         'space-1',
-        expect.any(Array),
+        [entry],
         'user-1',
         'main.tex',
         'page-1',
       );
-
-      const importSvc = new ImportService(hydrator, new ZipAdapter());
-      expect(importSvc).toBeDefined();
+      expect(hydrator.hydrateProjectEntries).toHaveBeenCalledWith(
+        'space-1',
+        [entry],
+        'user-1',
+        'main.tex',
+        'page-1',
+      );
     });
 
     it('eliminates N+1 getDoc queries via batch getAllDocs prefetch in collector', async () => {
@@ -292,15 +331,32 @@ describe('Export-Import Deep Module Suite', () => {
       const collector = new PageArchiveAggregatorAdapter(
         {
           getAllNodes: jest.fn().mockResolvedValue([
-            { id: 'n1', path: '/a.tex', type: 'DOC', docId: 'd1', isRootDoc: true },
-            { id: 'n2', path: '/b.tex', type: 'DOC', docId: 'd2', isRootDoc: false },
+            {
+              id: 'n1',
+              path: '/a.tex',
+              type: 'DOC',
+              docId: 'd1',
+              isRootDoc: true,
+            },
+            {
+              id: 'n2',
+              path: '/b.tex',
+              type: 'DOC',
+              docId: 'd2',
+              isRootDoc: false,
+            },
           ]),
         } as never,
         { getAllDocs, getDoc } as never,
         {} as never,
       );
 
-      const entries = await collector.collectProjectEntries('space-1', false, false, 'page-1');
+      const entries = await collector.collectProjectEntries(
+        'space-1',
+        false,
+        false,
+        'page-1',
+      );
       expect(entries).toHaveLength(2);
       expect(getAllDocs).toHaveBeenCalledTimes(1);
       expect(getDoc).not.toHaveBeenCalled();
@@ -352,7 +408,9 @@ describe('Export-Import Deep Module Suite', () => {
     });
 
     it('blocks HTTP 302 SSRF redirect to loopback in ImportService.importFromUrl', async () => {
-      const hydrator = { hydrateProjectEntries: jest.fn() } as unknown as PageArchiveHydratorAdapter;
+      const hydrator = {
+        hydrateProjectEntries: jest.fn(),
+      } as unknown as PageArchiveHydratorAdapter;
       const importSvc = new ImportService(hydrator, new ZipAdapter());
 
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce(

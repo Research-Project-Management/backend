@@ -13,7 +13,7 @@ import { mapWithConcurrency } from '@/core';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const gzipAsync = promisify(zlib.gzip);
-import { WorkspaceFile } from '@/modules/pages/core/domain/workspace-file.interface';
+import { WorkspaceFile } from '@/modules/pages/core/types/workspace-file';
 import {
   IDocRepository,
   IDocPersistor,
@@ -512,7 +512,7 @@ export class DocstoreService {
       );
     }
 
-    const key = `${projectId}/${doc.id}.json`;
+    const key = `${projectId}/${doc.id}-${doc.rev}.json`;
     const { buffer, sourceMd5 } = await this.encodeArchivePayload(payload);
     const stream = Readable.from(buffer);
     const clearLines = this.docPersistor.isDurableStorageConfigured
@@ -530,6 +530,7 @@ export class DocstoreService {
     if (archived) {
       this.logger.log(`Archived single document ${docId} to S3 cold tier`);
     } else {
+      await this.docPersistor.deleteObject(key).catch(() => {});
       this.logger.warn(
         `Skipped marking document ${docId} as archived due to concurrent rev modification`,
       );

@@ -4,8 +4,8 @@ import { mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  WorkspaceCollectorService,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { WorkspaceCollectorService } from '@/modules/pages/core/services/workspace-collector.service';
 import { resolveExportProfile } from '../domain/archive.policy';
 import type {
   ExportableFileEntry,
@@ -46,7 +46,6 @@ export class PageArchiveAggregatorAdapter {
     includePdf: boolean,
     cleanArxiv: boolean,
     pageId?: string,
-    prefetchedDocsById?: Map<string, string[]> | null,
   ): Promise<DeferredEntry[]> {
     const profile = resolveExportProfile({ cleanArxiv, includePdf });
     const nodes = pageId
@@ -54,7 +53,9 @@ export class PageArchiveAggregatorAdapter {
       : await this.structureService.getAllNodes(projectId);
     const nonFolderNodes = nodes.filter((n) => n.type !== 'FOLDER');
 
+    // Flush active CRDT edits BEFORE batch-prefetching Postgres docs so exports never serve stale content
     await this.flushLiveWorkspace(projectId, nonFolderNodes);
+    const prefetchedDocsById = await this.batchPrefetchDocs(projectId, pageId);
 
     const entries: DeferredEntry[] = [];
 
@@ -127,7 +128,6 @@ export class PageArchiveAggregatorAdapter {
       includePdf,
       cleanArxiv,
       pageId,
-      null,
     );
     return deferred.map((item) => ({
       path: item.path,
@@ -141,13 +141,11 @@ export class PageArchiveAggregatorAdapter {
     cleanArxiv = false,
     pageId?: string,
   ): Promise<ExportableFileEntry[]> {
-    const prefetchedDocsById = await this.batchPrefetchDocs(projectId, pageId);
     const deferred = await this.resolveDeferredEntries(
       projectId,
       includePdf,
       cleanArxiv,
       pageId,
-      prefetchedDocsById,
     );
 
     const materialized = await mapWithConcurrency<

@@ -4,7 +4,7 @@
  */
 
 import { Readable } from 'node:stream';
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB (Overleaf Parity)
 
@@ -550,7 +550,17 @@ export abstract class IPageBinaryAssetRepository {
   abstract findByProjectAndId(
     projectId: string,
     id: string,
+    pageId?: string | null,
   ): Promise<PageBinaryAsset | null>;
+  findManyByProjectAndIds?(
+    projectId: string,
+    ids: string[],
+  ): Promise<PageBinaryAsset[]>;
+  markDeletedIfActive?(
+    projectId: string,
+    fileId: string,
+    pageId?: string | null,
+  ): Promise<boolean | null>;
   abstract findByProjectAndName(
     projectId: string,
     name: string,

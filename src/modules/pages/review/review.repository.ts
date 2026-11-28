@@ -535,15 +535,13 @@ export class ReviewRepository {
     docId: string,
   ): Promise<DocReviewWithRound | null> {
     if (!this.prisma.docReview?.findUnique) return null;
-    return Promise.resolve(
-      this.prisma.docReview.findUnique({
-        where: { docId },
-        include: {
-          doc: { select: { spaceId: true } },
-          rounds: { orderBy: { roundNumber: 'desc' }, take: 1 },
-        },
-      }),
-    ).catch(() => null);
+    return this.prisma.docReview.findUnique({
+      where: { docId },
+      include: {
+        doc: { select: { spaceId: true } },
+        rounds: { orderBy: { roundNumber: 'desc' }, take: 1 },
+      },
+    });
   }
 
   public async updateDocReviewCas(

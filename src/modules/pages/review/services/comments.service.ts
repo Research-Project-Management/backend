@@ -9,8 +9,8 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthenticatedRequest, isUuid } from '@/core';
-import { getRecordSpaceId } from '@/modules/pages/core/page-scope.helper';
-import { PageService } from '@/modules/pages/core/services/page.service';
+import { getRecordSpaceId } from '@/modules/pages/core/utils/page-scope';
+import { PageService } from '@/modules/pages/page/services/page.service';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 import {

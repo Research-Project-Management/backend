@@ -94,6 +94,26 @@ export class ClsiRuntimeAdapter {
       return remoteResult;
     }
 
+    if (
+      this.remoteClient.isEnabled() &&
+      process.env.NODE_ENV === 'production'
+    ) {
+      return enrichUnreachableRemoteFailure({
+        pipelineResult: {
+          success: false,
+          status: 'failure',
+          error:
+            'Remote CLSI service is unreachable; local fallback is disabled in production.',
+          pdf: '',
+          logs: 'Remote CLSI service is unreachable; local fallback is disabled in production.',
+          diagnostics: [],
+          durationMs: 0,
+        },
+        mainFile,
+        remoteUrl: this.remoteClient.getBaseUrl(),
+      });
+    }
+
     const localResult = await this.pipeline.execute({
       spaceId: scratchWorkspaceId,
       mainFile,

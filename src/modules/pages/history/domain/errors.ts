@@ -1,4 +1,4 @@
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export class DuplicateLabelException extends PagesDomainError {
   constructor(

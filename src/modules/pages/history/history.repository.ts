@@ -8,7 +8,7 @@ import { Injectable, ConflictException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
-import { ensureCanonicalPageId } from '@/modules/pages/core/page-scope.helper';
+import { ensureCanonicalPageId } from '@/modules/pages/core/utils/page-scope';
 import {
   HistoryBlob as PrismaBlob,
   PageSnapshot as PrismaSnapshot,
@@ -19,10 +19,7 @@ import { IHistoryRepositoryPort } from './domain/ports';
 import { Snapshot } from './domain/snapshot';
 import { VersionLabel } from './domain/label';
 import { FileSnapshotVo } from './domain/snapshot';
-import {
-  SnapshotNormalizer,
-  RawSnapshotFileEntry,
-} from './domain/snapshot';
+import { SnapshotNormalizer, RawSnapshotFileEntry } from './domain/snapshot';
 
 export type { RawSnapshotFileEntry };
 
@@ -58,7 +55,11 @@ export class HistoryMapper {
       prisma.projectId ??
       fallbackContext?.spaceId ??
       '';
-    const version = prisma.snapshot?.version ?? prisma.version ?? fallbackContext?.version ?? 1;
+    const version =
+      prisma.snapshot?.version ??
+      prisma.version ??
+      fallbackContext?.version ??
+      1;
     return VersionLabel.create({
       id: prisma.id,
       projectId: spaceId,
@@ -250,7 +251,9 @@ export class HistoryRepository extends IHistoryRepositoryPort {
         vo.hash && vo.hash.length === 64
           ? vo.hash
           : computeContentHash(
-              isDoc ? (content ?? '') : `${pathname}:${vo.fileId ?? ''}:${sizeBytes}`,
+              isDoc
+                ? (content ?? '')
+                : `${pathname}:${vo.fileId ?? ''}:${sizeBytes}`,
             );
 
       if (!blobMap.has(rawHash)) {
@@ -293,9 +296,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
             isAutomatic: snapshot.isAutomatic,
             totalBytes,
             createdAt: snapshot.createdAt,
-            ...(fileRows.length > 0
-              ? { files: { create: fileRows } }
-              : {}),
+            ...(fileRows.length > 0 ? { files: { create: fileRows } } : {}),
           },
           include: {
             files: { include: { blob: true } },
@@ -492,9 +493,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
       include: { snapshot: { select: { spaceId: true, version: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((row) =>
-      HistoryMapper.toDomainLabel(row, { spaceId }),
-    );
+    return rows.map((row) => HistoryMapper.toDomainLabel(row, { spaceId }));
   }
 
   public async findBlobInSpace(

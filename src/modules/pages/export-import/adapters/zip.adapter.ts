@@ -1,10 +1,15 @@
 import * as zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import { Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
-import { buildZipBuffer, createZipStream } from '@/modules/pages/core';
+import {
+  buildZipBuffer,
+  createZipStream,
+} from '@/modules/pages/core/utils/zip-builder';
 import { ArchiveEntryVo } from '../domain/archive.domain';
 import {
-  ArchiveQuotaExceededException,
+  ArchiveFileLimitExceededException,
+  ArchiveSizeExceededException,
   InvalidZipArchiveException,
 } from '../domain/archive.errors';
 import {
@@ -13,6 +18,10 @@ import {
   MAX_UNCOMPRESSED_PROJECT_BYTES,
 } from '../domain/archive.policy';
 import type { RawZipEntryInput } from '../types/archive.types';
+
+const inflateRawAsync = promisify(zlib.inflateRaw);
+const ZIP_BOMB_RATIO_THRESHOLD_BYTES = 1 * 1024 * 1024;
+const ZIP_BOMB_MAX_RATIO = 100;
 
 @Injectable()
 export class ZipAdapter {
@@ -26,7 +35,7 @@ export class ZipAdapter {
     return createZipStream(entries);
   }
 
-  public extractZip(zipBuffer: Buffer): ArchiveEntryVo[] {
+  public async extractZip(zipBuffer: Buffer): Promise<ArchiveEntryVo[]> {
     if (!zipBuffer || zipBuffer.length < 22) {
       throw new InvalidZipArchiveException(
         'Provided buffer is too small to be a valid ZIP archive.',
@@ -48,10 +57,7 @@ export class ZipAdapter {
     }
 
     if (cdTotalEntries > MAX_PROJECT_ENTRY_COUNT) {
-      throw new ArchiveQuotaExceededException(
-        cdTotalEntries,
-        MAX_PROJECT_ENTRY_COUNT,
-      );
+      throw new ArchiveFileLimitExceededException(MAX_PROJECT_ENTRY_COUNT);
     }
 
     let offset = cdOffset;
@@ -93,8 +99,12 @@ export class ZipAdapter {
         continue;
       }
 
-      const localFileNameLength = zipBuffer.readUInt16LE(localHeaderOffset + 26);
-      const localExtraFieldLength = zipBuffer.readUInt16LE(localHeaderOffset + 28);
+      const localFileNameLength = zipBuffer.readUInt16LE(
+        localHeaderOffset + 26,
+      );
+      const localExtraFieldLength = zipBuffer.readUInt16LE(
+        localHeaderOffset + 28,
+      );
       const dataOffset =
         localHeaderOffset + 30 + localFileNameLength + localExtraFieldLength;
       const isDirectory =
@@ -109,11 +119,18 @@ export class ZipAdapter {
           );
         }
 
-        const slice = zipBuffer.subarray(dataOffset, dataOffset + compressedSize);
-        const inflated = this.decompressSlice(
+        const remainingBudget =
+          MAX_UNCOMPRESSED_PROJECT_BYTES - totalUncompressedBytes;
+        const maxEntryOutput = Math.min(MAX_SINGLE_FILE_BYTES, remainingBudget);
+        const slice = zipBuffer.subarray(
+          dataOffset,
+          dataOffset + compressedSize,
+        );
+        const inflated = await this.decompressSlice(
           compressionMethod,
           slice,
           declaredUncompressedSize,
+          maxEntryOutput,
           fileName,
         );
         if (inflated === null) continue;
@@ -122,7 +139,7 @@ export class ZipAdapter {
 
       totalUncompressedBytes += uncompressedData.length;
       if (totalUncompressedBytes > MAX_UNCOMPRESSED_PROJECT_BYTES) {
-        throw new ArchiveQuotaExceededException(
+        throw new ArchiveSizeExceededException(
           totalUncompressedBytes,
           MAX_UNCOMPRESSED_PROJECT_BYTES,
         );
@@ -142,18 +159,16 @@ export class ZipAdapter {
     return entries;
   }
 
-  private decompressSlice(
+  private async decompressSlice(
     method: number,
     slice: Buffer,
     declaredUncompressedSize: number,
+    maxOutputBytes: number,
     fileName: string,
-  ): Buffer | null {
+  ): Promise<Buffer | null> {
     if (method === 0) {
-      if (slice.length > MAX_SINGLE_FILE_BYTES) {
-        throw new ArchiveQuotaExceededException(
-          slice.length,
-          MAX_SINGLE_FILE_BYTES,
-        );
+      if (slice.length > maxOutputBytes) {
+        throw new ArchiveSizeExceededException(slice.length, maxOutputBytes);
       }
       return Buffer.from(slice);
     }
@@ -161,8 +176,8 @@ export class ZipAdapter {
     if (method === 8) {
       if (
         slice.length > 0 &&
-        declaredUncompressedSize > 10 * 1024 * 1024 &&
-        declaredUncompressedSize / slice.length > 100
+        declaredUncompressedSize > ZIP_BOMB_RATIO_THRESHOLD_BYTES &&
+        declaredUncompressedSize / slice.length > ZIP_BOMB_MAX_RATIO
       ) {
         throw new InvalidZipArchiveException(
           `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
@@ -170,13 +185,13 @@ export class ZipAdapter {
       }
 
       try {
-        const inflated = zlib.inflateRawSync(slice, {
-          maxOutputLength: MAX_SINGLE_FILE_BYTES,
+        const inflated = await inflateRawAsync(slice, {
+          maxOutputLength: Math.max(1, maxOutputBytes),
         });
         if (
           slice.length > 0 &&
-          inflated.length > 10 * 1024 * 1024 &&
-          inflated.length / slice.length > 100
+          inflated.length > ZIP_BOMB_RATIO_THRESHOLD_BYTES &&
+          inflated.length / slice.length > ZIP_BOMB_MAX_RATIO
         ) {
           throw new InvalidZipArchiveException(
             `Suspicious compression ratio detected in entry '${fileName}' (zip bomb protection).`,
@@ -186,9 +201,9 @@ export class ZipAdapter {
       } catch (err: unknown) {
         if (err instanceof InvalidZipArchiveException) throw err;
         if ((err as { code?: string })?.code === 'ERR_BUFFER_TOO_LARGE') {
-          throw new ArchiveQuotaExceededException(
-            MAX_SINGLE_FILE_BYTES + 1,
-            MAX_SINGLE_FILE_BYTES,
+          throw new ArchiveSizeExceededException(
+            maxOutputBytes + 1,
+            maxOutputBytes,
           );
         }
         const msg = err instanceof Error ? err.message : String(err);

@@ -1,4 +1,4 @@
-import { resolvePageFilesList } from '@/modules/pages/core/services/page-query-metadata.helper';
+import { resolvePageFilesList } from '@/modules/pages/page/services/query.service';
 import { PrismaService } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 

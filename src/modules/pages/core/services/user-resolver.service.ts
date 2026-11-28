@@ -60,20 +60,18 @@ export class UserResolverService {
         const remainingIds = validIds.filter((id) => !result.has(id));
         const users = await this.prisma.user.findMany({
           where: { id: { in: remainingIds } },
-          include: { profile: true },
+          select: {
+            id: true,
+            email: true,
+            profile: {
+              select: { name: true, avatar: true },
+            },
+          },
         });
         for (const u of users) {
-          const profileObj = u.profile as
-            | {
-                name?: string | null;
-                avatarUrl?: string | null;
-                avatar?: string | null;
-              }
-            | null
-            | undefined;
           const name =
-            profileObj?.name || u.email?.split('@')[0] || 'Collaborator';
-          const avatar = profileObj?.avatarUrl || profileObj?.avatar || '';
+            u.profile?.name || u.email?.split('@')[0] || 'Collaborator';
+          const avatar = u.profile?.avatar || '';
           result.set(u.id, { id: u.id, name, avatar });
         }
       } catch {

@@ -1,4 +1,4 @@
-import { PagesDomainError } from '@/modules/pages/core/domain/pages-domain.error';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export class ZipSlipSecurityException extends PagesDomainError {
   constructor(entryPath: string) {
@@ -46,5 +46,3 @@ export class ArchiveSizeExceededException extends PagesDomainError {
     );
   }
 }
-
-export { ArchiveSizeExceededException as ArchiveQuotaExceededException };

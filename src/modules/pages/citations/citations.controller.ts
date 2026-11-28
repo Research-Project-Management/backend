@@ -32,7 +32,7 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/page-scope.helper';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
 import { CitationsService } from './services/citations.service';
 import {
   CitationQueryDto,

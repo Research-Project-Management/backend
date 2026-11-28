@@ -81,7 +81,6 @@ describe('Library Ingestion Claim Check Pattern & Scale Optimizations', () => {
           buffer: entry.buffer,
         };
       }),
-      linkFile: jest.fn().mockResolvedValue(undefined),
     });
 
     mockRepo = {

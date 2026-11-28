@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { isUuid } from '@/core';
-import { isPrismaUniqueConstraintError } from '@/modules/pages/core/page-scope.helper';
-import { PageService } from '@/modules/pages/core/services/page.service';
+import { isPrismaUniqueConstraintError } from '@/modules/pages/core/utils/page-scope';
+import { PageService } from '@/modules/pages/page/services/page.service';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { ReviewRoundInfo } from '@/modules/pages/docstore/domain';
@@ -179,6 +179,9 @@ export class ReviewStatusService {
           payload,
         );
         if (!updated) {
+          if (attempt < MAX_CAS_ATTEMPTS) {
+            continue;
+          }
           throw new ConflictException(
             `Concurrent review status update conflict for document ${docId}`,
           );

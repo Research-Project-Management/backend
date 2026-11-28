@@ -17,8 +17,6 @@ import { UserResolverService } from './services/user-resolver.service';
 import { IDistributedLockPort } from './ports/distributed-lock.port';
 import { RedisLockAdapter } from './adapters/redis-lock.adapter';
 
-import { CleanupListener } from './services/cleanup.listener';
-
 @Global()
 @Module({
   imports: [PrismaModule, IdentityModule, RealtimeClientModule],
@@ -27,11 +25,10 @@ import { CleanupListener } from './services/cleanup.listener';
     WorkspaceCollectorService,
     PageDomainEventBus,
     UserResolverService,
-    CleanupListener,
     RedisLockAdapter,
     {
       provide: IDistributedLockPort,
-      useClass: RedisLockAdapter,
+      useExisting: RedisLockAdapter,
     },
   ],
   exports: [
@@ -40,7 +37,6 @@ import { CleanupListener } from './services/cleanup.listener';
     PageDomainEventBus,
     UserResolverService,
     IDistributedLockPort,
-    RedisLockAdapter,
     RealtimeClientModule,
   ],
 })

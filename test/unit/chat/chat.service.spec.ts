@@ -167,8 +167,9 @@ describe('ChatService Unit Tests', () => {
 
     it('creates new direct conversation if none exists', async () => {
       mockPrisma.conversation.findFirst.mockResolvedValue(null);
-      mockPrisma.conversation.create.mockImplementation(({ data }) =>
-        Promise.resolve({ id: 'conv-new', ...data }),
+      mockPrisma.conversation.create.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ id: 'conv-new', ...data }),
       );
 
       const res = await service.getOrCreateDirect('u1', 'u2');

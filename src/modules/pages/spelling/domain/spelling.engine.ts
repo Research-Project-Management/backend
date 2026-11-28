@@ -75,7 +75,7 @@ const SKIP_WORD_RULES: ReadonlyArray<(word: string) => boolean> = [
 export function normalizeLanguageCode(raw?: string): SupportedLanguage {
   if (!raw || !raw.trim()) return 'en-us';
   const normalized = raw.trim().toLowerCase().replace('_', '-');
-  if (!(normalized in DICTIONARY_PACKAGES)) {
+  if (!Object.prototype.hasOwnProperty.call(DICTIONARY_PACKAGES, normalized)) {
     throw new UnsupportedLanguageException(raw, SUPPORTED_LANGUAGES);
   }
   return normalized as SupportedLanguage;

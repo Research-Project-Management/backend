@@ -28,7 +28,7 @@ import { CitationsService } from './citations/services/citations.service';
 import { ExportService } from './export-import/services/export.service';
 import { WorkspaceCollectorService } from './core/services/workspace-collector.service';
 import { PageDomainEventBus } from './core/events/event-bus.service';
-import { PagesServiceUnavailableError } from './core/domain/pages-domain.error';
+import { PagesServiceUnavailableError } from '@/modules/pages/core/domain/errors';
 import {
   EditorBootstrapService,
   type BootstrapEditorParams,
@@ -195,7 +195,11 @@ export class PagesFacade {
     userId?: string,
   ) {
     if (this.restoreService) {
-      return this.restoreService.restoreVersion(projectId, targetVersion, userId);
+      return this.restoreService.restoreVersion(
+        projectId,
+        targetVersion,
+        userId,
+      );
     }
     throw new PagesServiceUnavailableError('RestoreService is not available');
   }

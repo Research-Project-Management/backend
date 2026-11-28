@@ -6,6 +6,7 @@ import { AccessRepository } from '@/modules/ai/access/access.repository';
 import { AccessService } from '@/modules/ai/access/services/access.service';
 import { DocumentAccessService } from '@/modules/ai/access/services/document.service';
 import { SpaceAccessService } from '@/modules/ai/access/services/space.service';
+import type { ChatService } from '@/modules/ai/chat/services/chat.service';
 import { PaperChatService } from '@/modules/ai/chat/services/paper.service';
 import type { IAiEnginePort } from '@/modules/ai/engine/engine.port';
 
@@ -48,6 +49,9 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
       cancelThread: jest.fn(),
       deleteThread: jest.fn(),
       deleteSpaceThreads: jest.fn(),
+      revertTurn: jest.fn(),
+      listThreadCheckpoints: jest.fn(),
+      rewindThread: jest.fn(),
       ingestDocument: jest.fn(),
       searchKnowledge: jest.fn(),
       deleteKnowledgeSource: jest.fn(),
@@ -83,8 +87,32 @@ describe('PaperChatService & AccessService RAG Q&A Suite', () => {
     const docAccess = new DocumentAccessService(accessRepo, spaceAccess);
     const accessService = new AccessService(spaceAccess, docAccess);
 
-    paperService = new PaperChatService(mockEngine, accessService);
-
+    // ChatService is stubbed: this suite verifies PaperChatService's grounding
+    // (resolved space, document ids, system prompt) as forwarded to the engine.
+    const buildRequest = (
+      dto: { query: string; spaceId?: string; documentIds?: string[] },
+      options?: { prependSystemMessage?: string },
+    ) => ({
+      space_id: dto.spaceId,
+      document_ids: dto.documentIds,
+      intent_hint: 'rag_agent',
+      messages: [
+        { role: 'system', content: options?.prependSystemMessage ?? '' },
+        { role: 'user', content: dto.query },
+      ],
+    });
+    const chatServiceStub = fromPartial<ChatService>({
+      stream: jest.fn(async (_userId, dto, _reply, _token, options) => {
+        await mockEngine.chatStream(
+          buildRequest(dto, options) as never,
+          {} as never,
+        );
+      }),
+      execute: jest.fn(async (_userId, dto, _token, options) =>
+        mockEngine.chatSync(buildRequest(dto, options) as never),
+      ),
+    });
+    paperService = new PaperChatService(chatServiceStub, accessService);
     mockReply = fromPartial<FastifyReply>({
       raw: {},
       hijack: jest.fn(),

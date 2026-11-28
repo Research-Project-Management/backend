@@ -216,8 +216,9 @@ describe('ProjectChannelService Unit Tests', () => {
       });
 
       mockPrisma.conversation.findFirst.mockResolvedValue(null);
-      mockPrisma.conversation.create.mockImplementation(({ data }) =>
-        Promise.resolve({ id: 'c-new', ...data }),
+      mockPrisma.conversation.create.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ id: 'c-new', ...data }),
       );
 
       const res = await service.createChannel('proj-1', 'user-owner', {

@@ -1,143 +1,143 @@
+/**
+ * templates/templates.controller.ts
+ * Canonical REST API for Manuscripts Templates & Gallery (Overleaf parity):
+ * - GET    /api/v1/pages/templates                                      (Virtual Proxy summary list)
+ * - GET    /api/v1/pages/templates/:id                                  (Full template detail + files)
+ * - POST   /api/v1/pages/templates                                      (Publish private/workspace/official template)
+ * - PATCH  /api/v1/pages/templates/:id                                  (Update template metadata)
+ * - DELETE /api/v1/pages/templates/:id                                  (Delete custom template)
+ * - POST   /api/v1/pages/spaces/:spaceId/templates/:templateId/scaffold (Instantiate/scaffold onto Space or Page)
+ */
+
 import {
-  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
-  HttpException,
   HttpStatus,
-  NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Req,
-  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
-import { JwtAuthGuard } from '@/modules/identity/auth';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { FastifyRequest } from 'fastify';
+import { UserRateLimit, UserRateLimitGuard } from '@/core';
+import { CurrentUser, JwtAuthGuard } from '@/modules/identity/auth';
 import {
   NoProjectContext,
-  RequireOperator,
-  OperatorGuard,
+  ProjectAccessGuard,
+  RequireRole,
+  ResolvedSpace,
+  Role,
 } from '@/modules/project/access';
-import { AuthenticatedRequest } from '@/core';
-import { TemplatesService } from './templates.service';
-import { TemplateNotFoundException, InvalidTemplateException } from './domain';
+import { resolvePageControllerCoordinates } from '../core/utils/page-scope';
 import {
+  PublishTemplateDto,
   QueryTemplatesDto,
-  SearchTemplatesDto,
-  InstantiateTemplateDto,
-  CreateTemplateDto,
+  ScaffoldTemplateDto,
+  UpdateTemplateDto,
 } from './dto/template.dto';
+import { GalleryService } from './services/gallery.service';
+import { PublishService } from './services/publish.service';
+import { ScaffoldService } from './services/scaffold.service';
 
-@ApiTags('Pages - Templates')
+@ApiTags('Manuscripts - Templates')
 @ApiBearerAuth('JWT-auth')
-@Controller('api/v1/pages/templates')
 @UseGuards(JwtAuthGuard)
-@NoProjectContext()
+@Controller('api/v1/pages')
 export class TemplatesController {
-  constructor(private readonly templatesService: TemplatesService) {}
+  constructor(
+    private readonly gallery: GalleryService,
+    private readonly publisher: PublishService,
+    private readonly scaffolder: ScaffoldService,
+  ) {}
 
-  private extractUserId(req?: AuthenticatedRequest): string {
-    const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
-    if (!userId) {
-      throw new UnauthorizedException('Authentication required');
-    }
-    return userId;
-  }
-
-  private handleError(error: unknown): never {
-    if (error instanceof HttpException) {
-      throw error;
-    }
-    if (error instanceof TemplateNotFoundException) {
-      throw new NotFoundException(error.message);
-    }
-    if (error instanceof InvalidTemplateException) {
-      throw new BadRequestException(error.message);
-    }
-    throw error;
-  }
-
-  @Get()
+  @Get('templates')
   @NoProjectContext()
-  @ApiOperation({ summary: 'List available manuscript starter templates' })
-  @ApiResponse({ status: 200, description: 'Paginated list of templates' })
-  async listTemplates(@Query() query: QueryTemplatesDto) {
-    try {
-      return await this.templatesService.listTemplates(query);
-    } catch (error) {
-      this.handleError(error);
-    }
+  @ApiOperation({ summary: 'Browse and search manuscript template summaries' })
+  public browse(
+    @CurrentUser('id') userId: string,
+    @Query() query: QueryTemplatesDto,
+  ) {
+    return this.gallery.browse(userId, query);
   }
 
-  @Get('search')
+  @Get('templates/:id')
   @NoProjectContext()
-  @ApiOperation({ summary: 'Search manuscript templates by keyword or tag' })
-  @ApiResponse({ status: 200, description: 'Search results' })
-  async searchTemplates(@Query() query: SearchTemplatesDto) {
-    try {
-      return await this.templatesService.searchTemplates(query);
-    } catch (error) {
-      this.handleError(error);
-    }
+  @ApiOperation({ summary: 'Retrieve full template manifest and files' })
+  public getDetail(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.gallery.getDetail(id, userId);
   }
 
-  @Get(':id')
+  @Post('templates')
+  @UseGuards(UserRateLimitGuard)
   @NoProjectContext()
-  @ApiOperation({ summary: 'Get details and files of a manuscript template' })
-  @ApiResponse({ status: 200, description: 'Template detail' })
-  async getTemplate(@Param('id') id: string) {
-    try {
-      return await this.templatesService.getTemplate(id);
-    } catch (error) {
-      this.handleError(error);
-    }
-  }
-
-  @Post('instantiate')
-  @UseGuards(JwtAuthGuard)
-  @NoProjectContext()
-  @ApiBearerAuth('JWT-auth')
+  @UserRateLimit('import')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Create a new project instantiated from a template',
+    summary: 'Publish a manuscript template from a workspace or inline files',
   })
-  @ApiResponse({
-    status: 201,
-    description: 'Project successfully created from template',
-  })
-  async instantiateTemplate(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: InstantiateTemplateDto,
+  public publish(
+    @CurrentUser('id') userId: string,
+    @Body() dto: PublishTemplateDto,
   ) {
-    try {
-      const userId = this.extractUserId(req);
-      return await this.templatesService.instantiateTemplate(userId, dto);
-    } catch (error) {
-      this.handleError(error);
-    }
+    return this.publisher.publish(userId, dto);
   }
 
-  @Post('custom')
-  @UseGuards(JwtAuthGuard, OperatorGuard)
-  @RequireOperator()
+  @Patch('templates/:id')
+  @UseGuards(UserRateLimitGuard)
   @NoProjectContext()
-  @ApiBearerAuth('JWT-auth')
+  @UserRateLimit('import')
+  @ApiOperation({ summary: 'Update custom template metadata' })
+  public update(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateTemplateDto,
+  ) {
+    return this.gallery.update(id, userId, dto);
+  }
+
+  @Delete('templates/:id')
+  @NoProjectContext()
+  @ApiOperation({ summary: 'Delete a private or workspace template' })
+  public async remove(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    await this.gallery.remove(id, userId);
+    return { success: true };
+  }
+
+  @Post('spaces/:spaceId/templates/:templateId/scaffold')
+  @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
+  @RequireRole(Role.CONTRIBUTOR)
+  @UserRateLimit('import')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Publish or create a custom manuscript template' })
-  @ApiResponse({ status: 201, description: 'Custom template created' })
-  async createCustomTemplate(@Body() dto: CreateTemplateDto) {
-    try {
-      return await this.templatesService.createCustomTemplate(dto);
-    } catch (error) {
-      this.handleError(error);
-    }
+  @ApiOperation({
+    summary:
+      'Instantiate a new Page or scaffold an existing Page from a template',
+  })
+  public scaffold(
+    @Param('spaceId') routeSpaceId: string,
+    @Param('templateId') templateId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body?: ScaffoldTemplateDto,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
+  ) {
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId },
+      authorizedSpace,
+      body?.pageId,
+      req,
+    );
+    return this.scaffolder.scaffold(spaceId, templateId, userId, {
+      pageId,
+      title: body?.title,
+    });
   }
 }

@@ -25,10 +25,14 @@ import {
 import { PageBinaryAssetResponseDto } from '@/modules/pages/filestore/dto/file-response.dto';
 import { FilestoreRepository } from '@/modules/pages/filestore/filestore.repository';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { filterRecordsByPageScope } from '@/modules/pages/core/page-scope.helper';
+import { filterRecordsByPageScope } from '@/modules/pages/core/utils/page-scope';
 import { findPageRecordWithNode } from '@/modules/pages/docstore/services/doc-occ.helper';
-import { applyPageMetadataAndTitleUpdates } from '@/modules/pages/core/services/page-query-metadata.helper';
-import { type IFilesPort, BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
+import { applyPageMetadataAndTitleUpdates } from '@/modules/pages/page/services/content.service';
+import {
+  type IFilesPort,
+  BlobStatus,
+  StorageBlobRecord,
+} from '@/modules/files/types/files.type';
 import {
   ContentHash as PlatformContentHash,
   StorageKey as PlatformStorageKey,

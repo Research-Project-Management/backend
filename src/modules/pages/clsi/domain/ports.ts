@@ -3,7 +3,7 @@
  * Domain contracts and port interfaces for CLSI artifacts, engines, sandbox runners, and workspaces.
  */
 
-import { WorkspaceFile } from '@/modules/pages/core';
+import { WorkspaceFile } from '@/modules/pages/core/types/workspace-file';
 import { SandboxProfile } from './sandbox.policy';
 
 export type CompileOutcome =

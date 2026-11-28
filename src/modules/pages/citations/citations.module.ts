@@ -6,7 +6,7 @@
 import { Module } from '@nestjs/common';
 import { StructureModule } from '@/modules/pages/structure/structure.module';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { PagesCoreModule } from '@/modules/pages/core';
+import { PagesCoreModule } from '@/modules/pages/core/core.module';
 import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { LibraryModule } from '@/modules/library';
 

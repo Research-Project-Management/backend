@@ -3,7 +3,7 @@
  * Pure domain BibTeX escaping, value formatting, and library-item serialization.
  */
 
-import { escapeLatex } from '@/modules/pages/core';
+import { escapeLatex } from '@/modules/pages/core/domain/latex-escape';
 
 export { escapeLatex };
 

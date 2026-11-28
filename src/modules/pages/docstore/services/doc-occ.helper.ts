@@ -9,7 +9,7 @@ import { PrismaService, isUuid } from '@/core';
 import {
   getRecordSpaceId,
   isRecordDeleted,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import { NodePathVo } from '@/modules/pages/structure/domain';
 import { DocstoreService } from '../docstore.service';
 import { DocModifiedError } from '../domain';

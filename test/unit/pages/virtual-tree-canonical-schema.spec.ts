@@ -8,9 +8,9 @@ import {
 import { FilestoreRepository } from '@/modules/pages/filestore/filestore.repository';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { StructureRepository } from '@/modules/pages/structure/structure.repository';
-import { PageService } from '@/modules/pages/core/services/page.service';
+import { PageService } from '@/modules/pages/page/services/page.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { PageScaffoldService } from '@/modules/pages/docstore/services/page-scaffold.service';
+import { PageScaffoldService } from '@/modules/pages/page/services/scaffold.service';
 
 const SPACE_ID = '11111111-1111-4111-8111-111111111111';
 const PAGE_ID = '22222222-2222-4222-8222-222222222222';

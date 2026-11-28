@@ -10,20 +10,48 @@
 import * as zlib from 'zlib';
 import { once } from 'events';
 import { PassThrough, Readable } from 'stream';
-import { Zip, ZipDeflate, ZipPassThrough, zipSync, type Zippable } from 'fflate';
+import {
+  Zip,
+  ZipDeflate,
+  ZipPassThrough,
+  zipSync,
+  type Zippable,
+} from 'fflate';
 
 const STREAM_HIGH_WATER_MARK = 256 * 1024;
 
 const PRE_COMPRESSED_EXTENSIONS = new Set([
-  'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'avif',
-  'woff', 'woff2', 'zip', 'gz', 'tgz', 'bz2', 'xz', '7z',
-  'mp4', 'webm', 'mp3', 'ogg', 'docx', 'xlsx', 'pptx', 'epub',
+  'pdf',
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+  'gif',
+  'avif',
+  'woff',
+  'woff2',
+  'zip',
+  'gz',
+  'tgz',
+  'bz2',
+  'xz',
+  '7z',
+  'mp4',
+  'webm',
+  'mp3',
+  'ogg',
+  'docx',
+  'xlsx',
+  'pptx',
+  'epub',
 ]);
 
 function isPreCompressedPath(cleanPath: string): boolean {
   const dotIdx = cleanPath.lastIndexOf('.');
   if (dotIdx === -1) return false;
-  return PRE_COMPRESSED_EXTENSIONS.has(cleanPath.slice(dotIdx + 1).toLowerCase());
+  return PRE_COMPRESSED_EXTENSIONS.has(
+    cleanPath.slice(dotIdx + 1).toLowerCase(),
+  );
 }
 
 export function crc32(data: Buffer | string): number {
@@ -62,7 +90,8 @@ export function buildZipBuffer(entries: ZipEntry[]): Buffer {
     if (!cleanPath) continue;
 
     const bytes = toUint8Array(entry.data);
-    const shouldStore = bytes.byteLength === 0 || isPreCompressedPath(cleanPath);
+    const shouldStore =
+      bytes.byteLength === 0 || isPreCompressedPath(cleanPath);
     archive[cleanPath] = [
       bytes,
       {
@@ -84,7 +113,9 @@ export function createZipStream(entries: ZipEntry[]): Readable {
       return;
     }
     if (chunk && chunk.byteLength > 0) {
-      output.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+      output.write(
+        Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength),
+      );
     }
     if (final) {
       output.end();
@@ -108,7 +139,8 @@ export function createZipStream(entries: ZipEntry[]): Readable {
         }
 
         const bytes = toUint8Array(resolved);
-        const shouldStore = bytes.byteLength === 0 || isPreCompressedPath(cleanPath);
+        const shouldStore =
+          bytes.byteLength === 0 || isPreCompressedPath(cleanPath);
         const fileStream = shouldStore
           ? new ZipPassThrough(cleanPath)
           : new ZipDeflate(cleanPath, { level: 6 });
@@ -121,7 +153,11 @@ export function createZipStream(entries: ZipEntry[]): Readable {
         fileStream.push(bytes, true);
 
         if (output.writableNeedDrain && !output.destroyed) {
-          await once(output, 'drain');
+          await Promise.race([
+            once(output, 'drain'),
+            once(output, 'close'),
+          ]).catch(() => {});
+          if (output.destroyed) return;
         }
       }
 

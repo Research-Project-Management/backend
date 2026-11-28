@@ -22,7 +22,6 @@ export interface PagesEnvConfig {
     readonly safeParentEnv: Record<string, string>;
   };
   readonly sandbox: {
-    readonly rawEnv: Record<string, string | undefined>;
     readonly safeHostEnv: Record<string, string | undefined>;
   };
 }
@@ -57,8 +56,19 @@ export function getSafeHostEnv(): Record<string, string> {
   return result;
 }
 
-export function getRawPagesEnv(): Record<string, string | undefined> {
-  return { ...process.env };
+/**
+ * Returns only explicitly allowlisted CLSI/TeX configuration variables (never DB/JWT/S3 secrets).
+ */
+export function getClsiSandboxEnv(): Record<string, string | undefined> {
+  const result: Record<string, string | undefined> = {
+    NODE_ENV: process.env.NODE_ENV,
+  };
+  for (const [key, val] of Object.entries(process.env)) {
+    if (key.startsWith('CLSI_') || key.startsWith('TEX_')) {
+      result[key] = val;
+    }
+  }
+  return result;
 }
 
 export function readPagesConfig(): PagesEnvConfig {
@@ -85,7 +95,6 @@ export function readPagesConfig(): PagesEnvConfig {
       safeParentEnv: getSafeHostEnv(),
     },
     sandbox: {
-      rawEnv: getRawPagesEnv(),
       safeHostEnv: getSafeHostEnv(),
     },
   };

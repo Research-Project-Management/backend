@@ -6,7 +6,6 @@
 
 export * from './docstore.module';
 export * from './docstore.service';
-export { PageService } from '../core/services/page.service';
 export * from './controllers';
 export * from './dto/doc.dto';
 
@@ -16,7 +15,6 @@ export * from './domain';
 // Repositories & Services
 export { DocstoreRepository } from './repositories/docstore.repository';
 export { ScopeRepository } from './repositories/scope.repository';
-export { PageScaffoldService } from './services/page-scaffold.service';
 export { PresenceService } from './services/presence.service';
 export { SearchReplaceService } from './services/search-replace.service';
 export {

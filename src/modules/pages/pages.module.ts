@@ -19,6 +19,7 @@ import { PagesCoreModule } from './core/core.module';
 // Subsystem 1: Virtual File System & Storage (Unified with @/modules/files)
 import { FilestoreModule } from './filestore/filestore.module';
 import { DocstoreModule } from './docstore/docstore.module';
+import { PageModule } from './page/page.module';
 import { StructureModule } from './structure/structure.module';
 
 // Subsystem 3: Compilation
@@ -43,9 +44,10 @@ import { PagesFacade } from './pages.facade';
     // Tier 0: Shared Kernel
     PagesCoreModule,
 
-    // Tier 1 (Subsystem 1): VFS & Storage
+    // Tier 1 (Subsystem 1): VFS & Storage + Page Management
     FilestoreModule,
     DocstoreModule,
+    PageModule,
     StructureModule,
 
     // Tier 2 (Subsystem 3): Compilation
@@ -69,6 +71,7 @@ import { PagesFacade } from './pages.facade';
   exports: [
     PagesFacade,
     PagesCoreModule,
+    PageModule,
     EditorBootstrapModule,
 
     // Subsystem 1: VFS & Storage

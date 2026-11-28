@@ -1,17 +1,34 @@
+/**
+ * templates/templates.module.ts
+ * Encapsulated NestJS Module for Manuscripts Templates & Gallery (zero leaked internals).
+ */
+
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { StructureModule } from '@/modules/pages/structure/structure.module';
+import { AccessModule } from '@/modules/project/access';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-
-// Controllers & Services
+import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
+import { StructureModule } from '@/modules/pages/structure/structure.module';
+import { GalleryService } from './services/gallery.service';
+import { PublishService } from './services/publish.service';
+import { ScaffoldService } from './services/scaffold.service';
 import { TemplatesController } from './templates.controller';
-import { TemplatesService } from './templates.service';
 import { TemplatesRepository } from './templates.repository';
 
 @Module({
-  imports: [PrismaModule, StructureModule, DocstoreModule],
+  imports: [
+    PrismaModule,
+    AccessModule,
+    StructureModule,
+    DocstoreModule,
+    FilestoreModule,
+  ],
   controllers: [TemplatesController],
-  providers: [TemplatesRepository, TemplatesService],
-  exports: [TemplatesService, TemplatesRepository],
+  providers: [
+    TemplatesRepository,
+    GalleryService,
+    PublishService,
+    ScaffoldService,
+  ],
 })
 export class TemplatesModule {}

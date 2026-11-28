@@ -13,12 +13,12 @@ import {
   RenameNodeDto,
   TreeNodeDto,
 } from './dto/node.dto';
+import { CompilationPayload } from '@/modules/pages/core/types/workspace-file';
 import {
-  CompilationPayload,
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  PageDomainEventBus,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';

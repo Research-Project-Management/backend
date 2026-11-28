@@ -4,7 +4,6 @@
  */
 
 export * from './doc.controller';
-export * from './page.controller';
 export * from './doc-sync.controller';
 export * from './search-replace.controller';
 export * from './presence.controller';

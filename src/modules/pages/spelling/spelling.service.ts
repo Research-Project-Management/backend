@@ -27,31 +27,37 @@ export class SpellingService {
     string,
     Promise<ReadonlySet<string>>
   >();
-  private cacheEpoch = 0;
+  private readonly spaceEpochs = new Map<string, number>();
 
   constructor(
     private readonly repository: SpellingRepository,
     private readonly engine: SpellingEngine,
   ) {}
 
+  private getEpoch(spaceId: string): number {
+    return this.spaceEpochs.get(spaceId) ?? 0;
+  }
+
   private invalidateSpaceCache(spaceId: string): void {
-    this.cacheEpoch++;
+    this.spaceEpochs.set(spaceId, this.getEpoch(spaceId) + 1);
     this.dictionaryCache.delete(spaceId);
     this.pendingLoads.delete(spaceId);
   }
 
-  private async getCachedWordSet(spaceId: string): Promise<ReadonlySet<string>> {
+  private async getCachedWordSet(
+    spaceId: string,
+  ): Promise<ReadonlySet<string>> {
     const cached = this.dictionaryCache.get(spaceId);
     if (cached) return cached;
 
     let pending = this.pendingLoads.get(spaceId);
     if (!pending) {
-      const loadEpoch = this.cacheEpoch;
+      const loadEpoch = this.getEpoch(spaceId);
       pending = this.repository
         .listWords(spaceId)
         .then((words) => {
           const wordSet = new Set(words.map((w) => w.toLowerCase()));
-          if (this.cacheEpoch === loadEpoch) {
+          if (this.getEpoch(spaceId) === loadEpoch) {
             this.dictionaryCache.set(spaceId, wordSet);
           }
           return wordSet;
@@ -77,9 +83,9 @@ export class SpellingService {
   }
 
   public async listWords(spaceId: string): Promise<CustomDictionaryResult> {
-    const loadEpoch = this.cacheEpoch;
+    const loadEpoch = this.getEpoch(spaceId);
     const words = await this.repository.listWords(spaceId);
-    if (this.cacheEpoch === loadEpoch) {
+    if (this.getEpoch(spaceId) === loadEpoch) {
       this.dictionaryCache.set(
         spaceId,
         new Set(words.map((w) => w.toLowerCase())),

@@ -207,13 +207,6 @@ export class BibtexParser implements IBibtexParserPort {
     let match: RegExpExecArray | null;
     while ((match = entryStartRegex.exec(maskedText)) !== null) {
       const entryType = match[1].toLowerCase();
-      if (
-        entryType === 'comment' ||
-        entryType === 'preamble' ||
-        entryType === 'string'
-      ) {
-        continue;
-      }
       const openDelim = match[2];
       const openIdx = match.index + match[0].indexOf(openDelim);
       const closeIdx =
@@ -221,6 +214,14 @@ export class BibtexParser implements IBibtexParserPort {
           ? BibtexParser.findMatchingClosingParenStatic(maskedText, openIdx)
           : BibtexParser.findMatchingClosingBrace(maskedText, openIdx);
       if (closeIdx === -1) break;
+      if (
+        entryType === 'comment' ||
+        entryType === 'preamble' ||
+        entryType === 'string'
+      ) {
+        entryStartRegex.lastIndex = closeIdx + 1;
+        continue;
+      }
 
       const normKey = match[3].trim().toLowerCase();
       let spans = keyToSpans.get(normKey);

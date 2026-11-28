@@ -7,7 +7,7 @@
  */
 
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -34,13 +34,11 @@ export class ContentHasherAdapter extends IContentHasherPort {
   public async hashStream(stream: Readable): Promise<StreamHashResult> {
     const tempDir = path.join(os.tmpdir(), 'flux-filestore-spool');
     await fs.promises.mkdir(tempDir, { recursive: true });
-    const tempFilePath = path.join(
-      tempDir,
-      `spool-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
-    );
+    const tempFilePath = path.join(tempDir, `spool-${randomUUID()}.tmp`);
 
     const writeStream = fs.createWriteStream(tempFilePath);
     let sizeBytes = 0;
+    const sha256Obj = createHash('sha256');
 
     const meterStream = new PassThrough();
     meterStream.on('data', (chunk: Buffer | string) => {
@@ -50,7 +48,9 @@ export class ContentHasherAdapter extends IContentHasherPort {
         meterStream.destroy(
           new StorageQuotaExceededException(sizeBytes, MAX_FILE_SIZE_BYTES),
         );
+        return;
       }
+      sha256Obj.update(chunk);
     });
 
     let cleanedUp = false;
@@ -63,24 +63,21 @@ export class ContentHasherAdapter extends IContentHasherPort {
     try {
       await pipeline(stream, meterStream, writeStream);
 
+      const sha256Hex = sha256Obj.digest('hex');
       const gitHeader = Buffer.from(`blob ${sizeBytes}\0`, 'utf8');
       const gitHashObj = createHash('sha1');
       gitHashObj.update(gitHeader);
-
-      const sha256Obj = createHash('sha256');
 
       const readStreamForHashing = fs.createReadStream(tempFilePath);
       await new Promise<void>((resolve, reject) => {
         readStreamForHashing.on('data', (chunk: Buffer | string) => {
           gitHashObj.update(chunk);
-          sha256Obj.update(chunk);
         });
         readStreamForHashing.on('end', () => resolve());
         readStreamForHashing.on('error', reject);
       });
 
       const gitBlobHash = gitHashObj.digest('hex');
-      const sha256Hex = sha256Obj.digest('hex');
 
       const replayStream = fs.createReadStream(tempFilePath);
       replayStream.on('close', cleanupTempFile);
@@ -340,7 +337,7 @@ export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {
     const destPath = this.resolvePath(bucket, key);
     await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
 
-    const tempPath = `${destPath}~${Date.now()}`;
+    const tempPath = `${destPath}~${randomUUID()}`;
     const fileWriter = fs.createWriteStream(tempPath);
 
     try {

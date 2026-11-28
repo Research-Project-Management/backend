@@ -29,7 +29,7 @@ import {
   PageService,
   UpdatePageContentParams,
   PageDocRanges,
-} from '@/modules/pages/core/services/page.service';
+} from '@/modules/pages/page/services/page.service';
 
 export type { PageDocRanges };
 

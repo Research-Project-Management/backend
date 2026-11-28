@@ -25,8 +25,8 @@ import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  PageDomainEventBus,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { DistributedLockService } from '@/core';
 
 import {
@@ -129,10 +129,7 @@ export class CitationsRepository
       const results = await Promise.all(
         validBibNodes.map(async (node) => {
           try {
-            const doc = await this.docstoreService!.getDoc(
-              spaceId,
-              node.docId,
-            );
+            const doc = await this.docstoreService!.getDoc(spaceId, node.docId);
             const rawText = (doc.lines || []).join('\n');
             const entries = this.bibParser.parse(rawText);
             return new BibliographyFile({
@@ -217,10 +214,13 @@ export class CitationsRepository
 
   private isConflictError(err: unknown): boolean {
     if (!err || typeof err !== 'object') return false;
-    const status = (err as { status?: number; statusCode?: number }).status ??
+    const status =
+      (err as { status?: number; statusCode?: number }).status ??
       (err as { status?: number; statusCode?: number }).statusCode;
     if (status === 409) return true;
-    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    const msg = (
+      err instanceof Error ? err.message : String(err)
+    ).toLowerCase();
     return (
       msg.includes('conflict') ||
       msg.includes('revision') ||
@@ -362,13 +362,13 @@ export class CitationsRepository
     } catch (err) {
       if (createdDocId) {
         if (typeof this.docstoreService!.deleteDoc === 'function') {
-          await this.docstoreService!
-            .deleteDoc(spaceId, createdDocId)
-            .catch(() => undefined);
+          await this.docstoreService!.deleteDoc(spaceId, createdDocId).catch(
+            () => undefined,
+          );
         } else if (typeof this.docstoreService!.patchDoc === 'function') {
-          await this.docstoreService!
-            .patchDoc(spaceId, createdDocId, { deleted: true })
-            .catch(() => undefined);
+          await this.docstoreService!.patchDoc(spaceId, createdDocId, {
+            deleted: true,
+          }).catch(() => undefined);
         }
       }
       throw err;

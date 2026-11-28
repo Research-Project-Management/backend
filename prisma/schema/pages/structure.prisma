@@ -38,6 +38,7 @@ model PageNode {
   @@unique([pageId, path], map: "uq_page_nodes_page_path")
   @@index([pageId, depth, sortOrder, name], map: "idx_page_nodes_page_tree")
   @@index([pageId, type], map: "idx_page_nodes_page_type")
+  @@index([parentId], map: "idx_page_nodes_parent_id")
   @@index([spaceId], map: "idx_page_nodes_space_id")
   @@map("page_nodes")
 }

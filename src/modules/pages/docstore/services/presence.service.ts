@@ -17,7 +17,7 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   LivePresenceUser,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/ports/live-collaboration.port';
 
 export interface ActivePresenceUser {
   id: string;

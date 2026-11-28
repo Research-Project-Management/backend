@@ -16,15 +16,15 @@ import { PrismaService, isUuid } from '@/core';
 import {
   resolveSpaceRootDocIds,
   type PageScopeDbClient,
-} from '@/modules/pages/core/page-scope.helper';
+} from '@/modules/pages/core/utils/page-scope';
 import { DocstoreService } from '../docstore.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-  PageDomainEventBus,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core';
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { buildSearchRegex, replaceInText } from '../domain';
 
 export interface SearchDocumentsParams {

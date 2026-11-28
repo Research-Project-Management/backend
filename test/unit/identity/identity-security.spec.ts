@@ -418,7 +418,7 @@ describe('Identity Security Suite (BOLA Prevention & Real-time Revocation)', () 
       const result = await authService.refresh('racing-token');
 
       expect(result.accessToken).toBe('fresh-jwt-token');
-      expect(result.user.email).toBe('test@flux.study');
+      expect(result.user?.email).toBe('test@flux.study');
     });
   });
 });
