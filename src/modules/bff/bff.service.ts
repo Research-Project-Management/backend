@@ -16,8 +16,8 @@ import { OverviewService } from '@/modules/project/overview/overview.service';
 import type { ProjectOverviewResponseDto } from '@/modules/project/overview/dto/project-overview-response.dto';
 import { YourWorkService } from '@/modules/project/your-work/your-work.service';
 import type { YourWorkSummaryDto } from '@/modules/project/your-work/dto/your-work.dto';
-import { ChatService } from '@/modules/chat/services/chat.service';
-import { ProjectChannelService } from '@/modules/chat/services/project-channel.service';
+import { ChatService } from '@/modules/project/chat/services/chat.service';
+import { ProjectChannelService } from '@/modules/project/chat/services/project-channel.service';
 import { EditorBootstrapService } from '@/modules/pages/bootstrap/editor-bootstrap.service';
 import type {
   BootstrapEditorParams,

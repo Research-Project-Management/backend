@@ -5,7 +5,7 @@
 
 import { Module } from '@nestjs/common';
 import { ProjectModule } from '@/modules/project/project.module';
-import { ChatModule } from '@/modules/chat/chat.module';
+import { ChatModule } from '@/modules/project/chat/chat.module';
 import { PagesModule } from '@/modules/pages/pages.module';
 import { BffCacheService } from './bff.cache';
 import { BffController } from './bff.controller';
