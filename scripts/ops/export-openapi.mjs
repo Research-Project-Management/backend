@@ -1,6 +1,6 @@
 /**
  * Deterministic OpenAPI 3.0 specification exporter & freshness gate.
- * Loads compiled `dist/` under plain Node so NestJS decorator metadata matches production.
+ * Runs under plain Node against compiled `dist/` so NestJS decorator metadata matches production.
  *
  * Usage:
  *   pnpm run build && pnpm run openapi:export   # writes openapi/openapi.json
@@ -9,23 +9,28 @@
 import 'reflect-metadata';
 import 'dotenv/config';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 
-function sortKeysDeep(value: unknown): unknown {
+const require = createRequire(import.meta.url);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function sortKeysDeep(value) {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
   if (value && typeof value === 'object') {
-    const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      sorted[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+    const sorted = {};
+    for (const key of Object.keys(value).sort()) {
+      sorted[key] = sortKeysDeep(value[key]);
     }
     return sorted;
   }
   return value;
 }
 
-async function main(): Promise<void> {
+async function main() {
   const repoRoot = resolve(__dirname, '..', '..');
   const distAppPath = resolve(repoRoot, 'dist', 'app.module.js');
   const distSwaggerPath = resolve(repoRoot, 'dist', 'core', 'http', 'setup', 'swagger.setup.js');
@@ -35,24 +40,21 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { AppModule } = require(distAppPath);
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { buildSwaggerDocument } = require(distSwaggerPath);
 
   if (typeof buildSwaggerDocument !== 'function') {
-    console.error('✖ dist/core/http/setup/swagger.setup.js is stale (missing buildSwaggerDocument). Run `pnpm run build`.');
+    console.error('✖ dist/core/http/setup/swagger.setup.js is stale. Run `pnpm run build`.');
     process.exit(1);
   }
 
   const checkOnly = process.argv.includes('--check');
   const outPath = resolve(repoRoot, 'openapi', 'openapi.json');
 
-  const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule,
-    new FastifyAdapter(),
-    { logger: false, abortOnError: false },
-  );
+  const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
+    logger: false,
+    abortOnError: false,
+  });
 
   try {
     const document = buildSwaggerDocument(app);
@@ -82,7 +84,7 @@ async function main(): Promise<void> {
 
 main()
   .then(() => process.exit(0))
-  .catch((err: unknown) => {
+  .catch((err) => {
     console.error('✖ OpenAPI export failed:', err);
     process.exit(1);
   });
