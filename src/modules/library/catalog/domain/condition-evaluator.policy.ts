@@ -91,6 +91,10 @@ const OPERATOR_ALIASES: Record<string, SavedSearchOperator> = {
   in_the_last: 'isInTheLast',
   is_present: 'isPresent',
   is_absent: 'isAbsent',
+  isEmpty: 'isAbsent',
+  is_empty: 'isAbsent',
+  isNotEmpty: 'isPresent',
+  is_not_empty: 'isPresent',
 };
 const SEARCH_FIELD_ALIASES: Record<string, string> = {
   author: 'creator',
@@ -1082,6 +1086,7 @@ export class ConditionEvaluatorEngine {
     }
     if (clauses.length === 0) return {};
     const mode = (group.conjunction || group.matchMode || 'AND').toUpperCase();
+    if (mode === 'NOT') return { NOT: { AND: clauses } };
     return mode === 'OR' || mode === 'ANY' ? { OR: clauses } : { AND: clauses };
   }
 

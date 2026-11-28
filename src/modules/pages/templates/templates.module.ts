@@ -1,34 +1,27 @@
 /**
  * templates/templates.module.ts
- * Encapsulated NestJS Module for Manuscripts Templates & Gallery (zero leaked internals).
+ * Encapsulated NestJS Module for Pages Templates & Gallery (aligned with Flux Space & FilesModule).
  */
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
+import { FilesModule } from '@/modules/files/files.module';
 import { AccessModule } from '@/modules/project/access';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
-import { StructureModule } from '@/modules/pages/structure/structure.module';
 import { GalleryService } from './services/gallery.service';
+import { InstantiateService } from './services/instantiate.service';
 import { PublishService } from './services/publish.service';
-import { ScaffoldService } from './services/scaffold.service';
 import { TemplatesController } from './templates.controller';
 import { TemplatesRepository } from './templates.repository';
 
 @Module({
-  imports: [
-    PrismaModule,
-    AccessModule,
-    StructureModule,
-    DocstoreModule,
-    FilestoreModule,
-  ],
+  imports: [PrismaModule, AccessModule, FilesModule, DocstoreModule],
   controllers: [TemplatesController],
   providers: [
     TemplatesRepository,
     GalleryService,
     PublishService,
-    ScaffoldService,
+    InstantiateService,
   ],
 })
 export class TemplatesModule {}

@@ -1,7 +1,7 @@
 /**
  * templates/domain/policy.ts
- * Canonical Overleaf categories, compilers, visibilities, quotas, MIME map, and RBAC predicates.
- * Zero legacy category aliases or silent string coercion.
+ * Canonical categories, compilers, Flux Space scopes (`personal` | `project`),
+ * quotas, MIME map, slug normalizer, and `Role`-aligned RBAC predicates.
  */
 
 import { InvalidTemplateError } from './errors';
@@ -31,22 +31,18 @@ export const TEMPLATE_COMPILERS = [
 
 export type TemplateCompiler = (typeof TEMPLATE_COMPILERS)[number];
 
-export const TEMPLATE_VISIBILITIES = [
-  'official',
-  'workspace',
-  'private',
-] as const;
+export const TEMPLATE_SCOPES = ['personal', 'project'] as const;
 
-export type TemplateVisibility = (typeof TEMPLATE_VISIBILITIES)[number];
+export type TemplateScope = (typeof TEMPLATE_SCOPES)[number];
 
 export const MAX_TEMPLATE_FILES = 500;
-export const MAX_TEMPLATE_FILE_BYTES = 25 * 1024 * 1024; // 25 MB per file
-export const MAX_TEMPLATE_TOTAL_BYTES = 50 * 1024 * 1024; // 50 MB per template
+export const MAX_TEMPLATE_FILE_BYTES = 50 * 1024 * 1024; // 50 MB (matches Pages Filestore)
+export const MAX_TEMPLATE_TOTAL_BYTES = 100 * 1024 * 1024; // 100 MB per template
 export const MAX_TEMPLATE_TAGS = 12;
 
 const CATEGORY_SET: ReadonlySet<string> = new Set(TEMPLATE_CATEGORIES);
 const COMPILER_SET: ReadonlySet<string> = new Set(TEMPLATE_COMPILERS);
-const VISIBILITY_SET: ReadonlySet<string> = new Set(TEMPLATE_VISIBILITIES);
+const SCOPE_SET: ReadonlySet<string> = new Set(TEMPLATE_SCOPES);
 
 const MIME_BY_EXT: Readonly<Record<string, string>> = {
   tex: 'text/x-tex',
@@ -89,12 +85,37 @@ export function assertCompiler(raw?: string | null): TemplateCompiler {
   return raw as TemplateCompiler;
 }
 
-export function assertVisibility(raw?: string | null): TemplateVisibility {
-  if (!raw) return 'private';
-  if (!VISIBILITY_SET.has(raw)) {
-    throw new InvalidTemplateError(`Unsupported template visibility: "${raw}"`);
+export function assertScope(raw?: string | null): TemplateScope {
+  if (!raw) return 'personal';
+  if (!SCOPE_SET.has(raw)) {
+    throw new InvalidTemplateError(`Unsupported template scope: "${raw}"`);
   }
-  return raw as TemplateVisibility;
+  return raw as TemplateScope;
+}
+
+export function deriveTemplateScope(
+  spaceId: string | null | undefined,
+  spaceType?: 'personal' | 'project' | null,
+  createdById?: string | null,
+): TemplateScope | null {
+  if (!spaceId) return null;
+  if (spaceType === 'personal') return 'personal';
+  if (spaceType === 'project') return 'project';
+  if (createdById && spaceId.toLowerCase() === createdById.toLowerCase()) {
+    return 'personal';
+  }
+  return 'project';
+}
+
+export function toTemplateSlug(rawName: string, fallbackSuffix?: string): string {
+  const base = rawName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96);
+  const root = base || 'template';
+  return fallbackSuffix ? `${root}-${fallbackSuffix}`.slice(0, 128) : root;
 }
 
 function hasControlChar(value: string): boolean {
@@ -141,27 +162,30 @@ export function inferMimeType(pathname: string): string {
 }
 
 export function canReadTemplate(params: {
-  visibility: TemplateVisibility;
-  createdById?: string | null;
+  spaceId: string | null;
   userId?: string | null;
-  isOperator: boolean;
-  canReadSpace: boolean;
+  memberRole?: string | null;
 }): boolean {
-  if (params.visibility === 'official' || params.isOperator) return true;
+  if (!params.spaceId) return true;
   if (!params.userId) return false;
-  if (params.createdById && params.createdById === params.userId) return true;
-  return params.visibility === 'workspace' && params.canReadSpace;
+  if (params.spaceId.toLowerCase() === params.userId.toLowerCase()) return true;
+  return Boolean(params.memberRole);
 }
 
 export function canManageTemplate(params: {
-  visibility: TemplateVisibility;
+  spaceId: string | null;
   createdById?: string | null;
   userId: string;
-  isOperator: boolean;
-  canWriteSpace: boolean;
+  memberRole?: string | null;
 }): boolean {
-  if (params.isOperator) return true;
-  if (params.visibility === 'official') return false;
-  if (params.createdById && params.createdById === params.userId) return true;
-  return params.visibility === 'workspace' && params.canWriteSpace;
+  if (!params.spaceId) return false;
+  if (params.spaceId.toLowerCase() === params.userId.toLowerCase()) return true;
+  if (
+    params.createdById &&
+    params.createdById.toLowerCase() === params.userId.toLowerCase() &&
+    Boolean(params.memberRole)
+  ) {
+    return true;
+  }
+  return params.memberRole === 'owner' || params.memberRole === 'coordinator';
 }

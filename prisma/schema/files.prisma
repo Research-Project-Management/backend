@@ -116,6 +116,7 @@ model FileBlob {
   files         FileNode[]
   versions      FileVersion[]
   pageFiles     PageFile[]
+  templateBlobs TemplateBlob[] @relation("TemplateFileBlobs")
   refs          FileBlobRef[]
   resultUploads FileUpload[] @relation("FileUploadResultBlob")
 

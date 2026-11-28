@@ -1,6 +1,6 @@
 /**
  * templates/domain/errors.ts
- * Pure domain errors for Manuscripts Templates (zero framework imports).
+ * Pure domain errors for Pages Templates (zero framework imports).
  */
 
 import { PagesDomainError } from '@/modules/pages/core/domain/errors';

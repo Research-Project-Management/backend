@@ -1,43 +1,38 @@
 /**
  * templates/services/publish.service.ts
- * Full-Fidelity Workspace Publisher (`publish`):
- * Snapshots BOTH UTF-8 text documents (`DocstoreService`) AND binary assets (`FilestoreService`:
- * `.png`, `.pdf`, `.jpg`, `.ttf`, `.otf`) from a live manuscript into an immutable `TemplateManifest`.
+ * Zero-Copy Page Template Publisher & Idempotent Republisher (`publish`):
+ * - Snapshots UTF-8 text documents (`PageDoc`) and zero-copy `FileBlob` pointers (`PageFile`)
+ *   without streaming S3 binaries through Node.js RAM or storing BYTEA in PostgreSQL.
+ * - Strictly Space-scoped (`personal` | `project`); updates existing `PageTemplate` in place
+ *   when republishing the same `sourcePageId` into the same `Space`.
  */
 
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { Readable } from 'node:stream';
-import { mapWithConcurrency, PrismaService, isUuid } from '@/core';
-import { AccessConfigService } from '@/modules/project/access';
+import { PrismaService, isUuid } from '@/core';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { StructureService } from '@/modules/pages/structure/structure.service';
+import { hydratePageDocLines } from '@/modules/pages/docstore/services/doc-occ.helper';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
 } from '@/modules/pages/core/ports/live-collaboration.port';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
-import { InvalidTemplateError, TemplateForbiddenError } from '../domain/errors';
+import {
+  InvalidTemplateError,
+  TemplateForbiddenError,
+  TemplateNotFoundError,
+} from '../domain/errors';
 import { TemplateFileVo } from '../domain/file.domain';
 import {
   TemplateDetailView,
   TemplateManifest,
 } from '../domain/manifest.domain';
-import { assertVisibility } from '../domain/policy';
+import { assertScope } from '../domain/policy';
 import { PublishTemplateDto } from '../dto/template.dto';
 import { TemplatesRepository } from '../templates.repository';
 import { GalleryService } from './gallery.service';
-
-const COLLECT_CONCURRENCY = 6;
-
-async function streamToBuffer(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const c of stream) {
-    chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
-  }
-  return Buffer.concat(chunks);
-}
 
 @Injectable()
 export class PublishService {
@@ -47,10 +42,10 @@ export class PublishService {
     private readonly prisma: PrismaService,
     private readonly repo: TemplatesRepository,
     private readonly gallery: GalleryService,
-    private readonly structure: StructureService,
     private readonly docstore: DocstoreService,
-    private readonly filestore: FilestoreService,
-    @Optional() private readonly accessConfig?: AccessConfigService,
+    @Optional()
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
     @Optional() private readonly users?: UserResolverService,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
@@ -59,167 +54,188 @@ export class PublishService {
     this.live = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
-  /**
-   * Publishes a new template (`private`, `workspace`, or operator-only `official`)
-   * from inline files and/or by snapshotting a live `(spaceId, pageId)` workspace
-   * (including binary images/fonts in `FilestoreService`).
-   */
   public async publish(
     userId: string,
     dto: PublishTemplateDto,
   ): Promise<TemplateDetailView> {
-    const visibility = assertVisibility(dto.visibility);
-    const isOp = this.accessConfig?.isOperator(userId) ?? false;
+    const page = await this.prisma.page.findFirst({
+      where: { id: dto.pageId, deletedAt: null },
+      include: { rootDoc: { select: { lastKnownPath: true } } },
+    });
+    if (!page) {
+      throw new TemplateNotFoundError(dto.pageId);
+    }
 
-    if (visibility === 'official' && !isOp) {
+    const sourceRole = await this.gallery.getSpaceRole(page.spaceId, userId);
+    if (!sourceRole) {
       throw new TemplateForbiddenError(
-        'Only platform operators can publish official gallery templates',
+        'You do not have access to publish this page as a template',
       );
     }
 
-    let sourceSpaceId = dto.spaceId;
-    const sourcePageId = dto.pageId;
-    let pageMeta: {
-      spaceId: string;
-      compiler: string;
-      texLiveVersion: string;
-      mainFile?: string;
-    } | null = null;
+    const isSourcePersonal =
+      page.spaceId.toLowerCase() === userId.toLowerCase();
+    const targetScope = dto.scope
+      ? assertScope(dto.scope)
+      : isSourcePersonal
+        ? 'personal'
+        : 'project';
 
-    if (sourcePageId && isUuid(sourcePageId)) {
-      const page = await this.prisma.page.findFirst({
-        where: { id: sourcePageId, deletedAt: null },
-        include: { rootDoc: { select: { lastKnownPath: true } } },
-      });
-      if (page) {
-        sourceSpaceId = page.spaceId;
-        pageMeta = {
-          spaceId: page.spaceId,
-          compiler: page.compiler,
-          texLiveVersion: page.texlive,
-          mainFile: page.rootDoc?.lastKnownPath?.replace(/^\/+/, ''),
-        };
-      }
-    }
+    let targetSpaceId: string;
 
-    if (sourceSpaceId) {
-      const canRead = await this.gallery.hasSpaceAccess(
-        sourceSpaceId,
-        userId,
-        visibility === 'workspace',
-      );
-      if (!canRead) {
-        throw new TemplateForbiddenError(
-          'You do not have access to snapshot the specified workspace',
+    if (targetScope === 'personal') {
+      targetSpaceId = userId;
+      await this.ensurePersonalSpace(userId);
+    } else {
+      if (isSourcePersonal) {
+        throw new InvalidTemplateError(
+          'A page in Personal Space cannot be published as a Project template',
         );
       }
-    } else if (visibility === 'workspace') {
-      throw new InvalidTemplateError(
-        'spaceId is required when publishing a workspace-scoped template',
-      );
-    }
-
-    const fileMap = new Map<string, TemplateFileVo>();
-
-    if (sourceSpaceId) {
-      const collected = await this.collectWorkspaceFiles(
-        sourceSpaceId,
-        sourcePageId,
-      );
-      for (const f of collected) {
-        fileMap.set(f.path, f);
+      if (
+        sourceRole !== 'owner' &&
+        sourceRole !== 'coordinator' &&
+        sourceRole !== 'contributor'
+      ) {
+        throw new TemplateForbiddenError(
+          'Contributor role or higher is required to publish a Project template',
+        );
       }
+      targetSpaceId = page.spaceId;
     }
 
-    if (dto.files) {
-      for (const [rawPath, content] of Object.entries(dto.files)) {
-        const vo = TemplateFileVo.fromText(rawPath, String(content ?? ''));
-        fileMap.set(vo.path, vo);
-      }
-    }
-
-    if (fileMap.size === 0) {
+    const { files, blobIds } = await this.collectPageSnapshot(
+      page.spaceId,
+      page.id,
+    );
+    if (files.length === 0) {
       throw new InvalidTemplateError(
-        'Template must contain at least one LaTeX or text file',
+        'Source page must contain at least one LaTeX or text file',
       );
+    }
+
+    // Idempotent republish: update existing template for `(sourcePageId, targetSpaceId)` in place
+    const existing = await this.repo.findBySourcePage(page.id, targetSpaceId);
+    if (existing) {
+      await this.gallery.assertCanManage(existing, userId);
     }
 
     const authorName =
-      dto.author?.trim() || (await this.resolveUserName(userId)) || 'Author';
+      existing?.author || (await this.resolveUserName(userId)) || null;
+    const mainFile =
+      page.rootDoc?.lastKnownPath?.replace(/^\/+/, '') || 'main.tex';
 
     const manifest = TemplateManifest.create({
+      id: existing?.id,
+      slug: existing?.slug ?? null,
       name: dto.name,
-      category: dto.category,
-      visibility,
-      description: dto.description,
-      compiler: dto.compiler || pageMeta?.compiler || 'pdflatex',
-      texLiveVersion: dto.texLiveVersion || pageMeta?.texLiveVersion || '2024',
-      mainFile: dto.mainFile || pageMeta?.mainFile || 'main.tex',
+      category: dto.category ?? existing?.category,
+      description: dto.description ?? page.description ?? existing?.description,
+      compiler: page.compiler,
+      texlive: page.texlive,
+      mainFile,
       author: authorName,
-      license: dto.license,
-      sourceUrl: dto.sourceUrl,
-      thumbnailUrl: dto.thumbnailUrl,
-      tags: dto.tags,
-      files: Array.from(fileMap.values()),
-      spaceId: visibility === 'workspace' ? (sourceSpaceId ?? null) : null,
-      createdById: userId,
+      thumbnail: page.thumbnail ?? existing?.thumbnail,
+      tags: dto.tags ?? existing?.tags,
+      files,
+      spaceId: targetSpaceId,
+      spaceType: targetScope,
+      sourcePageId: page.id,
+      createdById: existing?.createdById ?? userId,
+      createdAt: existing?.createdAt,
+      updatedAt: new Date(),
     });
 
     await this.repo.save(manifest);
+
+    if (this.filesPort && blobIds.length > 0) {
+      await Promise.all(
+        blobIds.map((id) =>
+          Promise.resolve(this.filesPort!.acquireBlob(id)).catch(() => null),
+        ),
+      );
+    }
+
     return manifest.toDetail();
   }
 
-  private async collectWorkspaceFiles(
+  private async collectPageSnapshot(
     spaceId: string,
-    pageId?: string,
-  ): Promise<TemplateFileVo[]> {
-    const nodes = await this.structure
-      .getAllNodes(spaceId, undefined, pageId)
-      .catch(() => []);
+    pageId: string,
+  ): Promise<{ files: TemplateFileVo[]; blobIds: string[] }> {
+    const nodes = await this.prisma.pageNode.findMany({
+      where: { spaceId, pageId },
+      orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }],
+    });
 
     const docIds = nodes.filter((n) => Boolean(n.docId)).map((n) => n.docId!);
     if (docIds.length > 0) {
       await this.live.flushDocs(spaceId, docIds).catch(() => []);
     }
 
-    const docsList = await this.docstore
-      .getAllDocs(spaceId, pageId)
-      .catch(() => []);
-    const docsById = new Map(
-      docsList.map((d) => [d._id, (d.lines || []).join('\n')]),
-    );
+    const [docs, binaryFiles] = await Promise.all([
+      this.prisma.pageDoc.findMany({
+        where: { spaceId, pageId, deletedAt: null },
+      }),
+      this.prisma.pageFile.findMany({
+        where: { spaceId, pageId, deletedAt: null },
+      }),
+    ]);
 
-    const leaves = nodes.filter((n) => n.type !== 'FOLDER' && n.path !== '/');
-    const collected = await mapWithConcurrency(
-      leaves,
-      COLLECT_CONCURRENCY,
-      async (node): Promise<TemplateFileVo | null> => {
-        const relPath = (node.path || node.name || '').replace(/^\/+/, '');
-        if (!relPath) return null;
+    const docTextById = new Map<string, string>();
+    for (const doc of docs) {
+      const lines = doc.inStorage
+        ? await hydratePageDocLines(this.docstore, doc)
+        : Array.isArray(doc.lines)
+          ? (doc.lines as string[])
+          : [];
+      docTextById.set(doc.id, lines.join('\n'));
+    }
 
-        if (node.docId) {
-          const text = docsById.get(node.docId);
-          if (text === undefined) return null;
-          return TemplateFileVo.fromText(relPath, text);
+    const fileById = new Map(binaryFiles.map((f) => [f.id, f]));
+    const collected: TemplateFileVo[] = [];
+    const blobIds = new Set<string>();
+
+    for (const node of nodes) {
+      if (node.type === 'FOLDER' || node.path === '/') continue;
+      const relPath = (node.path || node.name || '').replace(/^\/+/, '');
+      if (!relPath) continue;
+
+      if (node.type === 'DOC' && node.docId) {
+        const text = docTextById.get(node.docId);
+        if (text !== undefined) {
+          collected.push(TemplateFileVo.fromText(relPath, text));
         }
-
-        if (node.fileId) {
-          try {
-            const { file, stream } = await this.filestore.openReadStream(
-              spaceId,
-              node.fileId,
-            );
-            const buf = await streamToBuffer(stream);
-            return TemplateFileVo.fromBuffer(relPath, buf, file?.mimeType);
-          } catch {
-            return null;
-          }
+      } else if (node.type === 'FILE' && node.fileId) {
+        const pf = fileById.get(node.fileId);
+        if (pf && pf.storageKey) {
+          collected.push(
+            TemplateFileVo.fromAssetRef(relPath, {
+              blobId: pf.blobId,
+              storageKey: pf.storageKey,
+              bucketName: pf.bucketName,
+              contentHash: pf.hash,
+              mimeType: pf.mimeType,
+              sizeBytes: pf.sizeBytes,
+            }),
+          );
+          if (pf.blobId) blobIds.add(pf.blobId);
         }
-        return null;
-      },
-    );
+      }
+    }
 
-    return collected.filter((f): f is TemplateFileVo => f !== null);
+    return { files: collected, blobIds: Array.from(blobIds) };
+  }
+
+  private async ensurePersonalSpace(userId: string): Promise<void> {
+    if (!isUuid(userId) || !this.prisma.space?.upsert) return;
+    await this.prisma.space
+      .upsert({
+        where: { id: userId },
+        create: { id: userId, type: 'personal', ownerUserId: userId },
+        update: {},
+      })
+      .catch(() => undefined);
   }
 
   private async resolveUserName(userId: string): Promise<string | null> {

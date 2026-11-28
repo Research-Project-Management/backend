@@ -73,7 +73,7 @@ IEEEtran, journal, LaTeX, template.
 `,
       'references.bib': `@article{example2026,
   author = {Doe, John and Smith, Jane},
-  title = {Modern Collaborative Manuscript Engineering},
+  title = {Modern Collaborative Scientific Publishing},
   journal = {IEEE Transactions on Software Engineering},
   year = {2026},
   volume = {52},
@@ -141,7 +141,7 @@ Prior investigations have explored collaborative authoring \\cite{vaswani2017att
     name: 'ACM Conference Proceedings (SIGCONF)',
     category: 'conference',
     description:
-      'Official ACM Primary Article Template for computer science conferences (SIGCONF layout).',
+      'Standard ACM Primary Article Template for computer science conferences (SIGCONF layout).',
     compiler: 'pdflatex',
     mainFile: 'sample-sigconf.tex',
     author: 'Association for Computing Machinery',
@@ -260,7 +260,7 @@ A lightweight preprint layout suitable for rapid mathematics and physics submiss
 \\end{abstract}
 
 \\section{Introduction}
-Edit this file to begin authoring your manuscript.
+Edit this file to begin authoring your paper.
 \\end{document}
 `,
     },
@@ -363,7 +363,7 @@ This dissertation investigates advances in collaborative scientific publishing.
       'presentation.tex': `\\documentclass{beamer}
 \\usetheme{Madrid}
 
-\\title[Flux Collaboration]{Collaborative Research Manuscripts}
+\\title[Flux Collaboration]{Collaborative Research Presentations}
 \\author{Flux Research Team}
 \\institute{Flux Foundation}
 \\date{\\today}
@@ -577,28 +577,55 @@ Testing validates linear scalability with strict tenant isolation.
 
 const FIXED_EPOCH = new Date('2026-01-01T00:00:00.000Z');
 
-export const OFFICIAL_TEMPLATES: readonly TemplateManifest[] = SEEDS.map(
+export const BUILTIN_TEMPLATES: readonly TemplateManifest[] = SEEDS.map(
   (seed) =>
     TemplateManifest.create({
       id: seed.id,
       slug: seed.slug,
-      versionId: seed.versionId,
       name: seed.name,
       category: seed.category,
-      visibility: 'official',
       description: seed.description,
       compiler: seed.compiler,
-      texLiveVersion: '2024',
+      texlive: '2025',
       mainFile: seed.mainFile,
       author: seed.author,
-      license: seed.license,
-      sourceUrl: seed.sourceUrl ?? null,
       tags: seed.tags,
-      downloadCount: seed.downloadCount,
       files: Object.entries(seed.files).map(([p, text]) =>
         TemplateFileVo.fromText(p, text),
       ),
+      spaceId: null,
       createdAt: FIXED_EPOCH,
       updatedAt: FIXED_EPOCH,
     }),
 );
+
+const BUILTIN_BY_KEY: ReadonlyMap<string, TemplateManifest> = new Map(
+  BUILTIN_TEMPLATES.flatMap((t) => [
+    [t.id.toLowerCase(), t],
+    [t.slug.toLowerCase(), t],
+  ]),
+);
+
+export function findBuiltinTemplate(identifier: string): TemplateManifest | null {
+  const key = identifier?.trim().toLowerCase();
+  if (!key) return null;
+  return BUILTIN_BY_KEY.get(key) ?? null;
+}
+
+export function filterBuiltinTemplates(params?: {
+  category?: TemplateCategory;
+  search?: string;
+}): TemplateManifest[] {
+  const q = params?.search?.trim().toLowerCase() || '';
+  return BUILTIN_TEMPLATES.filter((t) => {
+    if (params?.category && t.category !== params.category) return false;
+    if (!q) return true;
+    return (
+      t.name.toLowerCase().includes(q) ||
+      t.slug.toLowerCase().includes(q) ||
+      (t.description?.toLowerCase().includes(q) ?? false) ||
+      (t.author?.toLowerCase().includes(q) ?? false) ||
+      t.tags.some((tag) => tag.includes(q))
+    );
+  });
+}

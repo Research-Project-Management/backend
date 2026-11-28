@@ -1,23 +1,29 @@
 /**
  * templates/services/gallery.service.ts
- * Gallery Browsing (Virtual Proxy summary vs detail), Access Verification,
- * Metadata Updates, and Custom Template Deletion.
+ * Gallery Browsing (Virtual Proxy summary vs detail), `Space` + `Role` Access Verification,
+ * Metadata Updates, and Space Template Deletion (with `FileBlob` release).
+ * Follows the exact same pattern as `library/citation` (`CslRepositoryService`):
+ * Space-scoped DB templates merged with immutable in-code `BUILTIN_TEMPLATES`.
  */
 
-import { Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { isUuid } from '@/core';
-import { AccessConfigService, AccessService } from '@/modules/project/access';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
+import { AccessService } from '@/modules/project/access';
+import {
+  filterBuiltinTemplates,
+  findBuiltinTemplate,
+} from '../domain/catalog.domain';
 import {
   TemplateForbiddenError,
   TemplateNotFoundError,
 } from '../domain/errors';
 import {
+  assertCategory,
   canManageTemplate,
   canReadTemplate,
-  assertCategory,
-  assertCompiler,
   normalizeTags,
-  assertVisibility,
 } from '../domain/policy';
 import {
   TemplateDetailView,
@@ -32,67 +38,111 @@ export class GalleryService {
   constructor(
     private readonly repo: TemplatesRepository,
     @Optional() private readonly access?: AccessService,
-    @Optional() private readonly accessConfig?: AccessConfigService,
+    @Optional()
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {}
 
   public async browse(
     userId: string,
     query?: QueryTemplatesDto,
   ): Promise<{ templates: TemplateSummaryView[]; total: number }> {
-    let spaceId = query?.spaceId;
-    if (spaceId && !(await this.hasSpaceAccess(spaceId, userId, false))) {
-      spaceId = undefined;
+    let projectSpaceId: string | undefined;
+    if (
+      query?.spaceId &&
+      isUuid(query.spaceId) &&
+      query.spaceId.toLowerCase() !== userId.toLowerCase()
+    ) {
+      const role = await this.getSpaceRole(query.spaceId, userId);
+      if (role) projectSpaceId = query.spaceId;
     }
 
-    const { items, total } = await this.repo.findSummaries({
-      userId,
-      spaceId,
-      category: query?.category,
-      visibility: query?.visibility,
-      tag: query?.tag,
-      search: query?.search,
-      limit: query?.limit ?? 50,
-      offset: query?.offset ?? 0,
-    });
+    const limit = query?.limit ?? 50;
+    const offset = query?.offset ?? 0;
 
+    // If filtered by explicit Space scope (`personal` | `project`), query Space DB rows only
+    if (query?.scope) {
+      const { items, total } = await this.repo.findSummaries({
+        userId,
+        projectSpaceId,
+        category: query.category,
+        scope: query.scope,
+        search: query.search,
+        limit,
+        offset,
+      });
+      return {
+        templates: items.map((m) => m.toSummary()),
+        total,
+      };
+    }
+
+    // Default (`All`): Space-owned templates first, followed by built-in academic presets
+    const [{ items: spaceItems }, builtinItems] = await Promise.all([
+      this.repo.findSummaries({
+        userId,
+        projectSpaceId,
+        category: query?.category,
+        search: query?.search,
+        limit: 200,
+        offset: 0,
+      }),
+      Promise.resolve(
+        filterBuiltinTemplates({
+          category: query?.category,
+          search: query?.search,
+        }),
+      ),
+    ]);
+
+    const combined = [...spaceItems, ...builtinItems];
     return {
-      templates: items.map((m) => m.toSummary()),
-      total,
+      templates: combined
+        .slice(offset, offset + limit)
+        .map((m) => m.toSummary()),
+      total: combined.length,
     };
   }
 
   public async getDetail(
     identifier: string,
     userId?: string,
+    spaceId?: string,
   ): Promise<TemplateDetailView> {
-    const manifest = await this.getAuthorizedManifest(identifier, userId);
+    const manifest = await this.getAuthorizedManifest(
+      identifier,
+      userId,
+      spaceId,
+    );
     return manifest.toDetail();
   }
 
   public async getAuthorizedManifest(
     identifier: string,
     userId?: string,
+    spaceId?: string,
   ): Promise<TemplateManifest> {
-    const manifest = await this.repo.findDetail(identifier);
+    const builtin = findBuiltinTemplate(identifier);
+    if (builtin) return builtin;
+
+    const allowedSpaces = [userId, spaceId].filter((id): id is string =>
+      Boolean(id && isUuid(id)),
+    );
+    const manifest = await this.repo.findDetail(identifier, allowedSpaces);
     if (!manifest) {
       throw new TemplateNotFoundError(identifier);
     }
 
-    const isOp = userId
-      ? (this.accessConfig?.isOperator(userId) ?? false)
-      : false;
-    const canReadSpace =
-      manifest.visibility === 'workspace' && manifest.spaceId && userId
-        ? await this.hasSpaceAccess(manifest.spaceId, userId, false)
-        : false;
+    const memberRole =
+      manifest.spaceId && userId
+        ? await this.getSpaceRole(manifest.spaceId, userId)
+        : null;
 
     if (
       !canReadTemplate({
-        visibility: manifest.visibility,
-        createdById: manifest.createdById,
+        spaceId: manifest.spaceId,
         userId,
-        isOperator: isOp,
-        canReadSpace,
+        memberRole,
       })
     ) {
       throw new TemplateNotFoundError(identifier);
@@ -106,34 +156,32 @@ export class GalleryService {
     userId: string,
     dto: UpdateTemplateDto,
   ): Promise<TemplateDetailView> {
-    const existing = await this.repo.findDetail(id);
+    if (findBuiltinTemplate(id)) {
+      throw new TemplateForbiddenError('Built-in templates cannot be modified');
+    }
+
+    const existing = await this.repo.findDetail(id, [userId]);
     if (!existing) throw new TemplateNotFoundError(id);
 
-    await this.assertCanManage(existing, userId, dto.visibility);
+    await this.assertCanManage(existing, userId);
 
     const updated = TemplateManifest.create({
       id: existing.id,
       slug: existing.slug,
-      versionId: existing.versionId,
       name: dto.name ?? existing.name,
       category: dto.category ? assertCategory(dto.category) : existing.category,
-      visibility: dto.visibility
-        ? assertVisibility(dto.visibility)
-        : existing.visibility,
       description:
         dto.description !== undefined ? dto.description : existing.description,
-      compiler: dto.compiler ? assertCompiler(dto.compiler) : existing.compiler,
-      texLiveVersion: existing.texLiveVersion,
-      mainFile: dto.mainFile ?? existing.mainFile,
+      compiler: existing.compiler,
+      texlive: existing.texlive,
+      mainFile: existing.mainFile,
       author: existing.author,
-      license: dto.license !== undefined ? dto.license : existing.license,
-      sourceUrl:
-        dto.sourceUrl !== undefined ? dto.sourceUrl : existing.sourceUrl,
-      thumbnailUrl: existing.thumbnailUrl,
-      downloadCount: existing.downloadCount,
+      thumbnail: existing.thumbnail,
       tags: dto.tags ? normalizeTags(dto.tags) : existing.tags,
       files: existing.files,
       spaceId: existing.spaceId,
+      spaceType: existing.scope,
+      sourcePageId: existing.sourcePageId,
       createdById: existing.createdById,
       createdAt: existing.createdAt,
       updatedAt: new Date(),
@@ -144,57 +192,57 @@ export class GalleryService {
   }
 
   public async remove(id: string, userId: string): Promise<void> {
-    const existing = await this.repo.findDetail(id);
+    if (findBuiltinTemplate(id)) {
+      throw new TemplateForbiddenError('Built-in templates cannot be deleted');
+    }
+
+    const existing = await this.repo.findDetail(id, [userId]);
     if (!existing) throw new TemplateNotFoundError(id);
 
     await this.assertCanManage(existing, userId);
-    const deleted = await this.repo.deleteById(existing.id);
+    const { deleted, releasedBlobIds } = await this.repo.deleteById(existing.id);
     if (!deleted) throw new TemplateNotFoundError(id);
+
+    if (this.filesPort && releasedBlobIds.length > 0) {
+      await Promise.all(
+        releasedBlobIds.map((blobId) =>
+          Promise.resolve(this.filesPort!.releaseBlob(blobId)).catch(
+            () => null,
+          ),
+        ),
+      );
+    }
   }
 
   public async assertCanManage(
     manifest: TemplateManifest,
     userId: string,
-    targetVisibility?: string,
   ): Promise<void> {
-    const isOp = this.accessConfig?.isOperator(userId) ?? false;
-    if (targetVisibility === 'official' && !isOp) {
-      throw new TemplateForbiddenError(
-        'Only platform operators can publish official gallery templates',
-      );
-    }
-    const canWriteSpace =
-      manifest.spaceId && isUuid(manifest.spaceId)
-        ? await this.hasSpaceAccess(manifest.spaceId, userId, true)
-        : false;
+    const memberRole = manifest.spaceId
+      ? await this.getSpaceRole(manifest.spaceId, userId)
+      : null;
 
     if (
       !canManageTemplate({
-        visibility: manifest.visibility,
+        spaceId: manifest.spaceId,
         createdById: manifest.createdById,
         userId,
-        isOperator: isOp,
-        canWriteSpace,
+        memberRole,
       })
     ) {
       throw new TemplateForbiddenError();
     }
   }
 
-  public async hasSpaceAccess(
+  public async getSpaceRole(
     spaceId: string,
     userId: string,
-    requireWrite: boolean,
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     if (!spaceId || !userId || !isUuid(spaceId) || !isUuid(userId)) {
-      return false;
+      return null;
     }
-    if (spaceId.toLowerCase() === userId.toLowerCase()) return true;
-    if (!this.access) return true;
-    const role = await this.access.getRole(spaceId, userId).catch(() => null);
-    if (!role) return false;
-    return requireWrite
-      ? role === 'owner' || role === 'coordinator' || role === 'contributor'
-      : true;
+    if (spaceId.toLowerCase() === userId.toLowerCase()) return 'owner';
+    if (!this.access) return 'contributor';
+    return this.access.getRole(spaceId, userId).catch(() => null);
   }
 }

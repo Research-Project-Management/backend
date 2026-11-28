@@ -231,12 +231,6 @@ export class CleanupListener {
         );
       }
 
-      if (this.redis) {
-        await this.redis
-          .del(PAGES_CACHE_KEYS.linkedFiles(projectId))
-          .catch(() => undefined);
-      }
-
       this.logger.log(
         `Successfully cascaded cleanup for deleted project ${projectId}`,
       );

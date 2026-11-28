@@ -39,6 +39,7 @@ model Page {
   referenceLinks PageReferenceLink[]
   githubLink     PageGithubLink?
   gitRepo        PageGitRepo?
+  publishedTemplates PageTemplate[] @relation("SourcePageTemplates")
 
   @@unique([id, spaceId], map: "uq_pages_id_space")
   @@index([spaceId, deletedAt, updatedAt(sort: Desc)], map: "idx_pages_space_updated")
