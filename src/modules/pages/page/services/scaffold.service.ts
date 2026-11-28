@@ -14,7 +14,7 @@ import {
   resolveSpaceRootDocIds,
   resolveUnicodePreamblePackages,
 } from '@/modules/pages/core';
-import { DocstoreService } from '../../docstore/docstore.service';
+import { DocstoreService } from '@/modules/pages/docstore';
 import { resolveProjectLabels } from './labels.service';
 
 export interface CreateProjectPageParams {

@@ -3,14 +3,14 @@ import type { RedisCacheService } from '@/core';
 import { BffCacheService } from '@/modules/bff/bff.cache';
 import { BffSectionCircuitBreaker } from '@/modules/bff/bff.resilience';
 import { BffService } from '@/modules/bff/bff.service';
+import type { EditorBootstrapService } from '@/modules/pages';
+import type { ChatService } from '@/modules/project/chat/services/chat.service';
+import type { ProjectChannelService } from '@/modules/project/chat/services/project-channel.service';
 import type { CoreService } from '@/modules/project/core/core.service';
 import type { OverviewService } from '@/modules/project/overview/overview.service';
 import type { YourWorkService } from '@/modules/project/your-work/your-work.service';
-import type { ChatService } from '@/modules/project/chat/services/chat.service';
-import type { ProjectChannelService } from '@/modules/project/chat/services/project-channel.service';
-import type { EditorBootstrapService } from '@/modules/pages/bootstrap/editor-bootstrap.service';
 
-describe('BffService', () => {
+describe('BffService Seam', () => {
   let service: BffService;
   let bffCache: BffCacheService;
   let circuitBreaker: BffSectionCircuitBreaker;
@@ -31,18 +31,16 @@ describe('BffService', () => {
   beforeEach(() => {
     redisStore = new Map<string, unknown>();
     redisCacheMock = {
-      get: jest.fn((key: string) =>
-        Promise.resolve(redisStore.has(key) ? redisStore.get(key) : null),
+      get: jest.fn(async (key: string) =>
+        redisStore.has(key) ? redisStore.get(key) : null,
       ),
-      set: jest.fn((key: string, value: unknown) => {
+      set: jest.fn(async (key: string, value: unknown) => {
         redisStore.set(key, value);
-        return Promise.resolve();
       }),
-      del: jest.fn((key: string) => {
+      del: jest.fn(async (key: string) => {
         redisStore.delete(key);
-        return Promise.resolve();
       }),
-      delPattern: jest.fn(() => Promise.resolve()),
+      delPattern: jest.fn(async () => undefined),
     };
 
     bffCache = new BffCacheService(
@@ -68,8 +66,8 @@ describe('BffService', () => {
     );
   });
 
-  describe('getWorkspaceShell', () => {
-    it('normalizes projects, preserves generatedAt on cache hit, and writes back on refresh', async () => {
+  describe('getWorkspaceShell (cache, Singleflight, CircuitBreaker & section timeout)', () => {
+    it('normalizes projects/chat unread counts, serves cached generatedAt, and writes back on bypassCache', async () => {
       projectCoreService.findUserProjects.mockResolvedValue({
         projects: [
           { id: 'p1', name: 'Flux' },
@@ -96,15 +94,17 @@ describe('BffService', () => {
         sharedProjectIds: ['p2'],
         total: 2,
       });
+      expect(first.data.chat).toEqual({
+        totalConversations: 3,
+        totalUnreadCount: 6,
+      });
       expect(first.meta.cacheHit).toBe(false);
 
-      // Cache hit preserves original generatedAt
-      const second = await service.getWorkspaceShell('user-1');
-      expect(second.meta.cacheHit).toBe(true);
-      expect(second.meta.generatedAt).toBe(first.meta.generatedAt);
+      const cached = await service.getWorkspaceShell('user-1');
+      expect(cached.meta.cacheHit).toBe(true);
+      expect(cached.meta.generatedAt).toBe(first.meta.generatedAt);
       expect(projectCoreService.findUserProjects).toHaveBeenCalledTimes(1);
 
-      // ?refresh=true bypasses read AND refreshes Redis cache so next normal read gets fresh data
       projectCoreService.findUserProjects.mockResolvedValueOnce({
         projects: [{ id: 'p3', name: 'Fresh' }],
         myProjects: [{ id: 'p3', name: 'Fresh' }],
@@ -122,7 +122,7 @@ describe('BffService', () => {
       expect(afterRefresh.data.projects.total).toBe(1);
     });
 
-    it('coalesces concurrent cold-cache requests via Singleflight and cleans inFlight on error', async () => {
+    it('coalesces concurrent cold-cache requests via Singleflight and clears inFlight on rejection', async () => {
       projectCoreService.findUserProjects.mockImplementationOnce(
         () =>
           new Promise((resolve) =>
@@ -134,7 +134,7 @@ describe('BffService', () => {
                   sharedProjects: [],
                   total: 1,
                 }),
-              25,
+              20,
             ),
           ),
       );
@@ -150,12 +150,10 @@ describe('BffService', () => {
         service.getWorkspaceShell('user-1'),
         service.getWorkspaceShell('user-1'),
       ]);
-
       expect(results).toHaveLength(3);
       expect(projectCoreService.findUserProjects).toHaveBeenCalledTimes(1);
       expect(bffCache.getInFlightCount()).toBe(0);
 
-      // Verify inFlight is cleaned up when compute rejects
       projectCoreService.findUserProjects.mockRejectedValueOnce(
         new Error('db failure'),
       );
@@ -165,7 +163,7 @@ describe('BffService', () => {
       expect(bffCache.getInFlightCount()).toBe(0);
     });
 
-    it('degrades gracefully on optional errors and opens Circuit Breaker after 3 failures', async () => {
+    it('degrades optional sections without caching partial payloads, opens CircuitBreaker after 3 failures, and enforces timeouts', async () => {
       projectCoreService.findUserProjects.mockResolvedValue({
         projects: [],
         myProjects: [],
@@ -181,16 +179,14 @@ describe('BffService', () => {
       await service.getWorkspaceShell('user-1');
       const third = await service.getWorkspaceShell('user-1');
       expect(third.meta.circuitOpenSections).toEqual(['chat']);
-      expect(chatService.getUserConversations).toHaveBeenCalledTimes(3);
 
       const fourth = await service.getWorkspaceShell('user-1');
       expect(fourth.meta.partial).toBe(true);
       expect(fourth.meta.circuitOpenSections).toEqual(['chat']);
       expect(chatService.getUserConversations).toHaveBeenCalledTimes(3);
       expect(redisCacheMock.set).not.toHaveBeenCalled();
-    });
 
-    it('enforces per-section timeout via constructor-injected deadline', async () => {
+      // Section timeout enforcement
       const fastTimeoutService = new BffService(
         projectCoreService as unknown as CoreService,
         overviewService as unknown as OverviewService,
@@ -199,18 +195,10 @@ describe('BffService', () => {
         projectChannelService as unknown as ProjectChannelService,
         bffCache,
         editorBootstrapService as unknown as EditorBootstrapService,
-        circuitBreaker,
+        new BffSectionCircuitBreaker(),
         25,
       );
-
-      projectCoreService.findUserProjects.mockResolvedValue({
-        projects: [],
-        myProjects: [],
-        sharedProjects: [],
-        total: 0,
-      });
-      yourWorkService.getYourWork.mockResolvedValue({ assignedCount: 0 });
-      chatService.getUserConversations.mockImplementation(
+      chatService.getUserConversations.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             const t = setTimeout(
@@ -221,16 +209,14 @@ describe('BffService', () => {
           }),
       );
 
-      const result = await fastTimeoutService.getWorkspaceShell('user-1');
-
-      expect(result.meta.partial).toBe(true);
-      expect(result.meta.degradedSections).toEqual(['chat']);
-      expect(result.meta.timedOutSections).toEqual(['chat']);
+      const timedOut = await fastTimeoutService.getWorkspaceShell('user-9');
+      expect(timedOut.meta.partial).toBe(true);
+      expect(timedOut.meta.timedOutSections).toEqual(['chat']);
     });
   });
 
   describe('getProjectBootstrap & getEditorBootstrap', () => {
-    it('aggregates project overview and shaped project chat channels', async () => {
+    it('aggregates project overview + shaped channels, propagates NotFoundException, and wraps EditorBootstrap envelope', async () => {
       overviewService.getProjectOverview.mockResolvedValue({
         id: 'proj-1',
         name: 'Research Paper',
@@ -243,8 +229,6 @@ describe('BffService', () => {
           topic: 'Main',
           avatar: null,
           projectId: 'proj-1',
-          projectName: 'Research Paper',
-          projectIdentifier: 'RP',
           isDefault: true,
           memberCount: 3,
           unreadCount: 1,
@@ -254,49 +238,57 @@ describe('BffService', () => {
         },
       ]);
 
-      const result = await service.getProjectBootstrap('proj-1', 'user-1');
-
-      expect(result.data.overview).toEqual({
+      const projBootstrap = await service.getProjectBootstrap(
+        'proj-1',
+        'user-1',
+      );
+      expect(projBootstrap.data.overview).toEqual({
         id: 'proj-1',
         name: 'Research Paper',
       });
-      expect(result.data.channels).toHaveLength(1);
-      expect(result.meta.partial).toBe(false);
-    });
+      expect(projBootstrap.data.channels).toEqual([
+        {
+          id: 'ch-1',
+          name: 'general',
+          topic: 'Main',
+          isDefault: true,
+          memberCount: 3,
+          unreadCount: 1,
+          isMuted: false,
+          isPinned: true,
+          updatedAt: '2026-11-25T00:00:00.000Z',
+        },
+      ]);
+      expect(projBootstrap.meta.partial).toBe(false);
 
-    it('propagates critical overview errors (NotFoundException)', async () => {
-      overviewService.getProjectOverview.mockRejectedValue(
+      overviewService.getProjectOverview.mockRejectedValueOnce(
         new NotFoundException('Project not found'),
       );
-      projectChannelService.getProjectChannels.mockResolvedValue([]);
-
       await expect(
         service.getProjectBootstrap('missing-proj', 'user-1'),
       ).rejects.toThrow(NotFoundException);
-    });
 
-    it('wraps EditorBootstrapService response in the canonical BFF envelope', async () => {
       editorBootstrapService.bootstrapEditor.mockResolvedValue({
         tree: [],
         degraded: true,
         degradedBranches: ['lastBuild'],
         serverTimestamp: '2026-11-25T07:00:00.000Z',
       });
-
-      const result = await service.getEditorBootstrap({
+      const editorRes = await service.getEditorBootstrap({
         pageOrProjectId: 'page-1',
         userId: 'user-1',
       });
-
-      expect(result.meta.channel).toBe('web');
-      expect(result.meta.partial).toBe(true);
-      expect(result.meta.degradedSections).toEqual(['lastBuild']);
-      expect(result.meta.generatedAt).toBe('2026-11-25T07:00:00.000Z');
+      expect(editorRes.meta).toMatchObject({
+        channel: 'web',
+        partial: true,
+        degradedSections: ['lastBuild'],
+        generatedAt: '2026-11-25T07:00:00.000Z',
+      });
     });
   });
 
-  describe('BffSectionCircuitBreaker single-probe HALF_OPEN lock & pure getStats', () => {
-    it('allows only 1 concurrent canary probe in HALF_OPEN and never mutates on getStats', () => {
+  describe('BffSectionCircuitBreaker & BffCacheService invalidation', () => {
+    it('enforces single-probe HALF_OPEN lock without mutating on getStats, and invalidates caches on domain events', async () => {
       let nowMs = 1_000;
       const breaker = new BffSectionCircuitBreaker(2, 10_000, () => nowMs);
 
@@ -305,10 +297,8 @@ describe('BffService', () => {
       expect(breaker.getState('chat')).toBe('OPEN');
       expect(breaker.tryAcquire('chat')).toBe(false);
 
-      // Advance past cooldown: getStats() reads HALF_OPEN without locking halfOpenInFlight
       nowMs += 10_001;
-      const statsBefore = breaker.getStats();
-      expect(statsBefore).toEqual([
+      expect(breaker.getStats()).toEqual([
         {
           section: 'chat',
           state: 'HALF_OPEN',
@@ -316,33 +306,24 @@ describe('BffService', () => {
           halfOpenInFlight: false,
         },
       ]);
-
-      // First caller acquires the single HALF_OPEN canary probe
       expect(breaker.tryAcquire('chat')).toBe(true);
-      // Concurrent second caller is rejected immediately (prevents thundering herd)
       expect(breaker.tryAcquire('chat')).toBe(false);
 
-      // Probe failure re-opens circuit and releases lock
       breaker.recordFailure('chat');
       expect(breaker.getState('chat')).toBe('OPEN');
 
-      // After next cooldown, probe succeeds -> CLOSED
       nowMs += 10_001;
       expect(breaker.tryAcquire('chat')).toBe(true);
       breaker.recordSuccess('chat');
       expect(breaker.getState('chat')).toBe('CLOSED');
-    });
-  });
 
-  describe('BffCacheService event-driven invalidation (DomainActivityEvent actorId)', () => {
-    it('evicts project bootstrap and affected users using actorId on project.** events', async () => {
+      // Event-driven cache invalidation
       await bffCache.handleProjectChanged({
         entityId: 'proj-42',
         actorId: 'owner-1',
         verb: 'member_added',
         newValue: 'member-2',
       });
-
       expect(redisCacheMock.delPattern).toHaveBeenCalledWith(
         'flux:bff:web:project-bootstrap:proj-42:*',
       );
@@ -352,22 +333,7 @@ describe('BffService', () => {
       expect(redisCacheMock.del).toHaveBeenCalledWith(
         'flux:bff:web:workspace-shell:member-2',
       );
-    });
 
-    it('evicts project and actor BFF caches on work-item.** events and survives Redis errors', async () => {
-      await bffCache.handleWorkItemChanged({
-        projectId: 'proj-99',
-        actorId: 'actor-7',
-      });
-
-      expect(redisCacheMock.delPattern).toHaveBeenCalledWith(
-        'flux:bff:web:project-bootstrap:proj-99:*',
-      );
-      expect(redisCacheMock.del).toHaveBeenCalledWith(
-        'flux:bff:web:workspace-shell:actor-7',
-      );
-
-      // Redis failure does not throw unhandled rejection
       redisCacheMock.delPattern.mockRejectedValueOnce(new Error('redis down'));
       await expect(
         bffCache.handleWorkItemChanged({

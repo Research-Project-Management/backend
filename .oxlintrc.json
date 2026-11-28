@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "pedantic": "off",
+    "style": "off",
+    "restriction": "off"
+  },
+  "env": {
+    "node": true,
+    "es2021": true
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "coverage/**",
+    "uploads/**",
+    "prisma/**",
+    "node_modules/**",
+    "*.tsbuildinfo",
+    "eslint.config.mjs"
+  ],
+  "rules": {
+    "no-var": "error",
+    "prefer-const": "warn",
+    "no-debugger": "error",
+    "no-eval": "error",
+    "no-useless-escape": "warn",
+    "no-control-regex": "warn",
+    "no-unsafe-optional-chaining": "warn",
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
+    "typescript/no-explicit-any": "off",
+    "typescript/no-duplicate-enum-values": "error",
+    "typescript/no-extra-non-null-assertion": "error",
+    "typescript/no-misused-new": "error",
+    "typescript/no-non-null-asserted-optional-chain": "error",
+    "typescript/no-this-alias": "warn",
+    "typescript/prefer-as-const": "error"
+  },
+  "overrides": [
+    {
+      "files": ["test/**/*.ts", "**/*.spec.ts", "**/*.test.ts"],
+      "env": {
+        "jest": true
+      },
+      "rules": {
+        "no-unused-vars": "off"
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+# Git hooks (Lefthook).
+# Keep pre-commit fast (< 3s, staged files only). CI owns the full gate matrix.
+# Install: runs automatically via `pnpm prepare` (`lefthook install`).
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: oxlint (staged)
+      glob: '*.{ts,tsx,js,mjs,cjs}'
+      exclude:
+        - 'dist/**'
+        - 'prisma/**'
+        - 'eslint.config.mjs'
+      run: pnpm exec oxlint --config .oxlintrc.staged.json --fix {staged_files}
+      stage_fixed: true
+
+    - name: ast-gates (staged)
+      glob: 'src/**/*.ts'
+      exclude:
+        - '**/*.d.ts'
+      run: pnpm exec ts-node --transpile-only scripts/gates/run-gates.ts {staged_files}
+
+    - name: prettier (staged)
+      glob: '*.{ts,tsx,js,mjs,cjs,json}'
+      exclude:
+        - 'dist/**'
+        - 'pnpm-lock.yaml'
+      run: pnpm exec prettier --write {staged_files}
+      stage_fixed: true
+
+    - name: whitespace check
+      run: git diff --cached --check
+
+pre-push:
+  jobs:
+    - name: typecheck
+      run: pnpm run typecheck

@@ -5,6 +5,10 @@ on:
     branches: ["main", "master"]
   pull_request:
     branches: ["main", "master"]
+
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,6 +25,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -33,7 +40,7 @@ jobs:
           version: 10
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma Client
         run: pnpm exec prisma generate
@@ -41,14 +48,32 @@ jobs:
       - name: Validate Prisma Schema
         run: pnpm exec prisma validate
 
-      - name: Run ESLint
-        run: pnpm run lint || true
+      - name: Run Oxlint
+        run: pnpm run verify:oxlint
 
-      - name: Run Unit Tests
-        run: pnpm test -- --coverage=false || true
+      - name: Run AST Quality Gates
+        run: pnpm run verify:gates
 
-      - name: Test Build Compilation
-        run: pnpm run build || true
+      - name: Run Architecture Gate (dependency-cruiser)
+        run: pnpm run verify:arch
+
+      - name: Run Duplication Gate (jscpd)
+        run: pnpm run verify:dup
+
+      - name: Run Typecheck
+        run: pnpm run typecheck
+
+      - name: Run Build Compilation
+        run: pnpm run build
+
+      - name: Run Unit Tests (Blocking — 57+ suites)
+        run: pnpm run test:ci -- --coverage
+
+      - name: Enforce New-Code Coverage (>= 80% on PR diff)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          pnpm exec ts-node --transpile-only scripts/gates/verify-diff-coverage.ts --base="origin/${{ github.base_ref }}" --min=80
 
   build-and-push:
     name: Build & Push Docker Image to GHCR

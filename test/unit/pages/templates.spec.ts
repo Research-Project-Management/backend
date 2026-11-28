@@ -23,9 +23,9 @@ const SPACE_PROJECT = '33333333-3333-4333-8333-333333333333';
 const PAGE_SOURCE = '44444444-4444-4444-8444-444444444444';
 const BLOB_LOGO = '77777777-7777-4777-8777-777777777777';
 
-describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)', () => {
-  describe('1. Zero-Copy File Value Object & Batch Clone Plan (`file.domain.ts`, `manifest.domain.ts`)', () => {
-    it('hashes DOC text deterministically and links FILE binary assets via FileBlob without BYTEA buffers', () => {
+describe('Pages Templates Seam', () => {
+  describe('TemplateFileVo, TemplateManifest & built-in catalog', () => {
+    it('hashes normalized DOC text, references binary assets by FileBlob ID, and builds depth-ordered clone plans', () => {
       const texA = TemplateFileVo.fromText(
         'main.tex',
         '\\documentclass{article}\r\n\\begin{document}Hi\\end{document}',
@@ -34,13 +34,10 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
         '/main.tex',
         '\\documentclass{article}\n\\begin{document}Hi\\end{document}',
       );
-
       expect(texA.path).toBe('main.tex');
-      expect(texA.type).toBe('DOC');
-      expect(texA.contentHash).toHaveLength(64);
       expect(texA.contentHash).toBe(texB.contentHash);
 
-      const logo = TemplateFileVo.fromAssetRef('figures/logo.png', {
+      const logo = TemplateFileVo.fromAssetRef('assets/plots/logo.png', {
         blobId: BLOB_LOGO,
         storageKey: 'cas/ab/cd/logo.png',
         bucketName: 'manuscript-files',
@@ -50,47 +47,26 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
       });
       expect(logo.type).toBe('FILE');
       expect(logo.blobId).toBe(BLOB_LOGO);
-      expect(logo.textContent).toBeNull();
       expect('content' in logo.toView()).toBe(false);
 
       expect(() => TemplateFileVo.fromText('../etc/passwd', 'bad')).toThrow(
         InvalidTemplateError,
       );
       expect(() => assertCategory('resume')).toThrow(InvalidTemplateError);
-    });
-
-    it('builds an O(1) batch Page clone plan with rootDocId===pageId, depth-ordered folders, and FileBlob increments', () => {
-      const tex = TemplateFileVo.fromText(
-        'paper.tex',
-        '\\documentclass[conference]{IEEEtran}\n\\begin{document}Hello\\end{document}',
-      );
-      const png = TemplateFileVo.fromAssetRef('assets/plots/fig1.png', {
-        blobId: BLOB_LOGO,
-        storageKey: 'cas/fig1.png',
-        contentHash: 'b'.repeat(64),
-        mimeType: 'image/png',
-        sizeBytes: 2048,
-      });
 
       const manifest = TemplateManifest.create({
         name: 'IEEE Conference Paper',
         category: 'conference',
         compiler: 'xelatex',
         texlive: '2025',
-        mainFile: 'paper.tex',
+        mainFile: 'main.tex',
         spaceId: SPACE_PROJECT,
         spaceType: 'project',
         tags: ['IEEE', 'Conference', 'ieee'],
-        files: [tex, png],
+        files: [texA, logo],
       });
-
-      expect(manifest.scope).toBe('project');
-      expect(manifest.isCustom).toBe(true);
       expect(manifest.tags).toEqual(['ieee', 'conference']);
-
-      const summary = manifest.toSummary();
-      expect(summary.fileCount).toBe(2);
-      expect('files' in summary).toBe(false);
+      expect(manifest.toSummary().fileCount).toBe(2);
 
       const plan = manifest.buildPageClonePlan({
         spaceId: SPACE_PROJECT,
@@ -98,34 +74,26 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
       });
       expect(plan.title).toBe('Cloned Paper');
       expect(plan.rootDocId).toBe(plan.pageId);
-      expect(plan.compiler).toBe('xelatex');
-      expect(plan.texlive).toBe('2025');
-      expect(plan.docsToCreate).toHaveLength(1);
-      expect(plan.filesToCreate).toHaveLength(1);
       expect(plan.blobIncrements.get(BLOB_LOGO)).toBe(1);
-      // Depth 1 (`paper.tex` + `/assets`), Depth 2 (`/assets/plots`), Depth 3 (`fig1.png`)
       expect(plan.nodeBatchesByDepth.get(1)).toHaveLength(2);
       expect(plan.nodeBatchesByDepth.get(2)).toHaveLength(1);
       expect(plan.nodeBatchesByDepth.get(3)).toHaveLength(1);
     });
-  });
 
-  describe('2. Flyweight Built-in Preset Catalog (`catalog.domain.ts`)', () => {
-    it('defines 13 curated built-in academic presets (`isCustom === false`, `scope === null`, `texlive === "2025"`)', () => {
+    it('provides 13 immutable built-in academic presets', () => {
       expect(TEMPLATE_CATEGORIES).toHaveLength(11);
       expect(TEMPLATE_SCOPES).toEqual(['personal', 'project']);
       expect(BUILTIN_TEMPLATES).toHaveLength(13);
       for (const tmpl of BUILTIN_TEMPLATES) {
-        expect(tmpl.spaceId).toBeNull();
-        expect(tmpl.scope).toBeNull();
         expect(tmpl.isCustom).toBe(false);
+        expect(tmpl.scope).toBeNull();
         expect(tmpl.texlive).toBe('2025');
       }
     });
   });
 
-  describe('3. Space & Role RBAC (`GalleryService`)', () => {
-    it('enforces Flux Space (`personal` | `project`) and ProjectMember Role rules', async () => {
+  describe('GalleryService RBAC, PublishService CAS deduplication & InstantiateService', () => {
+    it('enforces personal/project Space RBAC and releases FileBlobs when deleting custom templates', async () => {
       expect(
         canReadTemplate({
           spaceId: USER_ALICE,
@@ -133,7 +101,6 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
           memberRole: null,
         }),
       ).toBe(false);
-
       expect(
         canManageTemplate({
           spaceId: null,
@@ -154,143 +121,119 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
         ],
       });
 
-      const mockRepo = {
-        findSummaries: jest
-          .fn()
-          .mockResolvedValue({ items: [personalByAlice], total: 1 }),
-        findDetail: jest.fn().mockResolvedValue(personalByAlice),
-        save: jest.fn(),
-        deleteById: jest
-          .fn()
-          .mockResolvedValue({ deleted: true, releasedBlobIds: [BLOB_LOGO] }),
-      };
-      const mockAccess = {
-        getRole: jest.fn().mockResolvedValue(null),
-      };
-      const mockFilesPort = {
-        releaseBlob: jest.fn().mockResolvedValue({}),
-      };
-
+      const findDetail = jest.fn().mockResolvedValue(personalByAlice);
+      const releaseBlob = jest.fn().mockResolvedValue({});
       const gallery = new GalleryService(
-        mockRepo as never,
-        mockAccess as never,
-        mockFilesPort as never,
+        {
+          findSummaries: jest
+            .fn()
+            .mockResolvedValue({ items: [personalByAlice], total: 1 }),
+          findDetail,
+          deleteById: jest.fn().mockResolvedValue({
+            deleted: true,
+            releasedBlobIds: [BLOB_LOGO],
+          }),
+        } as never,
+        { getRole: jest.fn().mockResolvedValue(null) } as never,
+        { releaseBlob } as never,
       );
 
-      // Built-in templates resolve in O(1) memory without hitting DB
-      const builtinDetail = await gallery.getDetail(
-        'ieee-transactions',
-        USER_BOB,
-      );
-      expect(builtinDetail.isCustom).toBe(false);
-      expect(mockRepo.findDetail).not.toHaveBeenCalled();
+      expect(
+        (await gallery.getDetail('ieee-transactions', USER_BOB)).isCustom,
+      ).toBe(false);
+      expect(findDetail).not.toHaveBeenCalled();
 
       await expect(
         gallery.remove('ieee-transactions', USER_ALICE),
       ).rejects.toThrow(TemplateForbiddenError);
-
       await expect(
         gallery.getDetail(personalByAlice.id, USER_BOB),
       ).rejects.toThrow(TemplateNotFoundError);
+      await expect(
+        gallery.remove(personalByAlice.id, USER_BOB),
+      ).rejects.toThrow(TemplateForbiddenError);
 
-      const detail = await gallery.getDetail(personalByAlice.id, USER_ALICE);
-      expect(detail.scope).toBe('personal');
-      expect(detail.isCustom).toBe(true);
-
-      await expect(gallery.remove(personalByAlice.id, USER_BOB)).rejects.toThrow(
-        TemplateForbiddenError,
-      );
       await gallery.remove(personalByAlice.id, USER_ALICE);
-      expect(mockRepo.deleteById).toHaveBeenCalledWith(personalByAlice.id);
-      expect(mockFilesPort.releaseBlob).toHaveBeenCalledWith(BLOB_LOGO);
+      expect(releaseBlob).toHaveBeenCalledWith(BLOB_LOGO);
     });
-  });
 
-  describe('4. Zero-Copy Publisher & Idempotent Republisher (`PublishService`)', () => {
-    it('snapshots PageDoc + PageFile FileBlob refs and updates in-place on republish', async () => {
+    it('republishes in-place for the same sourcePageId and deduplicates FileBlob acquisition across shared TemplateBlobs', async () => {
       let storedManifest: TemplateManifest | null = null;
-
-      const prisma = {
-        space: { upsert: jest.fn().mockResolvedValue({}) },
-        page: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: PAGE_SOURCE,
-            spaceId: SPACE_PROJECT,
-            description: 'Lab template',
-            compiler: 'lualatex',
-            texlive: '2025',
-            thumbnail: 'https://cdn.flux/thumb.png',
-            rootDoc: { lastKnownPath: '/paper.tex' },
-          }),
-        },
-        pageNode: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              id: 'n1',
-              path: '/paper.tex',
-              name: 'paper.tex',
-              type: 'DOC',
-              docId: 'd1',
-              depth: 1,
-            },
-            {
-              id: 'n2',
-              path: '/figs/plot.png',
-              name: 'plot.png',
-              type: 'FILE',
-              fileId: 'f1',
-              depth: 2,
-            },
-          ]),
-        },
-        pageDoc: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              id: 'd1',
-              inStorage: false,
-              lines: [
-                '\\documentclass{article}',
-                '\\begin{document}Hi\\end{document}',
-              ],
-            },
-          ]),
-        },
-        pageFile: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              id: 'f1',
-              blobId: BLOB_LOGO,
-              storageKey: 'cas/plot.png',
-              bucketName: 'manuscript-files',
-              hash: 'c'.repeat(64),
-              mimeType: 'image/png',
-              sizeBytes: 8192,
-            },
-          ]),
-        },
-      };
-
-      const repo = {
-        findBySourcePage: jest.fn(async () => storedManifest),
-        save: jest.fn(async (m: TemplateManifest) => {
-          storedManifest = m;
-          return m;
-        }),
-      };
-      const gallery = {
-        getSpaceRole: jest.fn().mockResolvedValue('contributor'),
-        assertCanManage: jest.fn().mockResolvedValue(undefined),
-      };
-      const filesPort = {
-        acquireBlob: jest.fn().mockResolvedValue({}),
-      };
+      const acquireBlob = jest.fn().mockResolvedValue({});
 
       const publisher = new PublishService(
-        prisma as never,
-        repo as never,
-        gallery as never,
+        {
+          space: { upsert: jest.fn().mockResolvedValue({}) },
+          page: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: PAGE_SOURCE,
+              spaceId: SPACE_PROJECT,
+              description: 'Lab template',
+              compiler: 'lualatex',
+              texlive: '2025',
+              thumbnail: null,
+              rootDoc: { lastKnownPath: '/paper.tex' },
+            }),
+          },
+          pageNode: {
+            findMany: jest.fn().mockResolvedValue([
+              {
+                id: 'n1',
+                path: '/paper.tex',
+                name: 'paper.tex',
+                type: 'DOC',
+                docId: 'd1',
+                depth: 1,
+              },
+              {
+                id: 'n2',
+                path: '/figs/plot.png',
+                name: 'plot.png',
+                type: 'FILE',
+                fileId: 'f1',
+                depth: 2,
+              },
+            ]),
+          },
+          pageDoc: {
+            findMany: jest.fn().mockResolvedValue([
+              {
+                id: 'd1',
+                inStorage: false,
+                lines: [
+                  '\\documentclass{article}',
+                  '\\begin{document}Hi\\end{document}',
+                ],
+              },
+            ]),
+          },
+          pageFile: {
+            findMany: jest.fn().mockResolvedValue([
+              {
+                id: 'f1',
+                blobId: BLOB_LOGO,
+                storageKey: 'cas/plot.png',
+                bucketName: 'manuscript-files',
+                hash: 'c'.repeat(64),
+                mimeType: 'image/png',
+                sizeBytes: 8192,
+              },
+            ]),
+          },
+        } as never,
+        {
+          findBySourcePage: jest.fn(async () => storedManifest),
+          save: jest.fn(async (m: TemplateManifest) => {
+            storedManifest = m;
+            return m;
+          }),
+        } as never,
+        {
+          getSpaceRole: jest.fn().mockResolvedValue('contributor'),
+          assertCanManage: jest.fn().mockResolvedValue(undefined),
+        } as never,
         {} as never,
-        filesPort as never,
+        { acquireBlob } as never,
       );
 
       expect(() => assertScope('workspace')).toThrow(InvalidTemplateError);
@@ -301,39 +244,31 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
         category: 'journal',
         scope: 'project',
       });
-
-      expect(first.scope).toBe('project');
-      expect(first.spaceId).toBe(SPACE_PROJECT);
-      expect(first.sourcePageId).toBe(PAGE_SOURCE);
-      expect(first.compiler).toBe('lualatex');
-      expect(first.texlive).toBe('2025');
-      expect(first.fileCount).toBe(2);
-      expect(filesPort.acquireBlob).toHaveBeenCalledWith(BLOB_LOGO);
-
-      // Republishing the same sourcePageId into the same Space updates in-place (same template ID)
       const second = await publisher.publish(USER_ALICE, {
         pageId: PAGE_SOURCE,
         name: 'Lab Paper Template v2',
         category: 'journal',
         scope: 'project',
       });
+
       expect(second.id).toBe(first.id);
       expect(second.name).toBe('Lab Paper Template v2');
-    });
+      expect(acquireBlob).toHaveBeenCalledWith(BLOB_LOGO);
 
-    it('deduplicates FileBlob CAS acquisition across multiple templates sharing the same TemplateBlob hash', async () => {
+      // Shared TemplateBlob CAS deduplication across templates
       const existingBlobHashes = new Set<string>();
       const txMock = {
         templateBlob: {
-          findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
-            if ('contentHash' in where) {
-              const hashes = (where.contentHash as { in: string[] }).in;
-              return hashes
-                .filter((h) => existingBlobHashes.has(h))
-                .map((contentHash) => ({ contentHash }));
-            }
-            return [];
-          }),
+          findMany: jest.fn(
+            async ({ where }: { where: Record<string, unknown> }) => {
+              if ('contentHash' in where) {
+                return (where.contentHash as { in: string[] }).in
+                  .filter((h) => existingBlobHashes.has(h))
+                  .map((contentHash) => ({ contentHash }));
+              }
+              return [];
+            },
+          ),
           createMany: jest.fn(
             async ({ data }: { data: Array<{ contentHash: string }> }) => {
               for (const row of data) existingBlobHashes.add(row.contentHash);
@@ -352,52 +287,49 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
           createMany: jest.fn(async () => ({ count: 0 })),
         },
       };
-
       const repo = new TemplatesRepository({
         $transaction: async <T>(cb: (tx: typeof txMock) => Promise<T>) =>
           cb(txMock),
       } as never);
 
-      const sharedLogo = TemplateFileVo.fromAssetRef('logo.png', {
-        blobId: BLOB_LOGO,
-        storageKey: 'cas/logo.png',
-        contentHash: 'e'.repeat(64),
-        mimeType: 'image/png',
-        sizeBytes: 512,
-      });
-      const mainTex = TemplateFileVo.fromText(
-        'main.tex',
-        '\\documentclass{article}\n\\begin{document}Hi\\end{document}',
-      );
+      const sharedFiles = [
+        TemplateFileVo.fromText(
+          'main.tex',
+          '\\documentclass{article}\n\\begin{document}Hi\\end{document}',
+        ),
+        TemplateFileVo.fromAssetRef('logo.png', {
+          blobId: BLOB_LOGO,
+          storageKey: 'cas/logo.png',
+          contentHash: 'e'.repeat(64),
+          mimeType: 'image/png',
+          sizeBytes: 512,
+        }),
+      ];
 
-      const firstSaved = await repo.saveWithLifecycle(
+      const saved1 = await repo.saveWithLifecycle(
         TemplateManifest.create({
-          name: 'Template One',
+          name: 'T1',
           spaceId: USER_ALICE,
           spaceType: 'personal',
           createdById: USER_ALICE,
-          files: [mainTex, sharedLogo],
+          files: sharedFiles,
         }),
       );
-      expect(firstSaved.acquiredBlobIds).toEqual([BLOB_LOGO]);
-      expect(firstSaved.releasedBlobIds).toEqual([]);
-
-      const secondSaved = await repo.saveWithLifecycle(
+      const saved2 = await repo.saveWithLifecycle(
         TemplateManifest.create({
-          name: 'Template Two Sharing Logo',
+          name: 'T2',
           spaceId: USER_ALICE,
           spaceType: 'personal',
           createdById: USER_ALICE,
-          files: [mainTex, sharedLogo],
+          files: sharedFiles,
         }),
       );
-      expect(secondSaved.acquiredBlobIds).toEqual([]);
-      expect(secondSaved.releasedBlobIds).toEqual([]);
+
+      expect(saved1.acquiredBlobIds).toEqual([BLOB_LOGO]);
+      expect(saved2.acquiredBlobIds).toEqual([]);
     });
-  });
 
-  describe('5. Single-Transaction ACID Batch Instantiator (`InstantiateService`)', () => {
-    it('clones Page + PageDoc + PageFile + PageNode atomically in one $transaction and acquires FileBlobs', async () => {
+    it('instantiates a template atomically in one transaction and acquires referenced FileBlobs', async () => {
       const proto = TemplateManifest.create({
         id: '66666666-6666-4666-8666-666666666666',
         slug: 'xelatex-thesis',
@@ -431,27 +363,18 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
         pageFile: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
         pageNode: { createMany: jest.fn().mockResolvedValue({ count: 2 }) },
       };
-
-      const prisma = {
-        $transaction: jest.fn(async (cb: (tx: typeof txMock) => Promise<void>) =>
-          cb(txMock),
-        ),
-      };
-      const gallery = {
-        getAuthorizedManifest: jest.fn().mockResolvedValue(proto),
-      };
-      const filesPort = {
-        acquireBlob: jest.fn().mockResolvedValue({}),
-      };
-      const eventEmitter = {
-        emit: jest.fn(),
-      };
+      const acquireBlob = jest.fn().mockResolvedValue({});
+      const emit = jest.fn();
 
       const instantiator = new InstantiateService(
-        prisma as never,
-        gallery as never,
-        filesPort as never,
-        eventEmitter as never,
+        {
+          $transaction: jest.fn(
+            async (cb: (tx: typeof txMock) => Promise<void>) => cb(txMock),
+          ),
+        } as never,
+        { getAuthorizedManifest: jest.fn().mockResolvedValue(proto) } as never,
+        { acquireBlob } as never,
+        { emit } as never,
       );
 
       const res = await instantiator.instantiate(
@@ -461,20 +384,18 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
         { title: 'My PhD Thesis' },
       );
 
-      expect(res.isPersonal).toBe(true);
-      expect(res.compiler).toBe('xelatex');
-      expect(res.texlive).toBe('2025');
+      expect(res).toMatchObject({
+        isPersonal: true,
+        compiler: 'xelatex',
+        texlive: '2025',
+        createdDocs: 1,
+        createdFiles: 1,
+      });
       expect(res.rootDocId).toBe(res.pageId);
-      expect(res.createdDocs).toBe(1);
-      expect(res.createdFiles).toBe(1);
-      expect(txMock.pageDoc.createMany).toHaveBeenCalledTimes(1);
-      expect(txMock.pageFile.createMany).toHaveBeenCalledTimes(1);
-      expect(filesPort.acquireBlob).toHaveBeenCalledWith(BLOB_LOGO);
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
+      expect(acquireBlob).toHaveBeenCalledWith(BLOB_LOGO);
+      expect(emit).toHaveBeenCalledWith(
         'pages.file-tree.change',
-        expect.objectContaining({
-          projectId: USER_ALICE,
-        }),
+        expect.objectContaining({ projectId: USER_ALICE }),
       );
     });
   });

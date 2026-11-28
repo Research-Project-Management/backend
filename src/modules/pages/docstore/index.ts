@@ -36,6 +36,13 @@ export {
   PatchDocDto,
   DocResponseDto,
 } from './dto/doc.dto';
+export {
+  hydratePageDocLines,
+  findPageRecordWithNode,
+  formatPageByIdResponse,
+  assertExpectedVersionAndRev,
+  executeDocstoreUpdateWithOcc,
+} from './domain/doc-occ.helper';
 export { DocstoreRepository } from './repositories/docstore.repository';
 export {
   DocArchiveRepository,

@@ -19,16 +19,18 @@ import {
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
   filterRecordsByPageScope,
-  findPageRecordWithNode,
-  formatPageByIdResponse,
   getRecordSpaceId,
-  hydratePageDocLines,
   isRecordDeleted,
   resolveActiveProjectId,
   resolveProjectIdByEntityId,
   resolveSpaceRootDocIds,
 } from '@/modules/pages/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import {
+  DocstoreService,
+  findPageRecordWithNode,
+  formatPageByIdResponse,
+  hydratePageDocLines,
+} from '@/modules/pages/docstore';
 import type { PageDocRanges } from '../types/page.types';
 
 @Injectable()

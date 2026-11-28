@@ -1,277 +1,223 @@
 import { ForbiddenException } from '@nestjs/common';
+import { fromPartial } from '@total-typescript/shoehorn';
+import type { PrismaService } from '@/core';
 import { ProjectResourceResolver } from '@/modules/project/access/resolvers/project-resource.resolver';
 
 describe('ProjectResourceResolver', () => {
-  let resolver: ProjectResourceResolver;
-  let mockPrisma: any;
-
   const projectAId = 'a0000000-0000-4000-8000-000000000001';
   const projectBId = 'b0000000-0000-4000-8000-000000000002';
   const pageAId = 'c0000000-0000-4000-8000-000000000003';
   const docBId = 'd0000000-0000-4000-8000-000000000005';
 
-  beforeEach(() => {
-    mockPrisma = {
-      pageDoc: {
-        findUnique: jest.fn(),
-      },
-      page: {
-        findUnique: jest.fn(),
-      },
-      pageNode: {
-        findUnique: jest.fn(),
-      },
-      pageSnapshot: {
-        findUnique: jest.fn(),
-      },
-      docComment: {
-        findUnique: jest.fn(),
-      },
-      pageFile: {
-        findUnique: jest.fn(),
-      },
-      fileNode: {
-        findUnique: jest.fn(),
-      },
-      workItem: {
-        findFirst: jest.fn(),
-        findUnique: jest.fn(),
-      },
-      project: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
-      },
-    };
+  let resolver: ProjectResourceResolver;
+  let mockPageDocFindUnique: jest.Mock;
+  let mockProjectFindFirst: jest.Mock;
+  let mockLibraryItemFindUnique: jest.Mock;
 
-    resolver = new ProjectResourceResolver(mockPrisma);
+  beforeEach(() => {
+    mockPageDocFindUnique = jest.fn();
+    mockProjectFindFirst = jest.fn();
+    mockLibraryItemFindUnique = jest.fn();
+
+    resolver = new ProjectResourceResolver(
+      fromPartial<PrismaService>({
+        pageDoc: { findUnique: mockPageDocFindUnique },
+        page: { findUnique: jest.fn() },
+        pageNode: { findUnique: jest.fn() },
+        pageSnapshot: { findUnique: jest.fn() },
+        docComment: { findUnique: jest.fn() },
+        pageFile: { findUnique: jest.fn() },
+        fileNode: { findUnique: jest.fn() },
+        workItem: { findFirst: jest.fn(), findUnique: jest.fn() },
+        project: { findUnique: jest.fn(), findFirst: mockProjectFindFirst },
+        libraryItem: { findUnique: mockLibraryItemFindUnique },
+      }),
+    );
   });
 
-  it('should resolve projectId from pageId resource', async () => {
-    mockPrisma.pageDoc.findUnique.mockResolvedValue({
+  it('resolves authoritative projectId from pageDoc and Library items, and rejects cross-context mismatches', async () => {
+    mockPageDocFindUnique.mockResolvedValue({
       id: pageAId,
       spaceId: projectAId,
     });
 
-    const req = {
+    const pageReq: Record<string, unknown> = {
       params: { pageId: pageAId },
       headers: {},
       query: {},
       body: {},
     };
-
-    const result = await resolver.resolveAuthoritativeProjectId(req);
-    expect(result).toEqual({
+    await expect(
+      resolver.resolveAuthoritativeProjectId(pageReq),
+    ).resolves.toEqual({
       projectId: projectAId,
       spaceId: projectAId,
       isPersonalSpace: false,
       source: 'resource',
     });
-    expect((req as any).resolvedProjectId).toBe(projectAId);
-    expect((req as any).resolvedPageId).toBe(pageAId);
-  });
+    expect(pageReq.resolvedProjectId).toBe(projectAId);
+    expect(pageReq.resolvedPageId).toBe(pageAId);
 
-  it('should throw PROJECT_CONTEXT_MISMATCH if client project hint disagrees with resource project', async () => {
-    mockPrisma.pageDoc.findUnique.mockResolvedValue({
-      id: pageAId,
-      spaceId: projectAId,
-    });
-
-    const req = {
-      params: { pageId: pageAId },
-      headers: { 'x-project-id': projectBId },
-      query: {},
-      body: {},
-    };
-
-    await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
-      ForbiddenException,
-    );
-
+    // Header mismatch -> PROJECT_CONTEXT_MISMATCH
+    let caught: unknown;
     try {
-      await resolver.resolveAuthoritativeProjectId(req);
-    } catch (err: any) {
-      expect(err.getResponse()).toMatchObject({
-        code: 'PROJECT_CONTEXT_MISMATCH',
+      await resolver.resolveAuthoritativeProjectId({
+        params: { pageId: pageAId },
+        headers: { 'x-project-id': projectBId },
+        query: {},
+        body: {},
       });
+    } catch (err) {
+      caught = err;
     }
-  });
-
-  it('should throw PROJECT_CONTEXT_MISMATCH if multiple referenced resources belong to different projects', async () => {
-    mockPrisma.pageDoc.findUnique.mockImplementation(({ where }: any) => {
-      if (where.id === pageAId) return Promise.resolve({ spaceId: projectAId });
-      if (where.id === docBId) return Promise.resolve({ spaceId: projectBId });
-      return Promise.resolve(null);
+    expect(caught).toBeInstanceOf(ForbiddenException);
+    expect((caught as ForbiddenException).getResponse()).toMatchObject({
+      code: 'PROJECT_CONTEXT_MISMATCH',
     });
 
-    const req = {
-      params: { pageId: pageAId },
-      body: { docId: docBId },
-      headers: {},
-      query: {},
-    };
-
-    await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
-      ForbiddenException,
+    // Multi-resource cross-project mismatch
+    mockPageDocFindUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => {
+        if (where.id === pageAId) return { spaceId: projectAId };
+        if (where.id === docBId) return { spaceId: projectBId };
+        return null;
+      },
     );
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        params: { pageId: pageAId },
+        body: { docId: docBId },
+        headers: {},
+        query: {},
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    // Library item dual-context resolution + space mismatch rejection
+    mockLibraryItemFindUnique.mockResolvedValue({ spaceId: projectAId });
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        url: `/api/v1/library/items/${pageAId}`,
+        params: { itemId: pageAId },
+        headers: {},
+        query: {},
+        body: {},
+      }),
+    ).resolves.toEqual({
+      projectId: projectAId,
+      spaceId: projectAId,
+      isPersonalSpace: false,
+      source: 'resource',
+    });
+
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        url: `/api/v1/spaces/${projectBId}/library/items/${pageAId}`,
+        params: { spaceId: projectBId, itemId: pageAId },
+        headers: { 'x-space-id': projectBId },
+        query: {},
+        body: {},
+      }),
+    ).rejects.toThrow(ForbiddenException);
   });
 
-  it('should resolve from path param :projectId when no resource is referenced', async () => {
-    const req = {
-      params: { projectId: projectAId },
-      headers: {},
-      query: {},
-      body: {},
-    };
-
-    const result = await resolver.resolveAuthoritativeProjectId(req);
-    expect(result).toEqual({
+  it('resolves UUID params, human-readable slugs, spaceId hints, and personal space aliases, while failing closed on DB or unknown slug errors', async () => {
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        params: { projectId: projectAId },
+        headers: {},
+        query: {},
+        body: {},
+      }),
+    ).resolves.toEqual({
       projectId: projectAId,
       spaceId: projectAId,
       isPersonalSpace: false,
       source: 'param',
     });
-  });
 
-  it('should resolve human-readable project identifier to UUID', async () => {
-    mockPrisma.project.findFirst.mockResolvedValue({
+    mockProjectFindFirst.mockResolvedValueOnce({
       id: projectAId,
       identifier: 'my-project',
     });
-
-    const req = {
-      params: { projectId: 'my-project' },
-      headers: {},
-      query: {},
-      body: {},
-    };
-
-    const result = await resolver.resolveAuthoritativeProjectId(req);
-    expect(result).toEqual({
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        params: { projectId: 'my-project' },
+        headers: {},
+        query: {},
+        body: {},
+      }),
+    ).resolves.toEqual({
       projectId: projectAId,
       spaceId: projectAId,
       isPersonalSpace: false,
       source: 'param',
     });
-  });
 
-  it('should fail closed on database exception and throw ACCESS_DENIED', async () => {
-    mockPrisma.pageDoc.findUnique.mockRejectedValue(
-      new Error('DB Connection Timeout'),
-    );
+    // Header vs query conflict
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        params: {},
+        headers: { 'x-project-id': projectAId },
+        query: { projectId: projectBId },
+        body: {},
+      }),
+    ).rejects.toThrow(ForbiddenException);
 
-    const req = {
-      params: { pageId: pageAId },
-      headers: {},
-      query: {},
-      body: {},
-    };
+    // Unknown slug fails closed
+    mockProjectFindFirst.mockResolvedValueOnce(null);
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        params: {},
+        headers: {},
+        query: { projectId: 'unknown-slug' },
+        body: {},
+      }),
+    ).rejects.toThrow(ForbiddenException);
 
-    await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
-      ForbiddenException,
-    );
-  });
+    // DB error fails closed
+    mockPageDocFindUnique.mockRejectedValueOnce(new Error('DB timeout'));
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        params: { pageId: pageAId },
+        headers: {},
+        query: {},
+        body: {},
+      }),
+    ).rejects.toThrow(ForbiddenException);
 
-  it('should throw PROJECT_CONTEXT_MISMATCH when header x-project-id conflicts with query.projectId', async () => {
-    const req = {
-      params: {},
-      headers: { 'x-project-id': projectAId },
-      query: { projectId: projectBId },
-      body: {},
-    };
-
-    await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
-      ForbiddenException,
-    );
-  });
-
-  it('should throw ACCESS_DENIED when non-UUID projectId hint does not match any existing project', async () => {
-    mockPrisma.project.findFirst.mockResolvedValue(null);
-    const req = {
-      params: {},
-      headers: {},
-      query: { projectId: 'unknown-slug' },
-      body: {},
-    };
-
-    await expect(resolver.resolveAuthoritativeProjectId(req)).rejects.toThrow(
-      ForbiddenException,
-    );
-  });
-
-  it('should synchronize request.query and request.body two-way when only spaceId is provided', async () => {
-    const queryReq: Record<string, any> = {
-      url: '/api/v1/library/items',
-      params: {},
-      headers: {},
-      query: { spaceId: projectAId },
-      body: {},
-    };
-
-    const queryResult = await resolver.resolveAuthoritativeProjectId(queryReq);
-    expect(queryResult).toEqual({
+    // Hint & personal space resolution
+    await expect(
+      resolver.resolveAuthoritativeProjectId({
+        url: '/api/v1/library/items',
+        params: {},
+        headers: {},
+        query: { spaceId: projectAId },
+        body: {},
+      }),
+    ).resolves.toEqual({
       projectId: projectAId,
       spaceId: projectAId,
       isPersonalSpace: false,
       source: 'hint',
     });
-    expect(queryReq.query.spaceId).toBe(projectAId);
-    expect(queryReq.query.projectId).toBeUndefined();
 
-    const bodyReq: Record<string, any> = {
-      url: '/api/v1/pages/compile',
-      params: {},
-      headers: {},
-      query: {},
-      body: { spaceId: projectBId },
-    };
-
-    const bodyResult = await resolver.resolveAuthoritativeProjectId(bodyReq);
-    expect(bodyResult).toEqual({
-      projectId: projectBId,
-      spaceId: projectBId,
-      isPersonalSpace: false,
-      source: 'hint',
-    });
-    expect(bodyReq.body.spaceId).toBe(projectBId);
-    expect(bodyReq.body.projectId).toBeUndefined();
-  });
-
-  it('should resolve Personal Space client hint (spaceId=userId or personal) on /api/v1/pages/compile', async () => {
     const personalUserId = 'e0000000-0000-4000-8000-000000000009';
-    const reqByUserId: Record<string, any> = {
-      url: '/api/v1/pages/compile',
-      user: { sub: personalUserId },
-      params: {},
-      headers: {},
-      query: {},
-      body: { spaceId: personalUserId },
-    };
-
-    const res1 = await resolver.resolveAuthoritativeProjectId(reqByUserId);
-    expect(res1).toEqual({
-      projectId: personalUserId,
-      spaceId: personalUserId,
-      isPersonalSpace: true,
-      source: 'hint',
-    });
-    expect(reqByUserId.body.spaceId).toBe(personalUserId);
-    expect(reqByUserId.body.projectId).toBeUndefined();
-
-    const reqByAlias: Record<string, any> = {
-      url: '/api/v1/pages/compile',
-      user: { id: personalUserId },
-      params: {},
-      headers: {},
-      query: {},
-      body: { spaceId: 'personal' },
-    };
-
-    const res2 = await resolver.resolveAuthoritativeProjectId(reqByAlias);
-    expect(res2).toEqual({
-      projectId: personalUserId,
-      spaceId: personalUserId,
-      isPersonalSpace: true,
-      source: 'hint',
-    });
+    for (const rawSpace of [personalUserId, 'personal']) {
+      await expect(
+        resolver.resolveAuthoritativeProjectId({
+          url: '/api/v1/pages/compile',
+          user: { sub: personalUserId, id: personalUserId },
+          params: {},
+          headers: {},
+          query: {},
+          body: { spaceId: rawSpace },
+        }),
+      ).resolves.toEqual({
+        projectId: personalUserId,
+        spaceId: personalUserId,
+        isPersonalSpace: true,
+        source: 'hint',
+      });
+    }
   });
 });

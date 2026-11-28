@@ -59,13 +59,6 @@ export {
   isPrismaUniqueConstraintError,
 } from './utils/page-scope';
 export {
-  hydratePageDocLines,
-  findPageRecordWithNode,
-  formatPageByIdResponse,
-  assertExpectedVersionAndRev,
-  executeDocstoreUpdateWithOcc,
-} from './utils/doc-occ.helper';
-export {
   ensurePrismaFolderChain,
   isPrismaUniqueError,
 } from './utils/folder-chain';

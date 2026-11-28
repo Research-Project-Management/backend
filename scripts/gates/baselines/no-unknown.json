@@ -1,0 +1,262 @@
+{
+  "src/core/http/setup/plugins.setup.ts": {
+    "8d40353602709ca4": 1
+  },
+  "src/modules/ai/engine/services/stream.service.ts": {
+    "7c855f8d9e18928e": 1
+  },
+  "src/modules/experiments/controllers/stream.controller.ts": {
+    "8e9f76804944a6a3": 1
+  },
+  "src/modules/experiments/controllers/upload.controller.ts": {
+    "8e9f76804944a6a3": 1
+  },
+  "src/modules/files/controllers/http.helper.ts": {
+    "8e9f76804944a6a3": 1
+  },
+  "src/modules/identity/user/utils/user.util.ts": {
+    "6bb6abb5ff96c512": 1
+  },
+  "src/modules/library/catalog/domain/item-command.mapper.ts": {
+    "14eefff013d8cc99": 1,
+    "8fa825111da6e23c": 1
+  },
+  "src/modules/library/catalog/domain/type-conversion.policy.ts": {
+    "1c5ce375c4fbe924": 1
+  },
+  "src/modules/library/catalog/repositories/command-relations.repository.ts": {
+    "11932c2c4037071f": 2
+  },
+  "src/modules/library/catalog/repositories/command.repository.ts": {
+    "fafc70f318efae44": 2
+  },
+  "src/modules/library/catalog/repositories/saved-searches.repository.ts": {
+    "6c83d607192c57c2": 2
+  },
+  "src/modules/library/catalog/repositories/state.repository.ts": {
+    "b06cd2dae46809c3": 1
+  },
+  "src/modules/library/catalog/services/catalog.facade.ts": {
+    "233aba253fb06c0d": 1,
+    "4790bed0f21944ac": 1,
+    "482b2dd1b6b305ea": 1,
+    "5fa502812f5ddb08": 1,
+    "6108e12c9eda5f1d": 1,
+    "7321a137508289f7": 1,
+    "739ee425e065a580": 1,
+    "90663276e5f39b78": 1,
+    "a18ca5c61b1870d1": 1,
+    "affa6dffecb73792": 1,
+    "d213c6f9f8352248": 1
+  },
+  "src/modules/library/catalog/services/curation.service.ts": {
+    "61f29ff53d13220e": 1,
+    "a5976da1c2d95208": 1
+  },
+  "src/modules/library/catalog/services/item-query.service.ts": {
+    "512f582558c3ff43": 1
+  },
+  "src/modules/library/catalog/services/items.service.ts": {
+    "0f0e69c27ffe4d50": 1,
+    "61f29ff53d13220e": 1,
+    "a5976da1c2d95208": 1
+  },
+  "src/modules/library/catalog/services/notes.service.ts": {
+    "61f29ff53d13220e": 1,
+    "94c98b6629dcb38b": 1,
+    "cde39f8c6cad4639": 1,
+    "dc7f8371e055134f": 1
+  },
+  "src/modules/library/catalog/services/reader-bootstrap.service.ts": {
+    "f545144c987c49dc": 1
+  },
+  "src/modules/library/catalog/services/saved-searches.service.ts": {
+    "61f29ff53d13220e": 2,
+    "9e48d115fa6e8229": 1
+  },
+  "src/modules/library/catalog/services/type-conversion.service.ts": {
+    "1c5ce375c4fbe924": 2
+  },
+  "src/modules/library/citation/domain/export-format.mapper.ts": {
+    "67213f87069c5f14": 1
+  },
+  "src/modules/library/citation/services/doi-negotiation.service.ts": {
+    "496497b2d1fab152": 1
+  },
+  "src/modules/library/citation/services/exports.service.ts": {
+    "695a67c38c9d5f37": 1
+  },
+  "src/modules/library/core/domain/item-bibliographic.mapper.ts": {
+    "0fcf0f14631e9937": 1,
+    "61f29ff53d13220e": 1,
+    "a5976da1c2d95208": 1
+  },
+  "src/modules/library/core/domain/items.mapper.ts": {
+    "67213f87069c5f14": 1,
+    "dcb68ddcc6cc4196": 1
+  },
+  "src/modules/library/core/domain/reconciler.domain.ts": {
+    "3976834c0a08091d": 1,
+    "88190350802a2c66": 1,
+    "c54f39071f55cded": 1
+  },
+  "src/modules/library/core/domain/specification.domain.ts": {
+    "58093c24fb71a244": 1,
+    "95ed09866ef36fde": 2,
+    "a7a0d8f9365114b4": 1,
+    "dd333818cf7c8e16": 1
+  },
+  "src/modules/library/extraction/controllers/telemetry.controller.ts": {
+    "8e9f76804944a6a3": 1
+  },
+  "src/modules/library/extraction/domain/metadata-merge.policy.ts": {
+    "7ecbb8d8b2cc2e91": 1
+  },
+  "src/modules/library/extraction/providers/pdf-outline.extractor.ts": {
+    "2861d643e606843d": 1
+  },
+  "src/modules/library/extraction/repositories/attachments.repository.ts": {
+    "442913b980924379": 1,
+    "c0f4a51b1def6572": 1
+  },
+  "src/modules/library/extraction/repositories/extraction.repository.ts": {
+    "020212fd44fd7c48": 1
+  },
+  "src/modules/library/extraction/services/metadata-sync.service.ts": {
+    "129bfc98936a1869": 1,
+    "4c48b2480c10268a": 1,
+    "c769fff7a0f64f80": 1
+  },
+  "src/modules/library/ingestion/domain/duplicate-clustering.domain.ts": {
+    "61f29ff53d13220e": 1,
+    "96b5d4b5d8e6ca3d": 1,
+    "caed57c816296b7c": 1
+  },
+  "src/modules/library/ingestion/domain/enrichment-patch.mapper.ts": {
+    "180e1b410a18d468": 1,
+    "fafc70f318efae44": 1
+  },
+  "src/modules/library/ingestion/repositories/duplicate-merge.repository.ts": {
+    "1c5ce375c4fbe924": 1,
+    "4716cc3078c0f6bc": 1,
+    "6f27c010b45037da": 1,
+    "86280d5e65dce574": 1
+  },
+  "src/modules/library/ingestion/repositories/ingestion.repository.ts": {
+    "25308d73697a7c6f": 1,
+    "31598aecf6aa8223": 1
+  },
+  "src/modules/library/ingestion/repositories/retraction.repository.ts": {
+    "2e216fed0e5cde19": 1,
+    "3fc707eabffb113c": 1,
+    "61f29ff53d13220e": 2,
+    "a5976da1c2d95208": 1,
+    "c080bb0ae7069ef8": 2
+  },
+  "src/modules/library/ingestion/services/duplicate-detector.service.ts": {
+    "2d34c82997dabc91": 1,
+    "61f29ff53d13220e": 2
+  },
+  "src/modules/library/ingestion/services/ingestion-saga.service.ts": {
+    "484e172349eb9c8c": 1,
+    "e48cf38408891ed6": 1
+  },
+  "src/modules/library/ingestion/services/ingestion-verifier.service.ts": {
+    "67213f87069c5f14": 1
+  },
+  "src/modules/library/ingestion/services/ingestion.service.ts": {
+    "b4bd3bcc6ba00096": 1
+  },
+  "src/modules/library/ingestion/services/metadata-resolver.service.ts": {
+    "180e1b410a18d468": 11,
+    "dc9bd7b809989383": 2,
+    "fb5a43a5dd104ad0": 1
+  },
+  "src/modules/library/ingestion/services/metadata.service.ts": {
+    "0b50f0bee189d5ea": 1
+  },
+  "src/modules/library/ingestion/services/pipeline-batch.service.ts": {
+    "67758189ed20646b": 1
+  },
+  "src/modules/library/ingestion/services/pipeline-side-effects.service.ts": {
+    "2eea7e5b687267ec": 1,
+    "730223a9a0f08d10": 1,
+    "a7a45b09a0fa65c9": 1
+  },
+  "src/modules/library/ingestion/services/retraction-database.service.ts": {
+    "04000ed649eea4a4": 1
+  },
+  "src/modules/library/ingestion/services/retraction-seeder.service.ts": {
+    "8f04a3f527e5c4d3": 1
+  },
+  "src/modules/library/ingestion/services/url-capture.service.ts": {
+    "07e20f211010134f": 1,
+    "476ad538bf49288a": 1,
+    "5dd32af7eabd1cf4": 1,
+    "9e309cc80284bc2a": 1
+  },
+  "src/modules/library/ingestion/services/url-metadata-scraper.service.ts": {
+    "485f8de87d9903bc": 1
+  },
+  "src/modules/library/ingestion/stages/identify-file.resolver.ts": {
+    "6695321ed7971e3a": 1,
+    "b4749b330891c331": 1,
+    "d9e90680c1a5247d": 1,
+    "ffc27e3bcb84ec94": 1
+  },
+  "src/modules/library/ingestion/stages/identify.stage.ts": {
+    "d9e90680c1a5247d": 1
+  },
+  "src/modules/library/search/services/search.facade.ts": {
+    "e7e5373164d2a59b": 1
+  },
+  "src/modules/library/search/services/search.service.ts": {
+    "61f29ff53d13220e": 1
+  },
+  "src/modules/pages/export-import/export-import.controller.ts": {
+    "f30749b549ddea54": 1
+  },
+  "src/modules/project/archive/archive.service.ts": {
+    "893bb40a9cf58368": 2
+  },
+  "src/modules/project/core/core.repository.ts": {
+    "98f79a684814c864": 1
+  },
+  "src/modules/project/core/core.service.ts": {
+    "893bb40a9cf58368": 4
+  },
+  "src/modules/project/member/member.service.ts": {
+    "893bb40a9cf58368": 5
+  },
+  "src/modules/project/state/state.service.ts": {
+    "893bb40a9cf58368": 6
+  },
+  "src/modules/project/work-item/comment/comment.service.ts": {
+    "30ead35d98c2627f": 1,
+    "88a9393527c2f11e": 1,
+    "cdcf742f55292b88": 1
+  },
+  "src/modules/project/work-item/core/core.service.ts": {
+    "3ac0503171ba0728": 1,
+    "de2d8b9af481e11c": 1
+  },
+  "src/modules/project/work-item/core/handlers/bulk.handler.ts": {
+    "62951771fdebbb34": 1
+  },
+  "src/modules/project/work-item/core/utils/core.util.ts": {
+    "3ec84d56e40e5759": 1
+  },
+  "src/modules/project/work-item/relation/relation.service.ts": {
+    "cea0650869b16a58": 1
+  },
+  "src/modules/realtime/channels/pages/bridge.ts": {
+    "62019d5634460639": 1,
+    "b9196922a4ad2807": 1
+  },
+  "src/modules/realtime/channels/pages/session.ts": {
+    "62019d5634460639": 1
+  },
+  "src/modules/realtime/channels/pages/yjs/sync.ts": {
+    "61f29ff53d13220e": 3
+  }
+}

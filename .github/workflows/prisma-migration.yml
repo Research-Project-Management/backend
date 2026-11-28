@@ -1,0 +1,70 @@
+name: Database Migration Gate (Prisma)
+
+on:
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "prisma/**"
+      - "prisma.config.ts"
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "prisma/**"
+      - "prisma.config.ts"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prisma-migrate-deploy:
+    name: Validate & Deploy Migrations from Scratch
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: flux_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm exec prisma validate
+
+      - name: Deploy migrations from scratch
+        run: pnpm exec prisma migrate deploy
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/flux_ci_test?schema=public
+          DIRECT_URL: postgres://postgres:password@localhost:5432/flux_ci_test?schema=public
+
+      - name: Generate Prisma Client
+        run: pnpm exec prisma generate

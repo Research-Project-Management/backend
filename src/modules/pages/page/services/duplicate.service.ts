@@ -17,12 +17,14 @@ import {
   NodePathVo,
   ensureCanonicalPageId,
   getRecordSpaceId,
-  hydratePageDocLines,
   isRecordDeleted,
   resolveActiveProjectId,
 } from '@/modules/pages/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+import {
+  DocstoreService,
+  ScopeRepository,
+  hydratePageDocLines,
+} from '@/modules/pages/docstore';
 
 interface DuplicatePageSourceInput {
   spaceId: string;

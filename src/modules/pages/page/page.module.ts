@@ -4,11 +4,12 @@
  * files, trash/restore, duplication, labels, scaffolding, and cleanup).
  */
 
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { FilesModule } from '@/modules/files/files.module';
 import { FilestoreModule } from '@/modules/pages/filestore';
-import { DocstoreModule } from '../docstore/docstore.module';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { DocController } from './doc.controller';
 import { PageController } from './page.controller';
 import { PageRepository } from './page.repository';
 import { PageContentService } from './services/content.service';
@@ -26,9 +27,9 @@ import { CleanupListener } from './listeners/cleanup.listener';
     PrismaModule,
     FilesModule,
     FilestoreModule,
-    forwardRef(() => DocstoreModule),
+    DocstoreModule,
   ],
-  controllers: [PageController],
+  controllers: [PageController, DocController],
   providers: [
     PageRepository,
     PageQueryService,

@@ -1,0 +1,15 @@
+{
+  "minTokens": 60,
+  "minLines": 6,
+  "mode": "mild",
+  "format": ["typescript"],
+  "pattern": "src/**/*.ts",
+  "ignore": ["**/*.spec.ts", "**/*.test.ts", "**/*.d.ts", "dist/**"],
+  "ignorePattern": [
+    "(?s)/\\* jscpd:ignore-start \\*/.*?/\\* jscpd:ignore-end \\*/"
+  ],
+  "reporters": ["console"],
+  "threshold": 2.2,
+  "noColors": true,
+  "noTips": true
+}

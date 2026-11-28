@@ -1,0 +1,56 @@
+{
+  "src/core/core.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/core/infrastructure/database/prisma.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/core/infrastructure/redis/redis.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/core/infrastructure/resource/resource.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/core/logger/logger.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/identity/identity.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/library/catalog/catalog.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/library/citation/citation.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/library/extraction/extraction.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/library/ingestion/ingestion.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/library/search/search.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/library/sync/sync.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/pages/core/core.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/project/access/access.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/realtime/adapters/server.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/realtime/client/module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/realtime/realtime.module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  },
+  "src/modules/realtime/server/module.ts": {
+    "2e7cc3c45e0ed90e": 1
+  }
+}

@@ -25,13 +25,12 @@ import {
   ensureCanonicalPageId,
   ensurePrismaFolderChain,
   getRecordSpaceId,
-  hydratePageDocLines,
   isPrismaUniqueConstraintError,
   isRecordDeleted,
   resolveActiveProjectId,
   resolveProjectIdByEntityId,
 } from '@/modules/pages/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { DocstoreService, hydratePageDocLines } from '@/modules/pages/docstore';
 import {
   type CreatePageFileParams,
   type ImportFromProjectParams,

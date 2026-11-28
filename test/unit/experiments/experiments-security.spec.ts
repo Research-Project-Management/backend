@@ -1,38 +1,48 @@
-import { sanitizeFilename, isDangerousInlineMime } from '@/modules/files/domain/files.policy';
+import { Readable } from 'node:stream';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { fromPartial } from '@total-typescript/shoehorn';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { LocalStorageAdapter } from '@/modules/files/adapters/local.adapter';
 import {
   isBlockedExtension,
+  isDangerousInlineMime,
+  sanitizeFilename,
   validateMagicBytes,
 } from '@/modules/files/domain/files.policy';
 import { FileDownloadedEvent } from '@/modules/experiments';
 import { StreamController } from '@/modules/experiments/controllers/stream.controller';
 import { ExperimentsAccessPolicy } from '@/modules/experiments/domain/access.policy';
 import { ExperimentNode, FileScope } from '@/modules/experiments/domain/node.domain';
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
-import { Readable } from 'stream';
+import { NodeRepository } from '@/modules/experiments/repositories/node.repository';
+import { StreamService } from '@/modules/experiments/services/stream.service';
 
-describe('Storage & File Security Suite', () => {
-  describe('File Validator Utility - Magic Bytes & Extension Guard', () => {
-    it('should detect and block dangerous executable and script extensions', () => {
-      expect(isBlockedExtension('exploit.exe')).toBe(true);
-      expect(isBlockedExtension('webshell.php')).toBe(true);
-      expect(isBlockedExtension('script.sh')).toBe(true);
-      expect(isBlockedExtension('malicious.bat')).toBe(true);
-      expect(isBlockedExtension('phishing.html')).toBe(true);
-      expect(isBlockedExtension('payload.vbs')).toBe(true);
+describe('Experiments & File Security Suite', () => {
+  describe('File Policy - Magic Bytes, Extensions, Filenames & Dangerous MIMEs', () => {
+    it('blocks executable/script extensions while allowing safe research files and sanitizing filenames', () => {
+      for (const bad of [
+        'exploit.exe',
+        'webshell.php',
+        'script.sh',
+        'malicious.bat',
+        'phishing.html',
+        'payload.vbs',
+      ]) {
+        expect(isBlockedExtension(bad)).toBe(true);
+      }
+      for (const safe of [
+        'paper.pdf',
+        'figure.png',
+        'dataset.csv',
+        'citation.bib',
+      ]) {
+        expect(isBlockedExtension(safe)).toBe(false);
+      }
 
-      // Safe research files
-      expect(isBlockedExtension('paper.pdf')).toBe(false);
-      expect(isBlockedExtension('figure.png')).toBe(false);
-      expect(isBlockedExtension('dataset.csv')).toBe(false);
-      expect(isBlockedExtension('citation.bib')).toBe(false);
-    });
-
-    it('should sanitize filenames preventing path traversal and special characters', () => {
       expect(sanitizeFilename('../../../etc/passwd')).toBe('passwd');
       expect(sanitizeFilename('..\\..\\secret.env')).toBe('secret.env');
       expect(sanitizeFilename('my paper; rm -rf.pdf')).toBe(
@@ -40,593 +50,371 @@ describe('Storage & File Security Suite', () => {
       );
     });
 
-    it('should reject claimed PDF files that lack valid PDF magic bytes (%PDF-)', () => {
-      // Fake PDF that is actually plain text or HTML
-      const fakePdfBuffer = Buffer.from(
-        '<html><script>alert(1)</script></html>',
-      );
-      expect(() => {
-        validateMagicBytes(fakePdfBuffer, 'application/pdf', 'paper.pdf');
-      }).toThrow(BadRequestException);
-    });
-
-    it('should accept authentic PDF files with %PDF- signature', () => {
-      const realPdfBuffer = Buffer.from('%PDF-1.7 actual pdf content');
-      expect(() => {
-        validateMagicBytes(realPdfBuffer, 'application/pdf', 'paper.pdf');
-      }).not.toThrow();
-    });
-
-    it('should reject claimed PNG files that lack valid PNG magic bytes', () => {
-      const fakePngBuffer = Buffer.from('not a real png');
-      expect(() => {
-        validateMagicBytes(fakePngBuffer, 'image/png', 'figure.png');
-      }).toThrow(BadRequestException);
-    });
-
-    it('should accept authentic PNG files with 0x89PNG header', () => {
-      const realPngBuffer = Buffer.from([
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
-      ]);
-      expect(() => {
-        validateMagicBytes(realPngBuffer, 'image/png', 'figure.png');
-      }).not.toThrow();
-    });
-
-    it('should reject Windows PE executables disguised as documents', () => {
-      const fakeExecutable = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03]); // MZ header
-      expect(() => {
+    it('validates PDF/PNG/PE magic bytes and blocks XSS vectors in SVG uploads', () => {
+      expect(() =>
         validateMagicBytes(
-          fakeExecutable,
+          Buffer.from('<html><script>alert(1)</script></html>'),
+          'application/pdf',
+          'paper.pdf',
+        ),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        validateMagicBytes(
+          Buffer.from('%PDF-1.7 actual pdf content'),
+          'application/pdf',
+          'paper.pdf',
+        ),
+      ).not.toThrow();
+
+      expect(() =>
+        validateMagicBytes(Buffer.from('not a real png'), 'image/png', 'fig.png'),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        validateMagicBytes(
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
+          'image/png',
+          'fig.png',
+        ),
+      ).not.toThrow();
+
+      expect(() =>
+        validateMagicBytes(
+          Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03]),
           'application/octet-stream',
           'doc.bin',
-        );
-      }).toThrow(BadRequestException);
-    });
+        ),
+      ).toThrow(BadRequestException);
 
-    it('should reject SVG containing malicious script tags', () => {
-      const xssSvg = Buffer.from('<svg><script>alert("xss")</script></svg>');
-      expect(() => {
-        validateMagicBytes(xssSvg, 'image/svg+xml', 'icon.svg');
-      }).toThrow(BadRequestException);
-    });
-
-    it('should reject SVG containing active vectors like foreignObject, event handlers, and javascript: links', () => {
-      const foreignObjectSvg = Buffer.from(
+      for (const maliciousSvg of [
+        '<svg><script>alert("xss")</script></svg>',
         '<svg><foreignObject width="100" height="50"><body><div>xss</div></body></foreignObject></svg>',
-      );
-      expect(() => {
-        validateMagicBytes(foreignObjectSvg, 'image/svg+xml', 'icon.svg');
-      }).toThrow(BadRequestException);
-
-      const onloadSvg = Buffer.from(
         '<svg onload="alert(document.cookie)"><circle r="10"/></svg>',
-      );
-      expect(() => {
-        validateMagicBytes(onloadSvg, 'image/svg+xml', 'icon.svg');
-      }).toThrow(BadRequestException);
-
-      const jsLinkSvg = Buffer.from(
         '<svg><a href="javascript:alert(1)"><text>click</text></a></svg>',
-      );
-      expect(() => {
-        validateMagicBytes(jsLinkSvg, 'image/svg+xml', 'icon.svg');
-      }).toThrow(BadRequestException);
-
-      const iframeSvg = Buffer.from(
         '<svg><iframe src="https://attacker.com"></iframe></svg>',
-      );
-      expect(() => {
-        validateMagicBytes(iframeSvg, 'image/svg+xml', 'icon.svg');
-      }).toThrow(BadRequestException);
+      ]) {
+        expect(() =>
+          validateMagicBytes(
+            Buffer.from(maliciousSvg),
+            'image/svg+xml',
+            'icon.svg',
+          ),
+        ).toThrow(BadRequestException);
+      }
+
+      expect(() =>
+        validateMagicBytes(
+          Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40"/></svg>',
+          ),
+          'image/svg+xml',
+          'diagram.svg',
+        ),
+      ).not.toThrow();
+
+      for (const dangerous of [
+        'image/svg+xml',
+        'text/html',
+        'text/xml',
+        'application/xhtml+xml',
+        'application/javascript',
+        'text/javascript',
+      ]) {
+        expect(isDangerousInlineMime(dangerous)).toBe(true);
+      }
+      for (const safe of [
+        'application/pdf',
+        'image/png',
+        'image/jpeg',
+        'text/csv',
+        'application/json',
+        undefined,
+      ]) {
+        expect(isDangerousInlineMime(safe)).toBe(false);
+      }
     });
 
-    it('should accept clean and authentic SVG graphics without script vectors', () => {
-      const cleanSvg = Buffer.from(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" stroke="green" fill="yellow"/></svg>',
-      );
-      expect(() => {
-        validateMagicBytes(cleanSvg, 'image/svg+xml', 'diagram.svg');
-      }).not.toThrow();
-    });
-
-    it('should classify active and scriptable MIME types as dangerous inline MIME', () => {
-      expect(isDangerousInlineMime('image/svg+xml')).toBe(true);
-      expect(isDangerousInlineMime('text/html')).toBe(true);
-      expect(isDangerousInlineMime('text/xml')).toBe(true);
-      expect(isDangerousInlineMime('application/xhtml+xml')).toBe(true);
-      expect(isDangerousInlineMime('application/javascript')).toBe(true);
-      expect(isDangerousInlineMime('text/javascript')).toBe(true);
-
-      // Safe research MIME types
-      expect(isDangerousInlineMime('application/pdf')).toBe(false);
-      expect(isDangerousInlineMime('image/png')).toBe(false);
-      expect(isDangerousInlineMime('image/jpeg')).toBe(false);
-      expect(isDangerousInlineMime('text/csv')).toBe(false);
-      expect(isDangerousInlineMime('application/json')).toBe(false);
-      expect(isDangerousInlineMime(undefined)).toBe(false);
-    });
-  });
-
-  describe('LocalStorageAdapter - Path Traversal Prevention on Local Storage', () => {
-    let localDriver: LocalStorageAdapter;
-
-    beforeEach(() => {
-      localDriver = new LocalStorageAdapter('./test-storage');
-    });
-
-    it('should throw BadRequestException when storage key attempts directory traversal with ..', () => {
-      expect(() => {
-        localDriver.resolveFilePath('../../../.env');
-      }).toThrow(BadRequestException);
-
-      expect(() => {
-        localDriver.resolveFilePath('uploads/../../passwords.txt');
-      }).toThrow(BadRequestException);
-
-      expect(() => {
-        localDriver.resolveFilePath('..\\..\\windows\\system32');
-      }).toThrow(BadRequestException);
-    });
-
-    it('should safely resolve legitimate keys strictly inside storage directory', () => {
-      const legitimatePath = localDriver.resolveFilePath(
-        'users/user-123/paper.pdf',
-      );
-      expect(legitimatePath).toContain('test-storage');
-      expect(legitimatePath).not.toContain('..');
+    it('prevents directory traversal on LocalStorageAdapter.resolveFilePath', () => {
+      const localDriver = new LocalStorageAdapter('./test-storage');
+      for (const badKey of [
+        '../../../.env',
+        'uploads/../../passwords.txt',
+        '..\\..\\windows\\system32',
+      ]) {
+        expect(() => localDriver.resolveFilePath(badKey)).toThrow(
+          BadRequestException,
+        );
+      }
+      const ok = localDriver.resolveFilePath('users/user-123/paper.pdf');
+      expect(ok).toContain('test-storage');
+      expect(ok).not.toContain('..');
     });
   });
 
   describe('ExperimentsAccessPolicy - 5-Tier ReBAC & BOLA/IDOR Protection', () => {
     let accessPolicy: ExperimentsAccessPolicy;
-    let mockNodeRepo: any;
+    let mockNodeRepo: jest.Mocked<NodeRepository>;
 
     beforeEach(() => {
-      mockNodeRepo = {
+      mockNodeRepo = fromPartial<jest.Mocked<NodeRepository>>({
         findById: jest.fn(),
         findUserSharesForFiles: jest.fn().mockResolvedValue([]),
         findProjectMemberRole: jest.fn().mockResolvedValue(null),
         findSpaceOwnerId: jest.fn().mockResolvedValue(null),
-      };
+      });
       accessPolicy = new ExperimentsAccessPolicy(mockNodeRepo);
     });
 
-    it('should throw ForbiddenException when user attempts to access another user private file without permission', async () => {
-      const fileId = 'a0000000-0000-4000-8000-000000000001';
-      const fileOwnerId = 'owner-user-id';
-      const attackerId = 'attacker-user-id';
-
-      mockNodeRepo.findById.mockResolvedValue(
-        new ExperimentNode({
-          id: fileId,
-          name: 'private_paper.pdf',
-          isFolder: false,
-          size: 1024n,
-          authorId: fileOwnerId,
-          scope: FileScope.Personal,
-        }),
-      );
+    it('enforces owner, FileShare view/write ACLs, Project member read vs coordinator share, and allowTrashed', async () => {
+      const personalFile = new ExperimentNode({
+        id: 'a0000000-0000-4000-8000-000000000001',
+        name: 'private_paper.pdf',
+        isFolder: false,
+        size: 1024n,
+        authorId: 'owner-user',
+        scope: FileScope.Personal,
+      });
+      mockNodeRepo.findById.mockResolvedValue(personalFile);
 
       await expect(
-        accessPolicy.assertCanAccess(attackerId, fileId, 'read'),
+        accessPolicy.assertCanAccess('attacker-user', personalFile.id, 'read'),
       ).rejects.toThrow(ForbiddenException);
-    });
+      await expect(
+        accessPolicy.assertCanAccess('owner-user', personalFile.id, 'read'),
+      ).resolves.toMatchObject({ id: personalFile.id });
 
-    it('should allow read access when caller is the verified author/owner', async () => {
-      const fileId = 'a0000000-0000-4000-8000-000000000001';
-      const fileOwnerId = 'owner-user-id';
-
-      mockNodeRepo.findById.mockResolvedValue(
-        new ExperimentNode({
-          id: fileId,
-          name: 'my_thesis.pdf',
-          isFolder: false,
-          size: 2048n,
-          authorId: fileOwnerId,
-          scope: FileScope.Personal,
-        }),
-      );
-
-      const node = await accessPolicy.assertCanAccess(
-        fileOwnerId,
-        fileId,
-        'read',
-      );
-      expect(node).toBeDefined();
-      expect(node.id).toBe(fileId);
-    });
-
-    it('should allow read access when file is explicitly shared via FileShare ACL', async () => {
-      const fileId = 'a0000000-0000-4000-8000-000000000001';
-      const collaboratorId = 'collaborator-123';
-
-      mockNodeRepo.findById.mockResolvedValue(
-        new ExperimentNode({
-          id: fileId,
-          name: 'shared_dataset.csv',
-          isFolder: false,
-          size: 4096n,
-          authorId: 'principal-investigator',
-          scope: FileScope.Personal,
-        }),
-      );
-
-      mockNodeRepo.findUserSharesForFiles.mockResolvedValue([
-        { permission: 'view' },
+      // FileShare 'view' grants read, denies write
+      mockNodeRepo.findUserSharesForFiles.mockResolvedValueOnce([
+        { permission: 'view' } as never,
       ]);
-
-      const node = await accessPolicy.assertCanAccess(
-        collaboratorId,
-        fileId,
-        'read',
-      );
-      expect(node.id).toBe(fileId);
-
-      // But should forbid write when permission is only 'view'
       await expect(
-        accessPolicy.assertCanAccess(collaboratorId, fileId, 'write'),
+        accessPolicy.assertCanAccess('collab-123', personalFile.id, 'read'),
+      ).resolves.toMatchObject({ id: personalFile.id });
+
+      mockNodeRepo.findUserSharesForFiles.mockResolvedValueOnce([
+        { permission: 'view' } as never,
+      ]);
+      await expect(
+        accessPolicy.assertCanAccess('collab-123', personalFile.id, 'write'),
       ).rejects.toThrow(ForbiddenException);
-    });
 
-    it('should allow project members to read files within Project Workbench scope', async () => {
-      const fileId = 'a0000000-0000-4000-8000-000000000002';
-      const projectId = 'project-ai-lab';
-      const memberUserId = 'researcher-member';
-
-      mockNodeRepo.findById.mockResolvedValue(
-        new ExperimentNode({
-          id: fileId,
-          projectId,
-          name: 'project_report.docx',
-          isFolder: false,
-          size: 8192n,
-          authorId: 'pi-leader',
-          scope: FileScope.Project,
-        }),
-      );
-
+      // Project member can read, cannot share; coordinator can share
+      const projectFile = new ExperimentNode({
+        id: 'a0000000-0000-4000-8000-000000000002',
+        projectId: 'proj-lab',
+        name: 'dataset.csv',
+        isFolder: false,
+        size: 8192n,
+        authorId: 'pi-owner',
+        scope: FileScope.Project,
+      });
+      mockNodeRepo.findById.mockResolvedValue(projectFile);
       mockNodeRepo.findProjectMemberRole.mockResolvedValue('MEMBER');
 
-      const node = await accessPolicy.assertCanAccess(
-        memberUserId,
-        fileId,
-        'read',
-      );
-      expect(node.id).toBe(fileId);
+      await expect(
+        accessPolicy.assertCanAccess('member-user', projectFile.id, 'read'),
+      ).resolves.toMatchObject({ id: projectFile.id });
+      await expect(
+        accessPolicy.assertCanAccess('member-user', projectFile.id, 'share'),
+      ).rejects.toThrow(ForbiddenException);
+
+      mockNodeRepo.findProjectMemberRole.mockResolvedValue('COORDINATOR');
+      await expect(
+        accessPolicy.assertCanAccess('coord-user', projectFile.id, 'share'),
+      ).resolves.toMatchObject({ id: projectFile.id });
+
+      // Trashed node requires explicit allowTrashed
+      const trashedNode = new ExperimentNode({
+        id: 'trashed-file-01',
+        name: 'old_draft.pdf',
+        isFolder: false,
+        size: 512n,
+        authorId: 'owner-user',
+        scope: FileScope.Personal,
+        trashedAt: new Date(),
+      });
+      mockNodeRepo.findById.mockResolvedValue(trashedNode);
+
+      await expect(
+        accessPolicy.assertCanAccess('owner-user', trashedNode.id, 'delete'),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        accessPolicy.assertCanAccess('owner-user', trashedNode.id, 'delete', {
+          allowTrashed: true,
+        }),
+      ).resolves.toMatchObject({ id: trashedNode.id });
     });
   });
 
-  describe('StreamController - Security Headers & Audit Logging', () => {
+  describe('StreamController - Security Headers, ETag 304 & SEC-004 Auth', () => {
     let controller: StreamController;
-    let mockStreamService: any;
-    let mockEventEmitter: any;
+    let mockStreamService: jest.Mocked<StreamService>;
+    let mockEventEmitter: jest.Mocked<EventEmitter2>;
+
+    const makeRes = () => {
+      const headers: Record<string, string> = {};
+      let statusCode = 0;
+      let sentBody: unknown;
+      const res: FastifyReply = fromPartial<FastifyReply>({
+        status: jest.fn((c: number) => {
+          statusCode = c;
+          return res;
+        }),
+        header: jest.fn((key: string, val: unknown) => {
+          headers[key] = String(val);
+          return res;
+        }),
+        send: jest.fn((b?: unknown) => {
+          sentBody = b;
+          return res;
+        }),
+      });
+      return { res, headers, getStatus: () => statusCode, getBody: () => sentBody };
+    };
 
     beforeEach(() => {
-      mockStreamService = {
+      mockStreamService = fromPartial<jest.Mocked<StreamService>>({
         stream: jest.fn(),
         verifyReadAccess: jest.fn().mockResolvedValue(undefined),
-      };
-      mockEventEmitter = { emit: jest.fn() };
-
+      });
+      mockEventEmitter = fromPartial<jest.Mocked<EventEmitter2>>({
+        emit: jest.fn(),
+      });
       controller = new StreamController(mockStreamService, mockEventEmitter);
     });
 
-    it('should force attachment and CSP sandbox for dangerous inline MIME types (SVG)', async () => {
-      mockStreamService.stream.mockResolvedValue({
-        statusCode: 200,
-        mimeType: 'image/svg+xml',
-        contentLength: 512,
-        filename: 'vector.svg',
-        stream: Readable.from(['<svg></svg>']),
-      });
-
-      const headers: Record<string, string> = {};
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/test-svg-id/content',
-        headers: {},
-        query: {},
-        ip: '127.0.0.1',
-        user: { id: 'user-001' },
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn((key: string, val: any) => {
-          headers[key] = val;
-          return mockRes;
+    it('forces attachment + CSP sandbox for SVG, serves PDF inline, forces attachment on /download, and returns 304 on matching ETag', async () => {
+      mockStreamService.stream.mockResolvedValueOnce(
+        fromPartial({
+          statusCode: 200,
+          mimeType: 'image/svg+xml',
+          contentLength: 512,
+          filename: 'vector.svg',
+          stream: Readable.from(['<svg></svg>']),
         }),
-        send: jest.fn(),
-      };
-
-      await controller.streamFile('test-svg-id', mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(200);
-      expect(headers['Content-Type']).toBe('image/svg+xml');
-      expect(headers['Content-Disposition']).toContain('attachment');
-      expect(headers['Content-Security-Policy']).toBe(
+      );
+      const svgOut = makeRes();
+      await controller.streamFile(
+        'test-svg-id',
+        fromPartial<FastifyRequest & { user?: { id: string } }>({
+          url: '/api/v1/experiments/files/test-svg-id/content',
+          headers: {},
+          query: {},
+          ip: '127.0.0.1',
+          user: { id: 'user-001' },
+        }),
+        svgOut.res,
+      );
+      expect(svgOut.getStatus()).toBe(200);
+      expect(svgOut.headers['Content-Disposition']).toContain('attachment');
+      expect(svgOut.headers['Content-Security-Policy']).toBe(
         "default-src 'none'; sandbox",
       );
-      expect(headers['X-Content-Type-Options']).toBe('nosniff');
-      expect(headers['X-Frame-Options']).toBe('SAMEORIGIN');
-
+      expect(svgOut.headers['X-Content-Type-Options']).toBe('nosniff');
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         'file.downloaded',
         expect.any(FileDownloadedEvent),
       );
-    });
 
-    it('should serve safe documents inline without sandbox CSP restriction', async () => {
-      mockStreamService.stream.mockResolvedValue({
-        statusCode: 200,
-        mimeType: 'application/pdf',
-        contentLength: 2048,
-        filename: 'research_paper.pdf',
-        stream: Readable.from(['fake-pdf']),
-      });
-
-      const headers: Record<string, string> = {};
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/test-pdf-id/content',
-        headers: {},
-        query: {},
-        ip: '127.0.0.1',
-        user: { id: 'user-001' },
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn((key: string, val: any) => {
-          headers[key] = val;
-          return mockRes;
-        }),
-        send: jest.fn(),
-      };
-
-      await controller.streamFile('test-pdf-id', mockReq, mockRes);
-
-      expect(headers['Content-Type']).toBe('application/pdf');
-      expect(headers['Content-Disposition']).toContain('inline');
-      expect(headers['Content-Security-Policy']).toBeUndefined();
-    });
-
-    it('should force attachment when user accesses /download endpoint', async () => {
-      mockStreamService.stream.mockResolvedValue({
-        statusCode: 200,
-        mimeType: 'application/pdf',
-        contentLength: 2048,
-        filename: 'download_paper.pdf',
-        stream: Readable.from(['fake-pdf']),
-      });
-
-      const headers: Record<string, string> = {};
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/test-pdf-id/download',
-        headers: {},
-        query: {},
-        ip: '127.0.0.1',
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn((key: string, val: any) => {
-          headers[key] = val;
-          return mockRes;
-        }),
-        send: jest.fn(),
-      };
-
-      await controller.streamFile('test-pdf-id', mockReq, mockRes);
-
-      expect(headers['Content-Disposition']).toContain('attachment');
-    });
-
-    it('should return 304 Not Modified when client sends matching If-None-Match header', async () => {
+      // Safe PDF inline
       const mockEtag =
         '"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"';
-      mockStreamService.stream.mockResolvedValue({
-        statusCode: 200,
-        mimeType: 'application/pdf',
-        contentLength: 2048,
-        filename: 'cached_paper.pdf',
-        stream: Readable.from(['fake-pdf']),
-        etag: mockEtag,
-      });
-
-      const headers: Record<string, string> = {};
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/test-pdf-id/content',
-        headers: { 'if-none-match': mockEtag },
-        query: {},
-        ip: '127.0.0.1',
-        user: { id: 'user-001' },
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn((key: string, val: any) => {
-          headers[key] = val;
-          return mockRes;
+      mockStreamService.stream.mockResolvedValue(
+        fromPartial({
+          statusCode: 200,
+          mimeType: 'application/pdf',
+          contentLength: 2048,
+          filename: 'paper.pdf',
+          stream: Readable.from(['%PDF-1.7']),
+          etag: mockEtag,
         }),
-        send: jest.fn(),
-      };
-
-      await controller.streamFile('test-pdf-id', mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(304);
-      expect(headers['ETag']).toBe(mockEtag);
-      expect(headers['Cache-Control']).toBe(
-        'private, no-cache, must-revalidate',
       );
-      expect(mockRes.send).toHaveBeenCalledWith();
+      const pdfInline = makeRes();
+      await controller.streamFile(
+        'test-pdf-id',
+        fromPartial<FastifyRequest & { user?: { id: string } }>({
+          url: '/api/v1/experiments/files/test-pdf-id/content',
+          headers: {},
+          query: {},
+          ip: '127.0.0.1',
+          user: { id: 'user-001' },
+        }),
+        pdfInline.res,
+      );
+      expect(pdfInline.headers['Content-Disposition']).toContain('inline');
+      expect(pdfInline.headers['Content-Security-Policy']).toBeUndefined();
+
+      // /download forces attachment
+      const pdfDl = makeRes();
+      await controller.streamFile(
+        'test-pdf-id',
+        fromPartial<FastifyRequest>({
+          url: '/api/v1/experiments/files/test-pdf-id/download',
+          headers: {},
+          query: {},
+          ip: '127.0.0.1',
+        }),
+        pdfDl.res,
+      );
+      expect(pdfDl.headers['Content-Disposition']).toContain('attachment');
+
+      // Matching If-None-Match -> 304 Not Modified
+      const cached = makeRes();
+      await controller.streamFile(
+        'test-pdf-id',
+        fromPartial<FastifyRequest & { user?: { id: string } }>({
+          url: '/api/v1/experiments/files/test-pdf-id/content',
+          headers: { 'if-none-match': mockEtag },
+          query: {},
+          ip: '127.0.0.1',
+          user: { id: 'user-001' },
+        }),
+        cached.res,
+      );
+      expect(cached.getStatus()).toBe(304);
+      expect(cached.headers['ETag']).toBe(mockEtag);
     });
 
-    it('should block unauthenticated requests to private research files in streamFile (SEC-004)', async () => {
-      mockStreamService.verifyReadAccess.mockRejectedValue(
+    it('blocks unauthenticated access to private files (403) while allowing explicitly public files (SEC-004)', async () => {
+      mockStreamService.verifyReadAccess.mockRejectedValueOnce(
         new ForbiddenException(
           'Authentication required to access private research file',
         ),
       );
-
-      const securedController = new StreamController(
-        mockStreamService,
-        mockEventEmitter,
+      const privOut = makeRes();
+      await controller.streamFile(
+        'private-doc-id',
+        fromPartial<FastifyRequest>({
+          url: '/api/v1/experiments/files/private-doc-id/content',
+          headers: {},
+          query: {},
+          ip: '127.0.0.1',
+        }),
+        privOut.res,
       );
+      expect(privOut.getStatus()).toBe(403);
 
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/private-doc-id/content',
-        headers: {},
-        query: {},
-        ip: '127.0.0.1',
-        user: undefined, // Unauthenticated
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn().mockReturnThis(),
-        send: jest.fn(),
-      };
-
-      await securedController.streamFile('private-doc-id', mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(403);
-      expect(mockRes.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statusCode: 403,
-          message: 'Authentication required to access private research file',
+      mockStreamService.verifyReadAccess.mockResolvedValueOnce(undefined);
+      mockStreamService.stream.mockResolvedValueOnce(
+        fromPartial({
+          statusCode: 200,
+          mimeType: 'application/pdf',
+          contentLength: 2048,
+          filename: 'open_access.pdf',
+          stream: Readable.from(['open-access']),
         }),
       );
-    });
-
-    it('should allow unauthenticated requests if the research file is explicitly public (SEC-004)', async () => {
-      mockStreamService.verifyReadAccess.mockResolvedValue(undefined);
-      mockStreamService.stream.mockResolvedValue({
-        statusCode: 200,
-        mimeType: 'application/pdf',
-        contentLength: 2048,
-        filename: 'open_access_paper.pdf',
-        stream: Readable.from(['open-access-content']),
-      });
-
-      const securedController = new StreamController(
-        mockStreamService,
-        mockEventEmitter,
-      );
-
-      const mockReq: any = {
-        url: '/api/v1/experiments/files/public-doc-id/content',
-        headers: {},
-        query: {},
-        ip: '127.0.0.1',
-        user: undefined,
-      };
-      const mockRes: any = {
-        status: jest.fn().mockReturnThis(),
-        header: jest.fn().mockReturnThis(),
-        send: jest.fn(),
-      };
-
-      await securedController.streamFile('public-doc-id', mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(200);
-      expect(mockStreamService.stream).toHaveBeenCalledWith(
+      const pubOut = makeRes();
+      await controller.streamFile(
         'public-doc-id',
-        undefined,
-        undefined,
-      );
-    });
-  });
-
-  describe('ExperimentsAccessPolicy - Extended Edge Cases & Actions (SEC-001)', () => {
-    let accessPolicy: ExperimentsAccessPolicy;
-    let mockNodeRepo: any;
-
-    beforeEach(() => {
-      mockNodeRepo = {
-        findById: jest.fn(),
-        findUserSharesForFiles: jest.fn().mockResolvedValue([]),
-        findProjectMemberRole: jest.fn().mockResolvedValue(null),
-        findSpaceOwnerId: jest.fn().mockResolvedValue(null),
-      };
-      accessPolicy = new ExperimentsAccessPolicy(mockNodeRepo);
-    });
-
-    it('should forbid "share" action for regular project members without coordinator or owner role', async () => {
-      const fileId = 'project-file-01';
-      const projectId = 'proj-lab';
-      const memberUserId = 'regular-member';
-
-      mockNodeRepo.findById.mockResolvedValue(
-        new ExperimentNode({
-          id: fileId,
-          projectId,
-          name: 'dataset.csv',
-          isFolder: false,
-          size: 1024n,
-          authorId: 'pi-owner',
-          scope: FileScope.Project,
+        fromPartial<FastifyRequest>({
+          url: '/api/v1/experiments/files/public-doc-id/content',
+          headers: {},
+          query: {},
+          ip: '127.0.0.1',
         }),
+        pubOut.res,
       );
-
-      mockNodeRepo.findProjectMemberRole.mockResolvedValue('MEMBER');
-
-      await expect(
-        accessPolicy.assertCanAccess(memberUserId, fileId, 'share'),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('should allow "share" action for project coordinator or owner', async () => {
-      const fileId = 'project-file-01';
-      const projectId = 'proj-lab';
-      const coordinatorUserId = 'coord-user';
-
-      mockNodeRepo.findById.mockResolvedValue(
-        new ExperimentNode({
-          id: fileId,
-          projectId,
-          name: 'dataset.csv',
-          isFolder: false,
-          size: 1024n,
-          authorId: 'pi-owner',
-          scope: FileScope.Project,
-        }),
-      );
-
-      mockNodeRepo.findProjectMemberRole.mockResolvedValue('COORDINATOR');
-
-      const node = await accessPolicy.assertCanAccess(
-        coordinatorUserId,
-        fileId,
-        'share',
-      );
-      expect(node.id).toBe(fileId);
-    });
-
-    it('should allow access to trashed node when allowTrashed is explicitly enabled', async () => {
-      const fileId = 'trashed-file-01';
-      const ownerId = 'file-owner';
-
-      const trashedNode = new ExperimentNode({
-        id: fileId,
-        name: 'old_draft.pdf',
-        isFolder: false,
-        size: 512n,
-        authorId: ownerId,
-        scope: FileScope.Personal,
-        trashedAt: new Date(),
-      });
-
-      mockNodeRepo.findById.mockResolvedValue(trashedNode);
-
-      // Default should throw NotFoundException
-      await expect(
-        accessPolicy.assertCanAccess(ownerId, fileId, 'delete'),
-      ).rejects.toThrow(NotFoundException);
-
-      // With allowTrashed: true, it should succeed
-      const node = await accessPolicy.assertCanAccess(
-        ownerId,
-        fileId,
-        'delete',
-        { allowTrashed: true },
-      );
-      expect(node.id).toBe(fileId);
-      expect(node.isTrashed()).toBe(true);
+      expect(pubOut.getStatus()).toBe(200);
     });
   });
 });

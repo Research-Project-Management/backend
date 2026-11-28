@@ -1,0 +1,407 @@
+{
+  "src/clsi.module.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/ai/engine/domain/stream.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/files/files.facade.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/files/services/blob.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/files/services/upload.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/identity/auth/auth.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/identity/user/user.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/integrations/integrations.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/integrations/providers/github.provider.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/domain/condition-evaluator.policy.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/domain/creator-tag.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/domain/identifier-change.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/domain/item-command.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/domain/type-conversion.policy.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/collection-members.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/collections.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/command-bulk.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/command-relations.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/command.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/notes.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/query.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/repositories/tags.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/services/collections.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/services/curation.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/services/item-query.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/services/items.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/services/relations.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/catalog/services/tags.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/citation/domain/csl-json.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/citation/domain/csl-name-extra.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/citation/services/csl-engine.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/citation/services/csl-repository.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/citation/services/csl-style-formatter.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/author.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/creator-normalizer.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/field-harmonizer.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/identifier.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/item-bibliographic.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/item-provenance.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/items.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/reconciler.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/regex.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/renamer.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/search-query.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/specification.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/text.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/text.lexicon.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/domain/title.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/ports/catalog.port.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/resilience/circuit-breaker.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/services/ssrf-guard.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/core/types/bibliographic.types.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/controllers/attachment-storage.controller.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/domain/metadata-merge.policy.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/providers/layout.extractor.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/providers/pdf-outline.extractor.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/providers/pdf-text.extractor.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/repositories/annotations.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/repositories/attachments.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/repositories/extraction.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/services/annotations.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/services/attachments.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/extraction/services/extraction.handler.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/domain/deduplication.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/domain/duplicate-merge.domain.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/domain/enrichment-patch.mapper.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/domain/metadata-validation.policy.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/domain/normalization.policy.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/parsers/bibtex-entry.builder.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/parsers/bibtex.parser.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/parsers/csl.parser.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/parsers/html-meta-tag.extractor.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/parsers/publisher-dom.extractor.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/parsers/ris-fallback.parser.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/parsers/xml-legacy-formats.parser.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/providers/crossref.provider.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/providers/openalex.provider.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/providers/pubmed.provider.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/repositories/duplicate-merge.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/repositories/feeds.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/repositories/ingestion.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/repositories/retraction.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/duplicate-detector.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/duplicate-merger.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/feeds.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/ingestion-saga.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/ingestion.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/metadata-executor.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/metadata-resolver.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/metadata.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/pipeline-batch.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/pipeline-side-effects.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/pipeline.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/retraction.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/services/url-capture.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/stages/resolve.stage.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/types/ingestion.types.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/ingestion/types/metadata.types.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/search/repositories/search-sql.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/search/repositories/search.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/search/services/search.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/sync/repositories/changelog.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/sync/repositories/outbox.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/sync/services/idempotent-consumer.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/library/sync/services/outbox.worker.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/bootstrap/editor-bootstrap.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/clsi/clsi.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/clsi/domain/log-parser/tex-log.parser.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/clsi/services/compile-source.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/clsi/services/compile.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/export-import/adapters/hydrator.adapter.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/filestore/filestore.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/filestore/filestore.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/git-bridge/services/sync.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/history/adapters/restorer.adapter.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/history/history.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/page/services/content.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/page/services/duplicate.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/page/services/query.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/page/services/trash.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/review/review.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/review/services/comments.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/pages/structure/services/node-mutation.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/access/resolvers/project-resource.resolver.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/activity/activity.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/chat/services/chat.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/core/core.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/core/core.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/work-item/attachment/attachment.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/work-item/core/core.repository.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/work-item/core/core.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/work-item/core/dto/core.dto.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/work-item/core/utils/query-builder.util.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/work-item/relation/relation.service.ts": {
+    "over-600-loc": 1
+  },
+  "src/modules/project/work-item/relation/utils/relation.util.ts": {
+    "over-600-loc": 1
+  }
+}

@@ -19,14 +19,16 @@ import {
   ensureCanonicalPageId,
   ensurePrismaFolderChain,
   getRecordSpaceId,
-  hydratePageDocLines,
   resolveActiveProjectId,
   resolveCanonicalPageId,
   resolveProjectIdByEntityId,
   resolveSpaceRootDocIds,
 } from '@/modules/pages/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+import {
+  DocstoreService,
+  ScopeRepository,
+  hydratePageDocLines,
+} from '@/modules/pages/docstore';
 
 @Injectable()
 export class PageTrashService {

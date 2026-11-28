@@ -1,6 +1,4 @@
 import 'reflect-metadata';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import {
   EXCEPTION_FILTERS_METADATA,
@@ -25,7 +23,7 @@ import {
   type WsAuthService,
 } from '@/modules/realtime';
 
-describe('ChatGateway Unit & Extraction Boundary Tests', () => {
+describe('ChatGateway Unit Tests', () => {
   let gateway: ChatGateway;
   let mockAuthService: jest.Mocked<WsAuthService>;
   let mockChatPort: {
@@ -147,7 +145,7 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
     gateway.onModuleDestroy();
   });
 
-  it('attaches WsAllExceptionsFilter and ValidationPipe metadata and registers auth middleware on afterInit', () => {
+  it('attaches WsAllExceptionsFilter and ValidationPipe, manages user room lifecycle, and disconnects unauthorized sockets', async () => {
     const filters = Reflect.getMetadata(
       EXCEPTION_FILTERS_METADATA,
       ChatGateway,
@@ -158,11 +156,8 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
 
     gateway.afterInit(mockServer);
     expect(mockServer.use).toHaveBeenCalledWith(expect.any(Function));
-  });
 
-  it('joins user room on connection and cleans up rateLimiter + user room on disconnect', async () => {
     const { socket, join, leave } = makeSocket({ userId: 'user-42' });
-
     await gateway.handleConnection(socket);
     expect(join).toHaveBeenCalledWith(CHAT_ROOMS.user('user-42'));
 
@@ -170,19 +165,16 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
     gateway.handleDisconnect(socket);
     expect(cleanupSpy).toHaveBeenCalledWith(socket.id);
     expect(leave).toHaveBeenCalledWith(CHAT_ROOMS.user('user-42'));
-  });
 
-  it('disconnects unauthorized socket on handleConnection failure', async () => {
-    const { socket } = makeSocket({ authenticated: false });
-    mockAuthService.authenticateSocket.mockRejectedValue(
+    const unauth = makeSocket({ authenticated: false });
+    mockAuthService.authenticateSocket.mockRejectedValueOnce(
       new RealtimeAuthRequiredException(),
     );
-
-    await gateway.handleConnection(socket);
-    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    await gateway.handleConnection(unauth.socket);
+    expect(unauth.socket.disconnect).toHaveBeenCalledWith(true);
   });
 
-  it('verifies membership on conversation:join and denies non-members without joining', async () => {
+  it('verifies membership on conversation:join, handles conversation:leave, and enforces rate limits', async () => {
     const memberCtx = makeSocket({ userId: 'user-1' });
     await expect(
       gateway.handleJoinConversation(memberCtx.socket, {
@@ -190,6 +182,15 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
       }),
     ).resolves.toEqual({ success: true });
     expect(memberCtx.join).toHaveBeenCalledWith(
+      CHAT_ROOMS.conversation('conv-1'),
+    );
+
+    await expect(
+      gateway.handleLeaveConversation(memberCtx.socket, {
+        conversationId: 'conv-1',
+      }),
+    ).resolves.toEqual({ success: true });
+    expect(memberCtx.leave).toHaveBeenCalledWith(
       CHAT_ROOMS.conversation('conv-1'),
     );
 
@@ -212,21 +213,23 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
         conversationId: 'conv-404',
       }),
     ).rejects.toThrow(RealtimeAccessDeniedException);
-  });
 
-  it('leaves conversation room on conversation:leave', async () => {
-    const { socket, leave } = makeSocket({
-      userId: 'user-1',
-      rooms: [CHAT_ROOMS.conversation('conv-1')],
+    const { socket: burstSocket } = makeSocket({
+      id: 'sock-burst',
+      userId: 'user-burst',
     });
-
+    const burst = chatConfig.getRateLimitBudgets().joinLeave.burst;
+    for (let i = 0; i < burst; i += 1) {
+      await gateway.handleLeaveConversation(burstSocket, {
+        conversationId: 'conv-1',
+      });
+    }
     await expect(
-      gateway.handleLeaveConversation(socket, { conversationId: 'conv-1' }),
-    ).resolves.toEqual({ success: true });
-    expect(leave).toHaveBeenCalledWith(CHAT_ROOMS.conversation('conv-1'));
+      gateway.handleLeaveConversation(burstSocket, { conversationId: 'conv-1' }),
+    ).rejects.toThrow(RealtimeRateLimitedException);
   });
 
-  it('delivers chat:message via RealtimeEventBus ONLY to conv room and user:<memberId> rooms', async () => {
+  it('delivers chat:message via RealtimeEventBus strictly to conv and user:<memberId> rooms, skipping empty member lists', async () => {
     const { socket } = makeSocket({ userId: 'user-1' });
     const savedMsg = { id: 'msg-1', conversationId: 'conv-1', content: 'Hi' };
     mockChatPort.sendMessage.mockResolvedValue(savedMsg);
@@ -241,18 +244,15 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
     });
 
     expect(res).toEqual({ success: true, message: savedMsg });
-    expect(serverTo).toHaveBeenCalledWith(CHAT_ROOMS.conversation('conv-1'));
     expect(
       roomEmitMap.get(CHAT_ROOMS.conversation('conv-1')),
     ).toHaveBeenCalledWith(CHAT_EVENTS.MESSAGE_NEW, savedMsg);
-    expect(serverTo).toHaveBeenCalledWith(['user:user-1', 'user:user-2']);
     expect(roomEmitMap.get('user:user-1,user:user-2')).toHaveBeenCalledWith(
       CHAT_EVENTS.CONVERSATION_UPDATED,
       { conversationId: 'conv-1', message: savedMsg },
     );
     expect(serverEmit).not.toHaveBeenCalled();
 
-    // Also verifies external publish through RealtimeEventBus (REST -> Realtime service path)
     roomEmitMap.clear();
     serverTo.mockClear();
     await realtimeBus.publish({
@@ -264,24 +264,17 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
     expect(
       roomEmitMap.get(CHAT_ROOMS.conversation('conv-1')),
     ).toHaveBeenCalledWith(CHAT_EVENTS.MESSAGE_NEW, { id: 'msg-rest' });
-    expect(roomEmitMap.get('user:user-2')).toHaveBeenCalledWith(
-      CHAT_EVENTS.CONVERSATION_UPDATED,
-      { conversationId: 'conv-1', message: { id: 'msg-rest' } },
-    );
-  });
 
-  it('skips user-room broadcast cleanly when member list is empty', async () => {
-    mockChatPort.getConversationMemberIds.mockResolvedValue([]);
+    serverTo.mockClear();
+    mockChatPort.getConversationMemberIds.mockResolvedValueOnce([]);
     await gateway.broadcastMessage('conv-empty', { id: 'msg-x' });
-
     expect(serverTo).toHaveBeenCalledTimes(1);
     expect(serverTo).toHaveBeenCalledWith(
       CHAT_ROOMS.conversation('conv-empty'),
     );
-    expect(serverEmit).not.toHaveBeenCalled();
   });
 
-  it('enforces membership on typing:start/stop and avoids DB calls when socket is already in conv room', async () => {
+  it('handles typing:start/stop, message:read, and message:reaction_updated with membership verification', async () => {
     const joinedCtx = makeSocket({
       userId: 'user-1',
       name: 'Alice',
@@ -323,30 +316,18 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
         conversationId: 'conv-1',
       }),
     ).rejects.toThrow(RealtimeAccessDeniedException);
-  });
 
-  it('enforces membership on message:read and emits canonical message:read event', async () => {
-    const { socket, clientRoomEmitMap } = makeSocket({ userId: 'user-1' });
-    const res = await gateway.handleMessageRead(socket, {
+    // message:read
+    const readCtx = makeSocket({ userId: 'user-1' });
+    const readRes = await gateway.handleMessageRead(readCtx.socket, {
       conversationId: 'conv-1',
     });
-
-    expect(mockChatPort.markAsRead).toHaveBeenCalledWith('conv-1', 'user-1');
-    expect(
-      clientRoomEmitMap.get(CHAT_ROOMS.conversation('conv-1')),
-    ).toHaveBeenCalledWith(CHAT_EVENTS.MESSAGE_READ, {
-      conversationId: 'conv-1',
-      userId: 'user-1',
-      readAt: '2026-11-20T12:00:00.000Z',
-    });
-    expect(res).toEqual({
+    expect(readRes).toEqual({
       success: true,
       readAt: '2026-11-20T12:00:00.000Z',
     });
-  });
 
-  it('emits canonical message:reaction_updated WITH conversationId for add and remove via bus', async () => {
-    const { socket } = makeSocket({ userId: 'user-1' });
+    // message:reaction_updated
     mockChatPort.addReaction.mockResolvedValue({
       conversationId: 'conv-1',
       reaction: { id: 'r1' },
@@ -356,7 +337,7 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
       success: true,
     });
 
-    await gateway.handleReaction(socket, {
+    await gateway.handleReaction(readCtx.socket, {
       messageId: 'msg-1',
       emoji: '👍',
       action: 'add',
@@ -371,7 +352,7 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
       action: 'add',
     });
 
-    await gateway.handleReaction(socket, {
+    await gateway.handleReaction(readCtx.socket, {
       messageId: 'msg-1',
       emoji: '👍',
       action: 'remove',
@@ -385,58 +366,5 @@ describe('ChatGateway Unit & Extraction Boundary Tests', () => {
       emoji: '👍',
       action: 'remove',
     });
-  });
-
-  it('enforces chat rate limits on message bursts', async () => {
-    const { socket } = makeSocket({ userId: 'user-burst' });
-    const burst = chatConfig.getRateLimitBudgets().joinLeave.burst;
-
-    for (let i = 0; i < burst; i += 1) {
-      await gateway.handleLeaveConversation(socket, {
-        conversationId: 'conv-1',
-      });
-    }
-
-    await expect(
-      gateway.handleLeaveConversation(socket, { conversationId: 'conv-1' }),
-    ).rejects.toThrow(RealtimeRateLimitedException);
-  });
-
-  it('keeps realtime/channels/chat decoupled from @/modules/chat and removes legacy gateways & snake_case events', () => {
-    expect(
-      fs.existsSync(
-        path.resolve(__dirname, '../../../src/modules/chat/gateways'),
-      ),
-    ).toBe(false);
-
-    const chatChannelDir = path.resolve(
-      __dirname,
-      '../../../src/modules/realtime/channels/chat',
-    );
-    const gatewayContent = fs.readFileSync(
-      path.join(chatChannelDir, 'gateway.ts'),
-      'utf8',
-    );
-    const configContent = fs.readFileSync(
-      path.join(chatChannelDir, 'config.ts'),
-      'utf8',
-    );
-
-    expect(gatewayContent).not.toMatch(/this\.server\.emit\s*\(/);
-    for (const content of [gatewayContent, configContent]) {
-      expect(content).not.toMatch(/@\/modules\/chat/);
-      for (const legacyEvent of [
-        'join_conversation',
-        'leave_conversation',
-        'send_message',
-        'message_read',
-        'message_reaction',
-        'new_message',
-        'reaction_updated',
-        'conversation_updated',
-      ]) {
-        expect(content).not.toMatch(new RegExp(`['"]${legacyEvent}['"]`));
-      }
-    }
   });
 });

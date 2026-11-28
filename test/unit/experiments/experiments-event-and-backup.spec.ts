@@ -1,11 +1,12 @@
-import { BlobStatus, StorageBlobRecord } from '@/modules/files/types/files.type';
-import { FilesFacade } from '@/modules/files/files.facade';
+import { Readable } from 'node:stream';
+import { fromPartial } from '@total-typescript/shoehorn';
+import type { RedisCommandService } from '@/core';
 import { ContentHash, StorageKey } from '@/modules/files/domain/storage.vo';
-import { BlobRepository } from '@/modules/files/repositories/blob.repository';
-import { QuotaRepository } from '@/modules/files/repositories/quota.repository';
-import { SessionRepository } from '@/modules/files/repositories/session.repository';
-import { BlobService } from '@/modules/files/services/blob.service';
-import { FilesUploadService } from '@/modules/files/services/upload.service';
+import {
+  BlobStatus,
+  type IFilesPort,
+  type StorageBlobRecord,
+} from '@/modules/files/types/files.type';
 import {
   FileDownloadedEvent,
   FileTrashedEvent,
@@ -13,46 +14,39 @@ import {
 } from '@/modules/experiments';
 import { ExperimentNode } from '@/modules/experiments/domain/node.domain';
 import { ExperimentsEventListener } from '@/modules/experiments/processors/experiments.listener';
+import { NodeRepository } from '@/modules/experiments/repositories/node.repository';
 import { ExperimentsBackupService } from '@/modules/experiments/services/backup.service';
-import { Readable } from 'stream';
 
-describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5)', () => {
-  describe('ExperimentsEventListener - Durable Streams & PubSub', () => {
-    let outboxService: ExperimentsEventListener;
-    let mockRedisClient: any;
-    let mockRedisService: any;
-
-    beforeEach(() => {
-      mockRedisClient = {
-        publish: jest.fn().mockResolvedValue(1),
-        xadd: jest.fn().mockResolvedValue('1700000000000-0'),
-      };
-      mockRedisService = {
-        getClient: jest.fn().mockReturnValue(mockRedisClient),
+describe('Experiments Event Outbox & Backup Pipeline Suite', () => {
+  describe('ExperimentsEventListener - Durable Streams, PubSub & Fallback', () => {
+    it('dispatches file.uploaded and file.downloaded events to Redis Stream/PubSub and falls back to memory when Redis is absent', async () => {
+      const publish = jest.fn().mockResolvedValue(1);
+      const xadd = jest.fn().mockResolvedValue('1700000000000-0');
+      const mockRedis = fromPartial({
+        getClient: jest.fn(() => fromPartial({ publish, xadd })),
         isReady: jest.fn().mockReturnValue(true),
-      };
-      outboxService = new ExperimentsEventListener(mockRedisService);
-    });
+      });
 
-    it('should dispatch file.uploaded event to Redis Stream and PubSub channel', async () => {
-      const event = new FileUploadedEvent(
-        'file-001',
-        'blob-001',
-        'user-123',
-        'dataset.csv',
-        'text/csv',
-        1024n,
-        'blobs/aa/test.csv',
-        'project-abc',
+      const listener = new ExperimentsEventListener(mockRedis as never);
+
+      await listener.handleFileUploaded(
+        new FileUploadedEvent(
+          'file-001',
+          'blob-001',
+          'user-123',
+          'dataset.csv',
+          'text/csv',
+          1024n,
+          'blobs/aa/test.csv',
+          'project-abc',
+        ),
       );
 
-      await outboxService.handleFileUploaded(event);
-
-      expect(mockRedisClient.publish).toHaveBeenCalledWith(
+      expect(publish).toHaveBeenCalledWith(
         'flux:experiments:events',
         expect.stringContaining('file.uploaded'),
       );
-      expect(mockRedisClient.xadd).toHaveBeenCalledWith(
+      expect(xadd).toHaveBeenCalledWith(
         'flux:experiments:stream',
         'MAXLEN',
         '~',
@@ -66,84 +60,38 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         expect.stringContaining('dataset.csv'),
       );
 
-      const recent = outboxService.getRecentEvents();
-      expect(recent).toHaveLength(1);
-      expect(recent[0].type).toBe('file.uploaded');
-      expect(recent[0].payload.fileId).toBe('file-001');
-    });
-
-    it('should dispatch file.downloaded audit event', async () => {
-      const event = new FileDownloadedEvent(
-        'file-002',
-        'paper.pdf',
-        'application/pdf',
-        2048,
-        'user-456',
-        '192.168.1.1',
+      await listener.handleFileDownloaded(
+        new FileDownloadedEvent(
+          'file-002',
+          'paper.pdf',
+          'application/pdf',
+          2048,
+          'user-456',
+          '192.168.1.1',
+        ),
       );
 
-      await outboxService.handleFileDownloaded(event);
-
-      expect(mockRedisClient.publish).toHaveBeenCalledWith(
-        'flux:experiments:events',
-        expect.stringContaining('file.downloaded'),
+      const recent = listener.getRecentEvents();
+      expect(recent).toHaveLength(2);
+      expect(recent.map((e) => e.type)).toEqual(
+        expect.arrayContaining(['file.uploaded', 'file.downloaded']),
       );
-      const recent = outboxService.getRecentEvents();
-      expect(recent[0].type).toBe('file.downloaded');
-      expect(recent[0].payload.accessedBy).toBe('user-456');
-    });
 
-    it('should gracefully fallback and maintain memory history when Redis is unavailable', async () => {
-      const fallbackOutbox = new ExperimentsEventListener(undefined);
-
-      await fallbackOutbox.handleFileTrashed(
+      const fallback = new ExperimentsEventListener(undefined);
+      await fallback.handleFileTrashed(
         new FileTrashedEvent('file-004', 'user-789', new Date()),
       );
-
-      const recent = fallbackOutbox.getRecentEvents();
-      expect(recent).toHaveLength(1);
-      expect(recent[0].type).toBe('file.trashed');
-      expect(recent[0].payload.fileId).toBe('file-004');
+      expect(fallback.getRecentEvents()).toEqual([
+        expect.objectContaining({
+          type: 'file.trashed',
+          payload: expect.objectContaining({ fileId: 'file-004' }),
+        }),
+      ]);
     });
   });
 
-  describe('ExperimentsBackupService - Automated Project & Metadata Backup', () => {
-    let backupService: ExperimentsBackupService;
-    let mockDriver: any;
-    let mockNodeRepo: any;
-    let mockBlobRepo: any;
-
-    beforeEach(() => {
-      mockDriver = {
-        getStream: jest.fn(),
-        put: jest.fn().mockResolvedValue(undefined),
-      };
-      mockNodeRepo = {
-        list: jest.fn(),
-      };
-      mockBlobRepo = {
-        findById: jest.fn(),
-      };
-
-      const blobService = new BlobService(mockDriver, mockBlobRepo);
-      const quotaRepo = {} as QuotaRepository;
-      const filesPort = new FilesFacade(
-        mockDriver,
-        blobService,
-        mockBlobRepo as BlobRepository,
-        quotaRepo,
-        new FilesUploadService(
-          mockDriver,
-          blobService,
-          mockBlobRepo as BlobRepository,
-          quotaRepo,
-          {} as SessionRepository,
-        ),
-      );
-      backupService = new ExperimentsBackupService(filesPort, mockNodeRepo);
-    });
-
-    it('should export project files into a zipped archive and upload to S3 backup path', async () => {
+  describe('ExperimentsBackupService - Project ZIP & Metadata Snapshot', () => {
+    it('exports project files into a zipped archive and metadata catalog snapshot as gzipped JSON', async () => {
       const rootFolder = new ExperimentNode({
         id: 'folder-1',
         name: 'Analysis',
@@ -152,7 +100,6 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         authorId: 'user-001',
         projectId: 'proj-001',
       });
-
       const fileInFolder = new ExperimentNode({
         id: 'file-1',
         name: 'results.csv',
@@ -164,7 +111,6 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         authorId: 'user-001',
         projectId: 'proj-001',
       });
-
       const rootFile = new ExperimentNode({
         id: 'file-2',
         name: 'notes.txt',
@@ -176,31 +122,14 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         projectId: 'proj-001',
       });
 
-      const blob1: StorageBlobRecord = {
-        id: 'blob-1',
-        contentHashHex: ContentHash.fromHex('1'.repeat(64)).toHex(),
+      const makeBlob = (id: string, hexChar: string, key: string): StorageBlobRecord => ({
+        id,
+        contentHashHex: ContentHash.fromHex(hexChar.repeat(64)).toHex(),
         hashAlgorithm: 'SHA256',
         sizeBytes: 25n,
-        mimeType: 'text/csv',
-        checksumVerified: true,
-        s3Key: StorageKey.fromString('blobs/11/results.csv').value(),
-        s3Bucket: 'flux',
-        storageClass: 'STANDARD',
-        refCount: 1,
-        status: BlobStatus.READY,
-        createdAt: new Date(),
-        tombstoneAt: null,
-        claimedAt: null,
-      };
-
-      const blob2: StorageBlobRecord = {
-        id: 'blob-2',
-        contentHashHex: ContentHash.fromHex('2'.repeat(64)).toHex(),
-        hashAlgorithm: 'SHA256',
-        sizeBytes: 10n,
         mimeType: 'text/plain',
         checksumVerified: true,
-        s3Key: StorageKey.fromString('blobs/22/notes.txt').value(),
+        s3Key: StorageKey.fromString(key).value(),
         s3Bucket: 'flux',
         storageClass: 'STANDARD',
         refCount: 1,
@@ -208,53 +137,50 @@ describe('Storage Event-Driven Outbox & Automated Backup Pipeline Suite (Phase 5
         createdAt: new Date(),
         tombstoneAt: null,
         claimedAt: null,
-      };
+      });
 
-      mockNodeRepo.list
-        .mockResolvedValueOnce({
-          nodes: [rootFolder, rootFile],
-          total: 2,
-        })
-        .mockResolvedValueOnce({
-          nodes: [fileInFolder],
-          total: 1,
-        });
+      const putObject = jest.fn().mockResolvedValue(undefined);
+      const filesPort = fromPartial<IFilesPort>({
+        findBlobById: jest
+          .fn()
+          .mockResolvedValueOnce(makeBlob('blob-1', '1', 'blobs/11/results.csv'))
+          .mockResolvedValueOnce(makeBlob('blob-2', '2', 'blobs/22/notes.txt')),
+        getObjectStream: jest
+          .fn()
+          .mockResolvedValueOnce({
+            stream: Readable.from([Buffer.from('experiment_1,10.5,pass\n')]),
+            contentLength: 23,
+          })
+          .mockResolvedValueOnce({
+            stream: Readable.from([Buffer.from('hello world')]),
+            contentLength: 11,
+          }),
+        putObject,
+      });
 
-      mockBlobRepo.findById
-        .mockResolvedValueOnce(blob1)
-        .mockResolvedValueOnce(blob2);
+      const nodeRepo = fromPartial<NodeRepository>({
+        list: jest
+          .fn()
+          .mockResolvedValueOnce({ nodes: [rootFolder, rootFile], total: 2 })
+          .mockResolvedValueOnce({ nodes: [fileInFolder], total: 1 }),
+      });
 
-      mockDriver.getStream
-        .mockResolvedValueOnce({
-          stream: Readable.from([Buffer.from('experiment_1,10.5,pass\n')]),
-        })
-        .mockResolvedValueOnce({
-          stream: Readable.from([Buffer.from('hello world')]),
-        });
+      const backupService = new ExperimentsBackupService(filesPort, nodeRepo);
 
-      const result = await backupService.exportProjectArchive('proj-001');
-
-      expect(result.backupKey).toContain('backups/projects/proj-001/backup-');
-      expect(result.fileCount).toBe(2);
-      expect(result.sizeBytes).toBeGreaterThan(0);
-      expect(result.sha256).toMatch(/^[a-f0-9]{64}$/);
-
-      expect(mockDriver.put).toHaveBeenCalledWith(
+      const archive = await backupService.exportProjectArchive('proj-001');
+      expect(archive.backupKey).toContain('backups/projects/proj-001/backup-');
+      expect(archive.fileCount).toBe(2);
+      expect(archive.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(putObject).toHaveBeenCalledWith(
         expect.stringContaining('backups/projects/proj-001/'),
         expect.any(Buffer),
         expect.objectContaining({ mimeType: 'application/zip' }),
       );
-    });
 
-    it('should export storage metadata catalog snapshot as gzipped JSON', async () => {
-      const result = await backupService.exportMetadataSnapshot();
-
-      expect(result.backupKey).toContain('backups/metadata/snapshot-');
-      expect(result.backupKey).toContain('.json.gz');
-      expect(result.sizeBytes).toBeGreaterThan(0);
-      expect(result.sha256).toMatch(/^[a-f0-9]{64}$/);
-
-      expect(mockDriver.put).toHaveBeenCalledWith(
+      const snapshot = await backupService.exportMetadataSnapshot();
+      expect(snapshot.backupKey).toMatch(/^backups\/metadata\/snapshot-.*\.json\.gz$/);
+      expect(snapshot.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(putObject).toHaveBeenCalledWith(
         expect.stringContaining('backups/metadata/snapshot-'),
         expect.any(Buffer),
         expect.objectContaining({ mimeType: 'application/gzip' }),

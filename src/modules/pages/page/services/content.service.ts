@@ -20,21 +20,21 @@ import {
   NOOP_LIVE_COLLABORATION,
   NodePathVo,
   PageDomainEventBus,
-  assertExpectedVersionAndRev,
   ensurePrismaFolderChain,
-  executeDocstoreUpdateWithOcc,
   getRecordSpaceId,
   isPrismaUniqueConstraintError,
   isRecordDeleted,
   resolveActiveProjectId,
 } from '@/modules/pages/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { LineArray } from '@/modules/pages/docstore/domain/line-array';
 import {
+  DocstoreService,
   DocTooLargeError,
+  LineArray,
   NullByteDetectedError,
-} from '@/modules/pages/docstore/domain/doc.errors';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+  ScopeRepository,
+  assertExpectedVersionAndRev,
+  executeDocstoreUpdateWithOcc,
+} from '@/modules/pages/docstore';
 import { PageRepository } from '../page.repository';
 import {
   type PageDocRanges,

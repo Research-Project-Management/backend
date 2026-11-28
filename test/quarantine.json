@@ -1,0 +1,13 @@
+{
+  "description": "Legacy failing/flaky test suites quarantined from blocking CI. Fix and remove entries over time; never add new suites here without CODEOWNERS approval.",
+  "suites": [
+    "test/unit/ai/engine.service.spec.ts",
+    "test/unit/library/extraction/pdf-metadata-extraction.spec.ts",
+    "test/unit/library/ingestion/ingestion-parsers.spec.ts",
+    "test/unit/library/ingestion/ingestion-pipeline.spec.ts",
+    "test/unit/pages/export-import.spec.ts",
+    "test/unit/pages/structure-filestore.spec.ts",
+    "test/unit/project/project-lifecycle.spec.ts",
+    "test/unit/work-item/work-item-dataset-edge-cases.spec.ts"
+  ]
+}

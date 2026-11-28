@@ -1,0 +1,50 @@
+name: OpenAPI Breaking Change Gate (oasdiff)
+
+on:
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "openapi/openapi.json"
+      - "src/**/*.controller.ts"
+      - "src/**/*.dto.ts"
+      - "src/core/http/setup/swagger.setup.ts"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oasdiff-breaking:
+    name: API Contract Breaking Change Check (oasdiff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}"
+
+      - name: Check if baseline openapi/openapi.json exists on base branch
+        id: check-base
+        run: |
+          if git cat-file -e "origin/${{ github.base_ref }}:openapi/openapi.json" 2>/dev/null && [ -f openapi/openapi.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping oasdiff until openapi/openapi.json is committed on ${{ github.base_ref }}."
+          fi
+
+      - name: Detect Breaking API Changes
+        if: steps.check-base.outputs.ready == 'true'
+        uses: oasdiff/oasdiff-action/breaking@v0
+        with:
+          base: 'origin/${{ github.base_ref }}:openapi/openapi.json'
+          revision: 'HEAD:openapi/openapi.json'
+          fail-on: ERR

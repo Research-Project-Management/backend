@@ -1,0 +1,15 @@
+# Protect quality gates, CI workflows, and agent instructions from unreviewed changes.
+/AGENTS.md                                 @thanhngo92
+/CLAUDE.md                                 @thanhngo92
+/lefthook.yml                              @thanhngo92
+/.oxlintrc.json                            @thanhngo92
+/.oxlintrc.staged.json                     @thanhngo92
+/.dependency-cruiser.js                    @thanhngo92
+/.dependency-cruiser-known-violations.json @thanhngo92
+/.jscpd.json                               @thanhngo92
+/eslint.config.mjs                         @thanhngo92
+/knip.json                                 @thanhngo92
+/.github/workflows/**                      @thanhngo92
+/.github/CODEOWNERS                        @thanhngo92
+/scripts/gates/**                          @thanhngo92
+/test/quarantine.json                      @thanhngo92

@@ -22,11 +22,13 @@ import {
 import {
   NodePathVo,
   filterRecordsByPageScope,
-  findPageRecordWithNode,
-  formatPageByIdResponse,
   isRecordDeleted,
 } from '@/modules/pages/core';
-import { DocstoreService } from '@/modules/pages/docstore';
+import {
+  DocstoreService,
+  findPageRecordWithNode,
+  formatPageByIdResponse,
+} from '@/modules/pages/docstore';
 import { PageService } from '@/modules/pages/page';
 import { StructureService } from '@/modules/pages/structure';
 import type {

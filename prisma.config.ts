@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('dotenv/config');

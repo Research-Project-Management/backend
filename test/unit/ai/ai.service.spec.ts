@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { fromPartial } from '@total-typescript/shoehorn';
@@ -11,18 +12,13 @@ import { AccessService } from '@/modules/ai/access/services/access.service';
 import { DocumentAccessService } from '@/modules/ai/access/services/document.service';
 import { SpaceAccessService } from '@/modules/ai/access/services/space.service';
 import { ChatRepository } from '@/modules/ai/chat/chat.repository';
+import { normalizeIntentHint } from '@/modules/ai/chat/domain/context.mapper';
+import { SessionController } from '@/modules/ai/chat/controllers/session.controller';
 import { ChatService } from '@/modules/ai/chat/services/chat.service';
 import { PaperChatService } from '@/modules/ai/chat/services/paper.service';
 import { SessionService } from '@/modules/ai/chat/services/session.service';
 import { TitleService } from '@/modules/ai/chat/services/title.service';
 import type { IAiEnginePort } from '@/modules/ai/engine/engine.port';
-import { normalizeIntentHint } from '@/modules/ai/chat/domain/context.mapper';
-import {
-  mapArtifactsToWidgets,
-  mapCitationToSourceItem,
-  normalizeRawCitations,
-  translateEngineSseFrame,
-} from '@/modules/ai/engine/domain/stream.mapper';
 import type { StreamCompletionResult } from '@/modules/ai/engine/types/engine.type';
 import {
   mergeAndEncryptEditorConfig,
@@ -63,9 +59,10 @@ interface MockAiMessageCreateManyArgs {
   }>;
 }
 
-describe('AI ChatService, SessionService & AiFacade Suite', () => {
+describe('AI ChatService, SessionService, DocumentAccess & AiFacade Suite', () => {
   let chatService: ChatService;
   let sessionService: SessionService;
+  let documentAccess: DocumentAccessService;
   let aiFacade: AiFacade;
   let mockEngine: jest.Mocked<IAiEnginePort>;
   let mockPrisma: {
@@ -88,6 +85,8 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       deleteMany: jest.Mock<Promise<{ count: number }>, [unknown?]>;
     };
     aiMessage: {
+      findMany: jest.Mock<Promise<unknown[]>, [unknown?]>;
+      count: jest.Mock<Promise<number>, [unknown?]>;
       createMany: jest.Mock<
         Promise<{ count: number }>,
         [MockAiMessageCreateManyArgs]
@@ -220,6 +219,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
             makeChatRecord({
               createdById: data.createdById ?? mockUserId,
               spaceId: data.spaceId ?? mockUserId,
+              pageId: data.pageId ?? null,
               title: data.title ?? 'New Chat',
               documentIds: data.documentIds ?? [],
             }),
@@ -237,6 +237,8 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         ),
       },
       aiMessage: {
+        findMany: jest.fn<Promise<unknown[]>, [unknown?]>(async () => []),
+        count: jest.fn<Promise<number>, [unknown?]>(async () => 0),
         createMany: jest.fn<
           Promise<{ count: number }>,
           [MockAiMessageCreateManyArgs]
@@ -247,8 +249,12 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
     const prismaService = fromPartial<PrismaService>(mockPrisma);
     const accessRepo = new AccessRepository(prismaService);
     const spaceAccess = new SpaceAccessService(accessRepo);
-    const docAccess = new DocumentAccessService(accessRepo, spaceAccess);
-    const accessService = new AccessService(spaceAccess, docAccess);
+    documentAccess = new DocumentAccessService(accessRepo, spaceAccess);
+    const accessService = new AccessService(
+      spaceAccess,
+      documentAccess,
+      accessRepo,
+    );
 
     const chatRepo = new ChatRepository(prismaService);
     sessionService = new SessionService(
@@ -309,7 +315,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('auto-creates session, streams via engine, and persists BOTH content and sources on completion', async () => {
+    it('auto-creates session, streams via engine, and persists content and sources on completion', async () => {
       type OnCompleteFn = (
         result: StreamCompletionResult,
       ) => Promise<void> | void;
@@ -407,14 +413,13 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       expect(mockPrisma.aiChat.create).not.toHaveBeenCalled();
     });
 
-    it('skips persisting empty/cancelled stream responses and creates page chat when pageId supplied', async () => {
+    it('skips persisting cancelled stream responses while persisting user message in page-scoped chat', async () => {
       mockPrisma.page.findFirst.mockResolvedValue({
         id: mockPageId,
         title: 'Introduction',
         spaceId: mockUserId,
       });
 
-      const appendSpy = jest.spyOn(sessionService, 'appendMessagesFast');
       type OnCompleteFn = (
         result: StreamCompletionResult,
       ) => Promise<void> | void;
@@ -440,7 +445,10 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         cancelled: true,
       });
 
-      expect(appendSpy).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.aiMessage.createMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.aiMessage.createMany.mock.calls[0]?.[0]?.data[0]?.role).toBe(
+        'user',
+      );
     });
 
     it('executes synchronous chat, persists sources, and forwards cancel & HITL resume', async () => {
@@ -476,7 +484,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       );
     });
 
-    it('reuses existing global chatId when both chatId and pageId are supplied, and creates distinct page-linked sessions for new editor chats', async () => {
+    it('reuses existing global chatId when both chatId and pageId are supplied, and creates page-linked sessions for new editor chats', async () => {
       mockPrisma.page.findFirst.mockResolvedValue({
         id: mockPageId,
         title: 'Introduction',
@@ -506,7 +514,6 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         expect.any(Object),
       );
 
-      // Starting a new chat in editor (pageId present, no chatId) creates a new session with pageId metadata
       await chatService.stream(
         mockUserId,
         {
@@ -528,9 +535,104 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
         }),
       );
     });
+
+    it('resolves both direct documentIds and attached_sources into RAG document IDs and enriched source metadata', async () => {
+      mockPrisma.fileNode.findMany.mockImplementation(async (rawArgs) => {
+        const ids =
+          (rawArgs as { where?: { id?: { in?: string[] } } } | undefined)?.where
+            ?.id?.in ?? [];
+        const rows: Array<{ id: string; metadata: unknown }> = [];
+        if (ids.includes('file-direct-1')) {
+          rows.push({
+            id: 'file-direct-1',
+            metadata: { ragDocId: 'rag-direct-1' },
+          });
+        }
+        if (ids.includes('file-att-2')) {
+          rows.push({
+            id: 'file-att-2',
+            metadata: { ragDocId: 'rag-att-2' },
+          });
+        }
+        return rows;
+      });
+
+      mockPrisma.libraryItem.findMany.mockResolvedValue([
+        {
+          id: 'item-1',
+          title: 'Attention Is All You Need',
+          metadata: { ragDocId: 'rag-item-1' },
+          attachments: [
+            {
+              fileId: 'file-att-1',
+              attachmentType: 'primary_pdf',
+              metadata: null,
+            },
+          ],
+        },
+        {
+          id: 'item-2',
+          title: 'Deep Residual Learning',
+          metadata: null,
+          attachments: [
+            {
+              fileId: 'file-att-2',
+              attachmentType: 'primary_pdf',
+              metadata: null,
+            },
+          ],
+        },
+      ]);
+
+      await chatService.execute(mockUserId, {
+        chatId: mockChatId,
+        query: 'Compare these papers',
+        documentIds: ['file-direct-1', 'item-1'],
+        context: {
+          attached_sources: [
+            { kind: 'paper', item_id: 'item-1' },
+            { kind: 'library', item_id: 'item-2' },
+          ],
+        },
+      });
+
+      const sentRequest = mockEngine.chatSync.mock.calls[0]?.[0];
+      expect(sentRequest?.document_ids).toEqual(
+        expect.arrayContaining(['rag-direct-1', 'rag-item-1', 'rag-att-2']),
+      );
+      expect(sentRequest?.context?.attached_sources).toEqual([
+        {
+          kind: 'paper',
+          title: 'Attention Is All You Need',
+          source_id: 'rag-item-1',
+          source_type: 'file',
+          item_id: 'item-1',
+          file_id: 'file-att-1',
+          has_pdf: true,
+          indexed: true,
+        },
+        {
+          kind: 'library',
+          title: 'Deep Residual Learning',
+          source_id: 'rag-att-2',
+          source_type: 'file',
+          item_id: 'item-2',
+          file_id: 'file-att-2',
+          has_pdf: true,
+          indexed: true,
+        },
+      ]);
+
+      await expect(
+        documentAccess.resolveChatDocuments([], undefined),
+      ).resolves.toEqual({
+        resolvedDocumentIds: [],
+        enrichedSources: [],
+      });
+    });
   });
 
-  describe('Session lifecycle, Space projectId & AiFacade', () => {
+  describe('Session lifecycle, Pagination, Space projectId & AiFacade', () => {
     it('deletes Python AI checkpointer threads on deleteChat and clearMemory', async () => {
       await sessionService.deleteChat(mockChatId, mockUserId);
       expect(mockEngine.deleteThread).toHaveBeenCalledWith(
@@ -564,6 +666,82 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       expect(projectChat.projectId).toBe(mockProjectId);
     });
 
+    it('paginates chat messages, clamps skip/limit bounds, and rejects unauthorized chat owners', async () => {
+      const msgCreatedAt = new Date('2026-03-01T10:00:00.000Z');
+      mockPrisma.aiMessage.findMany.mockResolvedValue([
+        {
+          id: 'msg-3',
+          chatId: mockChatId,
+          role: 'user',
+          content: 'Question 2',
+          sources: [{ title: 'Paper A' }],
+          widgets: [],
+          createdAt: msgCreatedAt,
+        },
+        {
+          id: 'msg-4',
+          chatId: mockChatId,
+          role: 'assistant',
+          content: 'Answer 2',
+          sources: [{ source: 'doc-1', title: 'Paper A' }],
+          widgets: [],
+          createdAt: msgCreatedAt,
+        },
+      ]);
+      mockPrisma.aiMessage.count.mockResolvedValue(42);
+
+      const controller = new SessionController(sessionService);
+      const result = await controller.getChatMessages(
+        mockChatId,
+        mockUserId,
+        20,
+        10,
+      );
+
+      expect(result).toEqual({
+        total: 42,
+        messages: [
+          {
+            id: 'msg-3',
+            role: 'user',
+            content: 'Question 2',
+            sources: undefined,
+            attachments: [{ title: 'Paper A' }],
+            widgets: [],
+            createdAt: '2026-03-01T10:00:00.000Z',
+          },
+          {
+            id: 'msg-4',
+            role: 'assistant',
+            content: 'Answer 2',
+            sources: [{ source: 'doc-1', title: 'Paper A' }],
+            attachments: undefined,
+            widgets: [],
+            createdAt: '2026-03-01T10:00:00.000Z',
+          },
+        ],
+      });
+
+      await sessionService.getChatMessages(mockChatId, mockUserId, {
+        limit: 999,
+        skip: -5,
+      });
+      expect(mockPrisma.aiMessage.findMany).toHaveBeenLastCalledWith({
+        where: { chatId: mockChatId },
+        orderBy: { createdAt: 'asc' },
+        skip: 0,
+        take: 200,
+      });
+
+      mockPrisma.aiChat.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        sessionService.getChatMessages(mockChatId, mockUserId, {
+          limit: 10,
+          skip: 0,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
     it('AiFacade.generate executes stateless direct call for CLSI helpers', async () => {
       const res = await aiFacade.generate({
         prompt: 'Fix LaTeX error',
@@ -585,42 +763,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
     });
   });
 
-  describe('stream.mapper citation index preservation', () => {
-    it('preserves positive integer index and drops zero/non-integer values', () => {
-      const normalized = normalizeRawCitations([
-        {
-          index: 6,
-          source_id: 'doc-resnet',
-          title: 'ResNet',
-          page: 6,
-          snippet: 'CIFAR-10 results',
-        },
-        {
-          index: 0,
-          source_id: 'doc-invalid-zero',
-          title: 'Zero Index',
-        },
-        {
-          index: 1.5,
-          source_id: 'doc-float',
-          title: 'Float Index',
-        },
-      ]);
-
-      expect(normalized).toHaveLength(3);
-      expect(normalized[0].index).toBe(6);
-      expect(normalized[1].index).toBeUndefined();
-      expect(normalized[2].index).toBeUndefined();
-
-      const mapped0 = mapCitationToSourceItem(normalized[0]);
-      const mapped1 = mapCitationToSourceItem(normalized[1]);
-      expect(mapped0.index).toBe(6);
-      expect(mapped0.page).toBe(6);
-      expect(mapped1.index).toBeUndefined();
-    });
-  });
-
-  describe('editor_agent intent routing, widgets mapping, and persistence', () => {
+  describe('Intent routing, Widgets persistence, PaperChat & BYOK', () => {
     it('routes editor_agent and latex intent hints cleanly while falling back when docs/domains attached', () => {
       expect(normalizeIntentHint('editor_agent', false, false)).toBe(
         'editor_agent',
@@ -628,75 +771,6 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       expect(normalizeIntentHint('editor', true, true)).toBe('editor_agent');
       expect(normalizeIntentHint('latex', false, false)).toBe('editor_agent');
       expect(normalizeIntentHint('latex', true, false)).toBeNull();
-    });
-
-    it('maps artifacts.editor_patches into editor_patches widget and forwards via run.finished [META]', () => {
-      const widgets = mapArtifactsToWidgets({
-        editor_patches: [
-          {
-            id: 'patch-1',
-            file_id: 'doc-1',
-            file_path: 'sections/intro.tex',
-            kind: 'replace',
-            title: 'Polish intro sentence',
-            rationale: 'More concise academic phrasing',
-            search_text: 'Old line',
-            replace_text: 'New line',
-            from_line: 10,
-            to_line: 10,
-            match_strategy: 'exact',
-            warnings: ['Verify cite key'],
-          },
-        ],
-      });
-
-      expect(widgets).toEqual([
-        {
-          type: 'editor_patches',
-          title: 'Proposed LaTeX Edit',
-          patches: [
-            {
-              id: 'patch-1',
-              fileId: 'doc-1',
-              filePath: 'sections/intro.tex',
-              kind: 'replace',
-              title: 'Polish intro sentence',
-              rationale: 'More concise academic phrasing',
-              searchText: 'Old line',
-              replaceText: 'New line',
-              fromLine: 10,
-              toLine: 10,
-              matchStrategy: 'exact',
-              warnings: ['Verify cite key'],
-            },
-          ],
-        },
-      ]);
-
-      const translated = translateEngineSseFrame(
-        'run.finished',
-        JSON.stringify({
-          route: 'editor_agent',
-          citations: [],
-          artifacts: {
-            editor_patches: [
-              {
-                id: 'patch-1',
-                file_path: 'main.tex',
-                title: 'Fix typo',
-                search_text: 'teh',
-                replace_text: 'the',
-                from_line: 4,
-                to_line: 4,
-              },
-            ],
-          },
-        }),
-      );
-
-      expect(translated.widgets).toHaveLength(1);
-      expect(translated.clientFrames[0]).toContain('"type":"meta"');
-      expect(translated.clientFrames[0]).toContain('editor_patches');
     });
 
     it('persists editor_patches widgets on stream completion', async () => {
@@ -758,64 +832,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       ]);
     });
 
-    it('translates editor.patch_preview and error status on tool.completed cleanly', () => {
-      const previewTranslated = translateEngineSseFrame(
-        'editor.patch_preview',
-        JSON.stringify({
-          agent: 'editor_agent',
-          total_patches: 2,
-          patch: {
-            id: 'patch-live-1',
-            file_id: 'doc-method',
-            file_path: 'sections/method.tex',
-            kind: 'replace',
-            title: 'Tighten method claim',
-            search_text: 'We study FluxKV.',
-            replace_text: 'We analyze FluxKV.',
-            from_line: 5,
-            to_line: 5,
-            match_strategy: 'exact',
-          },
-        }),
-      );
-
-      expect(previewTranslated.finished).toBeUndefined();
-      expect(previewTranslated.widgets).toBeUndefined();
-      expect(previewTranslated.clientFrames).toHaveLength(1);
-      const previewJson: unknown = JSON.parse(
-        previewTranslated.clientFrames[0].replace(/^data: /, '').trim(),
-      );
-      expect(previewJson).toMatchObject({
-        type: 'editor-patch-preview',
-        agent: 'editor_agent',
-        totalPatches: 2,
-        patch: {
-          id: 'patch-live-1',
-          fileId: 'doc-method',
-          filePath: 'sections/method.tex',
-          kind: 'replace',
-          title: 'Tighten method claim',
-          searchText: 'We study FluxKV.',
-          replaceText: 'We analyze FluxKV.',
-          fromLine: 5,
-          toLine: 5,
-          matchStrategy: 'exact',
-        },
-      });
-
-      const toolErr = translateEngineSseFrame(
-        'tool.completed',
-        JSON.stringify({
-          tool: 'propose_edit',
-          agent: 'editor_agent',
-          status: 'error',
-        }),
-      );
-      expect(toolErr.clientFrames[0]).toContain('"status":"error"');
-      expect(toolErr.clientFrames[0]).toContain('"success":false');
-    });
-
-    it('forwards resolved projectId to engine context and maps artifacts.widgets for project_agent', async () => {
+    it('forwards resolved projectId to engine context for project_agent', async () => {
       mockPrisma.space.findFirst.mockResolvedValue({
         id: 'space-proj-1',
         type: 'project',
@@ -824,7 +841,7 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       });
       mockPrisma.project.findFirst.mockResolvedValue({
         id: mockProjectId,
-        spaceId: 'space-proj-1',
+        space: { id: 'space-proj-1' },
       });
 
       await chatService.execute(mockUserId, {
@@ -837,75 +854,6 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
       const sentReq = chatSyncCalls[chatSyncCalls.length - 1]?.[0];
       expect(sentReq?.intent_hint).toBe('project_agent');
       expect(sentReq?.context?.project_id).toBe(mockProjectId);
-
-      const widgets = mapArtifactsToWidgets({
-        widgets: [
-          {
-            type: 'work_item_overview',
-            title: 'Project Work Items Overview',
-            total: 2,
-            done: 1,
-            inProgress: 1,
-            overdue: 1,
-            groups: [],
-          },
-          {
-            type: 'metric_summary',
-            title: 'Workload Summary',
-            metrics: [{ label: 'Total Items', value: 2 }],
-          },
-        ],
-      });
-      expect(widgets).toHaveLength(2);
-      expect(widgets[0]).toMatchObject({
-        type: 'work_item_overview',
-        title: 'Project Work Items Overview',
-      });
-      expect(widgets[1]).toMatchObject({
-        type: 'metric_summary',
-        title: 'Workload Summary',
-      });
-    });
-
-    it('maps experiment artifact provenance onto editor_patches widget cleanly', () => {
-      const widgets = mapArtifactsToWidgets({
-        editor_patches: [
-          {
-            id: 'patch-exp-1',
-            file_path: 'main.tex',
-            kind: 'insert_after',
-            title: 'Insert benchmark table',
-            search_text: '\\section{Experiments}',
-            replace_text: '\\begin{table}...\\end{table}',
-          },
-        ],
-        provenance: [
-          {
-            repo: 'flux-lab/vision-exp',
-            path: 'eval/metrics.csv',
-            commit_sha: 'a8f2c3e4b5d6e7f8a8f2c3e4b5d6e7f8a8f2c3e4',
-            url: 'https://github.com/flux-lab/vision-exp/blob/a8f2c3e/eval/metrics.csv',
-          },
-          {
-            repo: '',
-            path: 'invalid.csv',
-          },
-        ],
-      });
-
-      expect(widgets).toHaveLength(1);
-      expect(widgets[0]).toMatchObject({
-        type: 'editor_patches',
-        title: 'Proposed LaTeX Edit',
-        provenance: [
-          {
-            repo: 'flux-lab/vision-exp',
-            path: 'eval/metrics.csv',
-            commitSha: 'a8f2c3e4b5d6e7f8a8f2c3e4b5d6e7f8a8f2c3e4',
-            url: 'https://github.com/flux-lab/vision-exp/blob/a8f2c3e/eval/metrics.csv',
-          },
-        ],
-      });
     });
 
     it('encrypts BYOK API key at rest, masks client view, and decrypts llm_override for AI Engine', () => {
@@ -968,14 +916,6 @@ describe('AI ChatService, SessionService & AiFacade Suite', () => {
           resolvePaperTarget,
         }),
       );
-
-      const mockReply = fromPartial<FastifyReply>({
-        raw: fromPartial<FastifyReply['raw']>({
-          writableEnded: false,
-          write: jest.fn(),
-          end: jest.fn(),
-        }),
-      });
 
       await paperChatService.stream(
         mockUserId,

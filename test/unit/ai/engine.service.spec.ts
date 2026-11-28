@@ -7,7 +7,9 @@ import type { ConfigService } from '@nestjs/config';
 import { fromPartial } from '@total-typescript/shoehorn';
 import type { FastifyReply } from 'fastify';
 import {
+  mapArtifactsToWidgets,
   mapCitationToSourceItem,
+  normalizeRawCitations,
   SseFrameParser,
   translateEngineSseFrame,
 } from '@/modules/ai/engine/domain/stream.mapper';
@@ -64,8 +66,26 @@ describe('AI Engine Transport, SSE Mapper & Cancellation Suite', () => {
       });
     });
 
-    it('maps CitationItem to FrontendSourceItem without null fields and translates run.finished', () => {
+    it('normalizes citations with positive integer index preservation and maps run.finished frames', () => {
+      const normalized = normalizeRawCitations([
+        {
+          index: 6,
+          source_id: 'doc-resnet',
+          title: 'ResNet',
+          page: 6,
+          snippet: 'CIFAR-10 results',
+        },
+        { index: 0, source_id: 'doc-invalid-zero', title: 'Zero Index' },
+        { index: 1.5, source_id: 'doc-float', title: 'Float Index' },
+      ]);
+
+      expect(normalized).toHaveLength(3);
+      expect(normalized[0].index).toBe(6);
+      expect(normalized[1].index).toBeUndefined();
+      expect(normalized[2].index).toBeUndefined();
+
       const source = mapCitationToSourceItem({
+        index: 6,
         source_id: 'fluxkv-2026',
         title: 'FluxKV Report',
         page: 2,
@@ -74,6 +94,7 @@ describe('AI Engine Transport, SSE Mapper & Cancellation Suite', () => {
       });
 
       expect(source).toEqual({
+        index: 6,
         source: 'fluxkv-2026 (p.2)',
         title: 'FluxKV Report',
         page: 2,
@@ -102,6 +123,114 @@ describe('AI Engine Transport, SSE Mapper & Cancellation Suite', () => {
         'https://arxiv.org/abs/2205.14135',
       );
       expect(translated.clientFrames[1]).toBe('data: {"type":"done"}\n\n');
+    });
+
+    it('maps editor_patches, provenance, project widgets, patch_preview, and tool.completed error frames', () => {
+      const widgets = mapArtifactsToWidgets({
+        editor_patches: [
+          {
+            id: 'patch-1',
+            file_id: 'doc-1',
+            file_path: 'sections/intro.tex',
+            kind: 'replace',
+            title: 'Polish intro sentence',
+            rationale: 'More concise academic phrasing',
+            search_text: 'Old line',
+            replace_text: 'New line',
+            from_line: 10,
+            to_line: 10,
+            match_strategy: 'exact',
+            warnings: ['Verify cite key'],
+          },
+        ],
+        provenance: [
+          {
+            repo: 'flux-lab/vision-exp',
+            path: 'eval/metrics.csv',
+            commit_sha: 'a8f2c3e4b5d6e7f8a8f2c3e4b5d6e7f8a8f2c3e4',
+            url: 'https://github.com/flux-lab/vision-exp/blob/a8f2c3e/eval/metrics.csv',
+          },
+          { repo: '', path: 'invalid.csv' },
+        ],
+        widgets: [
+          {
+            type: 'work_item_overview',
+            title: 'Project Work Items Overview',
+            total: 2,
+            done: 1,
+            inProgress: 1,
+            overdue: 1,
+            groups: [],
+          },
+        ],
+      });
+
+      expect(widgets).toHaveLength(2);
+      expect(widgets[0]).toMatchObject({
+        type: 'editor_patches',
+        title: 'Proposed LaTeX Edit',
+        provenance: [
+          {
+            repo: 'flux-lab/vision-exp',
+            path: 'eval/metrics.csv',
+            commitSha: 'a8f2c3e4b5d6e7f8a8f2c3e4b5d6e7f8a8f2c3e4',
+            url: 'https://github.com/flux-lab/vision-exp/blob/a8f2c3e/eval/metrics.csv',
+          },
+        ],
+        patches: [
+          expect.objectContaining({
+            id: 'patch-1',
+            fileId: 'doc-1',
+            filePath: 'sections/intro.tex',
+            fromLine: 10,
+            toLine: 10,
+            matchStrategy: 'exact',
+          }),
+        ],
+      });
+      expect(widgets[1]).toMatchObject({
+        type: 'work_item_overview',
+        title: 'Project Work Items Overview',
+      });
+
+      const previewTranslated = translateEngineSseFrame(
+        'editor.patch_preview',
+        JSON.stringify({
+          agent: 'editor_agent',
+          total_patches: 2,
+          patch: {
+            id: 'patch-live-1',
+            file_id: 'doc-method',
+            file_path: 'sections/method.tex',
+            kind: 'replace',
+            title: 'Tighten method claim',
+            search_text: 'We study FluxKV.',
+            replace_text: 'We analyze FluxKV.',
+            from_line: 5,
+            to_line: 5,
+            match_strategy: 'exact',
+          },
+        }),
+      );
+      expect(previewTranslated.clientFrames).toHaveLength(1);
+      expect(
+        JSON.parse(previewTranslated.clientFrames[0].replace(/^data: /, '').trim()),
+      ).toMatchObject({
+        type: 'editor-patch-preview',
+        agent: 'editor_agent',
+        totalPatches: 2,
+      });
+
+      const toolErr = translateEngineSseFrame(
+        'tool.completed',
+        JSON.stringify({
+          tool: 'propose_edit',
+          agent: 'editor_agent',
+          status: 'error',
+        }),
+      );
+      expect(toolErr.clientFrames[0]).toContain('"status":"error"');
+      expect(toolErr.clientFrames[0]).toContain('"success":false');
     });
   });
 
@@ -269,7 +398,6 @@ describe('AI Engine Transport, SSE Mapper & Cancellation Suite', () => {
       ]);
       expect(completedResult?.cancelled).toBe(false);
 
-      // Now simulate abrupt client disconnect mid-stream
       const hangingStream = new ReadableStream<Uint8Array>({
         start(ctrl) {
           ctrl.enqueue(

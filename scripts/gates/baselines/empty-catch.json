@@ -1,0 +1,292 @@
+{
+  "src/clsi.module.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/clsi.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/core/infrastructure/idempotency/idempotency.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/core/infrastructure/queue/queue.config.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/core/infrastructure/redis/cache.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/core/infrastructure/redis/client.factory.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/core/infrastructure/resource/system-resource-governor.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/main.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/ai/engine/domain/stream.mapper.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/ai/engine/services/http.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/ai/knowledge/processors/knowledge.processor.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/experiments/experiments.facade.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/files/services/thumbnail.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/identity/auth/auth.service.ts": {
+    "07feee9faddb957c": 5
+  },
+  "src/modules/identity/auth/guards/auth.guard.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/integrations/integrations.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/integrations/providers/zotero.provider.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/catalog/repositories/command-relations.repository.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/library/catalog/repositories/saved-searches.repository.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/catalog/services/item-query.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/catalog/services/saved-searches.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/citation/services/csl-repository.service.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/modules/library/citation/services/doi-negotiation.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/library/citation/services/pdf-baker.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/core/domain/metadata-coalesce.policy.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/core/domain/regex.domain.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/core/resilience/circuit-breaker.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/core/services/ssrf-guard.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/extraction/controllers/telemetry.controller.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/extraction/providers/layout.extractor.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/library/extraction/providers/pdf-metadata.extractor.ts": {
+    "07feee9faddb957c": 6
+  },
+  "src/modules/library/extraction/providers/pdf-outline.extractor.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/modules/library/extraction/providers/pdf-text.extractor.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/extraction/providers/pdf.provider.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/modules/library/extraction/repositories/attachments.repository.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/extraction/services/annotations.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/library/extraction/services/extraction.handler.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/extraction/services/pdf-annotations.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/extraction/services/web-snapshot.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/domain/metadata-validation.policy.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/parsers/publisher-dom.extractor.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/modules/library/ingestion/providers/pubmed.provider.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/domain-rate-limiter.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/feed-retrieval.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/metadata-executor.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/pipeline-batch.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/pipeline.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/retraction-database.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/retraction.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/services/url-capture.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/library/ingestion/services/web-fetch-ladder.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/stages/commit.stage.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/ingestion/stages/identify-file.resolver.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/search/repositories/search-sql.repository.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/search/repositories/search.repository.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/modules/library/sync/services/idempotent-consumer.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/library/sync/services/transaction.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/pages/citations/domain/bibtex-parser.domain.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/clsi/adapters/latexmk.adapter.ts": {
+    "07feee9faddb957c": 1,
+    "83a44251aebfb854": 1
+  },
+  "src/modules/pages/clsi/adapters/scratch-disk.adapter.ts": {
+    "07feee9faddb957c": 7
+  },
+  "src/modules/pages/clsi/clsi.repository.ts": {
+    "07feee9faddb957c": 7,
+    "83a44251aebfb854": 1
+  },
+  "src/modules/pages/clsi/domain/compile.policy.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/clsi/sandbox/docker.sandbox.ts": {
+    "83a44251aebfb854": 2
+  },
+  "src/modules/pages/clsi/sandbox/local.sandbox.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/pages/clsi/services/compile-source.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/clsi/services/compile.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/pages/clsi/services/output.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/clsi/services/wordcount.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/core/services/user-resolver.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/pages/docstore/domain/doc-occ.helper.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/docstore/services/search-replace.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/pages/export-import/adapters/collector.adapter.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/export-import/services/convert.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/filestore/adapters/filestore.adapters.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/filestore/filestore.service.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/modules/pages/git-bridge/adapters/repo.adapter.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/page/listeners/cleanup.listener.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/page/services/content.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/pages/page/services/scaffold.service.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/pages/spelling/domain/spelling.engine.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/pages/structure/services/node-mutation.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/project/archive/archive.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/project/core/core.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/project/invitation/invitation.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/project/member/member.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/project/state/state.service.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/project/work-item/core/core.repository.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/project/work-item/core/utils/query-builder.util.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/project/work-item/label/label.repository.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/modules/realtime/channels/pages/access.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/realtime/channels/pages/presence.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/realtime/channels/pages/session.ts": {
+    "07feee9faddb957c": 2
+  },
+  "src/modules/realtime/channels/pages/yjs/cluster.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/modules/realtime/channels/pages/yjs/sync.ts": {
+    "07feee9faddb957c": 3
+  },
+  "src/realtime.ts": {
+    "07feee9faddb957c": 1
+  },
+  "src/worker.ts": {
+    "07feee9faddb957c": 1
+  }
+}

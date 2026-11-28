@@ -1,18 +1,11 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 
 /**
- * OpenAPI / Swagger Specification Setup for Flux API.
- * Enabled in development and staging by default, opt-in in production via ENABLE_SWAGGER=true.
+ * Build the authoritative OpenAPI specification object for Flux API.
+ * Shared by runtime Swagger UI (`setupSwagger`) and offline spec export (`scripts/ops/export-openapi.ts`).
  */
-export function setupSwagger(app: NestFastifyApplication): void {
-  const isProd = process.env.NODE_ENV === 'production';
-  const shouldEnableSwagger = !isProd || process.env.ENABLE_SWAGGER === 'true';
-
-  if (!shouldEnableSwagger) {
-    return;
-  }
-
+export function buildSwaggerDocument(app: NestFastifyApplication): OpenAPIObject {
   const config = new DocumentBuilder()
     .setTitle('Flux API')
     .setDescription(
@@ -67,7 +60,22 @@ export function setupSwagger(app: NestFastifyApplication): void {
     )
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
+  return SwaggerModule.createDocument(app, config);
+}
+
+/**
+ * OpenAPI / Swagger Specification Setup for Flux API.
+ * Enabled in development and staging by default, opt-in in production via ENABLE_SWAGGER=true.
+ */
+export function setupSwagger(app: NestFastifyApplication): void {
+  const isProd = process.env.NODE_ENV === 'production';
+  const shouldEnableSwagger = !isProd || process.env.ENABLE_SWAGGER === 'true';
+
+  if (!shouldEnableSwagger) {
+    return;
+  }
+
+  const document = buildSwaggerDocument(app);
   SwaggerModule.setup('docs', app, document, {
     swaggerOptions: {
       persistAuthorization: true,

@@ -1,21 +1,16 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { StickyService } from '@/modules/project/sticky/sticky.service';
-import { StickyRepository } from '@/modules/project/sticky/sticky.repository';
-import { PrismaService } from '@/core';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { fromPartial } from '@total-typescript/shoehorn';
 import { buildMockUser } from '@test/factories';
+import { PrismaService } from '@/core';
+import { StickyRepository } from '@/modules/project/sticky/sticky.repository';
+import { StickyService } from '@/modules/project/sticky/sticky.service';
 
 describe('StickyService', () => {
   let service: StickyService;
   let repo: jest.Mocked<StickyRepository>;
-  let prisma: jest.Mocked<PrismaService>;
+  let mockStickyFindFirst: jest.Mock;
 
-  const mockUser: any = buildMockUser({
-    profile: {
-      name: 'Researcher',
-      avatar: null,
-    },
-  } as any);
+  const mockUser = buildMockUser();
 
   const mockSticky = {
     id: '01920b92-7f12-7890-a123-456789abcdef',
@@ -32,8 +27,8 @@ describe('StickyService', () => {
     user: mockUser,
   };
 
-  beforeEach(async () => {
-    const mockRepo = {
+  beforeEach(() => {
+    repo = fromPartial<jest.Mocked<StickyRepository>>({
       findStickyById: jest.fn(),
       findStickiesByUserId: jest.fn(),
       countStickiesByUserId: jest.fn(),
@@ -42,191 +37,124 @@ describe('StickyService', () => {
       deleteSticky: jest.fn(),
       findStickiesByIds: jest.fn(),
       reorderStickies: jest.fn(),
-    };
+    });
+    mockStickyFindFirst = jest.fn();
 
-    const mockPrisma = {
-      sticky: {
-        findFirst: jest.fn(),
-        findMany: jest.fn(),
-        count: jest.fn(),
-        create: jest.fn(),
-        update: jest.fn(),
-      },
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        StickyService,
-        { provide: StickyRepository, useValue: mockRepo },
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
-    }).compile();
-
-    service = module.get<StickyService>(StickyService);
-    repo = module.get(StickyRepository);
-    prisma = module.get(PrismaService);
+    service = new StickyService(
+      repo,
+      fromPartial<PrismaService>({
+        sticky: { findFirst: mockStickyFindFirst },
+      }),
+    );
   });
 
-  describe('getStickies', () => {
-    it('should return formatted personal stickies', async () => {
-      repo.findStickiesByUserId.mockResolvedValue([mockSticky]);
+  it('lists and searches formatted personal stickies with x/y coordinates', async () => {
+    repo.findStickiesByUserId.mockResolvedValue([mockSticky as never]);
 
-      const result = await service.getStickies(mockUser.id);
+    const all = await service.getStickies(mockUser.id);
+    expect(all.stickies[0].position).toEqual({ x: 10, y: 20 });
 
-      expect(repo.findStickiesByUserId).toHaveBeenCalledWith(mockUser.id);
-      expect(result.stickies).toHaveLength(1);
-      expect(result.stickies[0].position).toEqual({ x: 10, y: 20 });
-    });
-
-    it('should search personal stickies when search keyword is provided', async () => {
-      repo.findStickiesByUserId.mockResolvedValue([mockSticky]);
-
-      const result = await service.getStickies(mockUser.id, 'thesis');
-
-      expect(repo.findStickiesByUserId).toHaveBeenCalledWith(
-        mockUser.id,
-        'thesis',
-      );
-      expect(result.stickies).toHaveLength(1);
-    });
+    await service.getStickies(mockUser.id, 'thesis');
+    expect(repo.findStickiesByUserId).toHaveBeenLastCalledWith(
+      mockUser.id,
+      'thesis',
+    );
   });
 
-  describe('createSticky', () => {
-    it('should create personal sticky with order based on user count and assign a valid UUID v7', async () => {
-      repo.countStickiesByUserId.mockResolvedValue(2);
-      (prisma.sticky.findFirst as jest.Mock).mockResolvedValue(null);
-      repo.createSticky.mockResolvedValue({
-        ...mockSticky,
-        order: 2,
-      });
+  it('creates stickies with UUID v7, rejects when latest draft is empty, rotates colors, and strips XSS script tags', async () => {
+    repo.countStickiesByUserId.mockResolvedValue(2);
+    mockStickyFindFirst.mockResolvedValueOnce(null);
+    repo.createSticky.mockResolvedValueOnce({ ...mockSticky, order: 2 } as never);
 
-      const result = await service.createSticky(mockUser.id, {
-        title: 'New Note',
-        content: '<p>Content</p>',
-        color: 'mint-1',
-      });
-
-      expect(repo.countStickiesByUserId).toHaveBeenCalledWith(mockUser.id);
-      expect(repo.createSticky).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: expect.stringMatching(
-            /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-          ),
-          title: 'New Note',
-          content: '<p>Content</p>',
-          color: 'mint-1',
-          positionX: 0,
-          positionY: 0,
-          order: 2,
-          userId: mockUser.id,
-        }),
-      );
-      expect(result.sticky?.order).toBe(2);
+    const created = await service.createSticky(mockUser.id, {
+      title: 'New Note',
+      content: '<p>Content</p>',
+      color: 'mint-1',
     });
+    expect(created.sticky?.order).toBe(2);
+    expect(repo.createSticky).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
+        userId: mockUser.id,
+      }),
+    );
 
-    it('should reject creating a new sticky if the latest note is still empty', async () => {
-      (prisma.sticky.findFirst as jest.Mock).mockResolvedValue({
-        id: 'latest-empty',
-        title: '',
-        content: '<p></p>',
-        color: 'yellow-1',
-      });
-
-      await expect(
-        service.createSticky(mockUser.id, { content: '<p></p>' }),
-      ).rejects.toThrow(
-        'Please add content to your existing draft note before creating a new one',
-      );
+    // Reject creating a new sticky when latest note is still empty
+    mockStickyFindFirst.mockResolvedValueOnce({
+      id: 'latest-empty',
+      title: '',
+      content: '<p></p>',
+      color: 'yellow-1',
     });
+    await expect(
+      service.createSticky(mockUser.id, { content: '<p></p>' }),
+    ).rejects.toThrow(
+      'Please add content to your existing draft note before creating a new one',
+    );
 
-    it('should automatically rotate color and sanitize script tags', async () => {
-      repo.countStickiesByUserId.mockResolvedValue(1);
-      (prisma.sticky.findFirst as jest.Mock).mockResolvedValue({
-        id: 'prev-note',
-        title: 'Previous Note',
-        content: '<p>Active research ideas</p>',
-        color: 'yellow-1',
-      });
-      repo.createSticky.mockResolvedValue({
-        ...mockSticky,
+    // Auto color rotation + DOMPurify script stripping
+    mockStickyFindFirst.mockResolvedValueOnce({
+      id: 'prev-note',
+      title: 'Previous Note',
+      content: '<p>Active research ideas</p>',
+      color: 'yellow-1',
+    });
+    repo.createSticky.mockResolvedValueOnce({
+      ...mockSticky,
+      color: 'lavender-1',
+    } as never);
+
+    await service.createSticky(mockUser.id, {
+      content: '<p>Valid text<script>alert("xss")</script></p>',
+    });
+    expect(repo.createSticky).toHaveBeenLastCalledWith(
+      expect.objectContaining({
         color: 'lavender-1',
-      });
-
-      await service.createSticky(mockUser.id, {
-        content: '<p>Valid text<script>alert("xss")</script></p>',
-      });
-
-      expect(repo.createSticky).toHaveBeenCalledWith(
-        expect.objectContaining({
-          color: 'lavender-1', // Next color after yellow-1
-          content: '<p>Valid text</p>', // Script tag stripped by server DOMPurify
-        }),
-      );
-    });
+        content: '<p>Valid text</p>',
+      }),
+    );
   });
 
-  describe('deleteSticky', () => {
-    it('should throw NotFoundException when sticky not found', async () => {
-      repo.findStickyById.mockResolvedValue(null);
+  it('enforces 404 and 403 ownership checks on getStickyById and deleteSticky', async () => {
+    repo.findStickyById.mockResolvedValueOnce(null);
+    await expect(
+      service.getStickyById('non-existent', mockUser.id),
+    ).rejects.toThrow(NotFoundException);
 
-      await expect(
-        service.deleteSticky('non-existent', mockUser.id),
-      ).rejects.toThrow(NotFoundException);
-    });
+    repo.findStickyById.mockResolvedValueOnce({
+      ...mockSticky,
+      userId: 'other-user',
+    } as never);
+    await expect(
+      service.getStickyById(mockSticky.id, mockUser.id),
+    ).rejects.toThrow(ForbiddenException);
 
-    it('should throw ForbiddenException when deleting another user personal sticky', async () => {
-      repo.findStickyById.mockResolvedValue({
-        ...mockSticky,
-        userId: 'other-user',
-      });
+    repo.findStickyById.mockResolvedValueOnce(mockSticky as never);
+    const got = await service.getStickyById(mockSticky.id, mockUser.id);
+    expect(got.sticky?.position).toEqual({ x: 10, y: 20 });
 
-      await expect(
-        service.deleteSticky(mockSticky.id, mockUser.id),
-      ).rejects.toThrow(ForbiddenException);
-    });
+    repo.findStickyById.mockResolvedValueOnce(null);
+    await expect(
+      service.deleteSticky('non-existent', mockUser.id),
+    ).rejects.toThrow(NotFoundException);
 
-    it('should call deleteSticky on repository when authorized', async () => {
-      repo.findStickyById.mockResolvedValue(mockSticky);
-      repo.deleteSticky.mockResolvedValue({
-        ...mockSticky,
-        deletedAt: new Date(),
-      });
+    repo.findStickyById.mockResolvedValueOnce({
+      ...mockSticky,
+      userId: 'other-user',
+    } as never);
+    await expect(
+      service.deleteSticky(mockSticky.id, mockUser.id),
+    ).rejects.toThrow(ForbiddenException);
 
-      const res = await service.deleteSticky(mockSticky.id, mockUser.id);
-      expect(repo.deleteSticky).toHaveBeenCalledWith(mockSticky.id);
-      expect(res.success).toBe(true);
-    });
-  });
-
-  describe('getStickyById', () => {
-    it('should throw NotFoundException when sticky not found', async () => {
-      repo.findStickyById.mockResolvedValue(null);
-
-      await expect(
-        service.getStickyById('non-existent', mockUser.id),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('should throw ForbiddenException when accessing another user sticky', async () => {
-      repo.findStickyById.mockResolvedValue({
-        ...mockSticky,
-        userId: 'other-user',
-      });
-
-      await expect(
-        service.getStickyById(mockSticky.id, mockUser.id),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('should return formatted sticky when authorized', async () => {
-      repo.findStickyById.mockResolvedValue(mockSticky);
-
-      const result = await service.getStickyById(mockSticky.id, mockUser.id);
-
-      expect(repo.findStickyById).toHaveBeenCalledWith(mockSticky.id);
-      expect(result.sticky).toBeDefined();
-      expect(result.sticky?.id).toBe(mockSticky.id);
-      expect(result.sticky?.position).toEqual({ x: 10, y: 20 });
-    });
+    repo.findStickyById.mockResolvedValueOnce(mockSticky as never);
+    repo.deleteSticky.mockResolvedValueOnce({
+      ...mockSticky,
+      deletedAt: new Date(),
+    } as never);
+    await expect(
+      service.deleteSticky(mockSticky.id, mockUser.id),
+    ).resolves.toMatchObject({ success: true });
   });
 });

@@ -25,19 +25,19 @@ import {
   Role,
   ResolvedSpace,
 } from '@/modules/project/access';
-import { isUuid } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
   getRecordSpaceId,
   resolveActiveProjectId,
+  resolveProjectIdByEntityId,
 } from '@/modules/pages/core';
-import { PageService } from '@/modules/pages/page/services/page.service';
 import { DocstoreService } from '../docstore.service';
 import { ScopeRepository } from '../repositories/scope.repository';
 
-@ApiTags('Pages - History & Export')
+@ApiTags('Pages - Documents')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -48,7 +48,7 @@ export class DocSyncController {
   constructor(
     private readonly docstoreService: DocstoreService,
     private readonly pageScopeRepo: ScopeRepository,
-    private readonly pageService: PageService,
+    private readonly prisma: PrismaService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
@@ -87,7 +87,7 @@ export class DocSyncController {
     const projectId =
       getRecordSpaceId(doc) ||
       activeProjectId ||
-      (await this.pageService.resolveProjectId(effectiveTargetId));
+      (await resolveProjectIdByEntityId(this.prisma, effectiveTargetId));
     if (!projectId) {
       throw new NotFoundException(
         `Document/project ${effectiveTargetId} not found`,

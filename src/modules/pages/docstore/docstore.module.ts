@@ -3,13 +3,11 @@
  * NestJS Module bundling Pages Docstore controllers, services, repositories, and adapters.
  */
 
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core';
 import { FilestoreModule } from '@/modules/pages/filestore';
 import { UserResolverService } from '@/modules/pages/core';
-import { PageModule } from '../page/page.module';
-import { DocController } from './controllers/doc.controller';
 import { DocSyncController } from './controllers/doc-sync.controller';
 import { SearchReplaceController } from './controllers/search-replace.controller';
 import { PresenceController } from './controllers/presence.controller';
@@ -28,10 +26,8 @@ import { ScopeRepository } from './repositories/scope.repository';
     ConfigModule,
     PrismaModule,
     FilestoreModule,
-    forwardRef(() => PageModule),
   ],
   controllers: [
-    DocController,
     DocSyncController,
     SearchReplaceController,
     PresenceController,

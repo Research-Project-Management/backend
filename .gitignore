@@ -51,6 +51,5 @@ uploads/
 # Local test scripts with credentials
 check-*.js
 seed-*.js
-test-runner.ts
 test_*.pdf
 

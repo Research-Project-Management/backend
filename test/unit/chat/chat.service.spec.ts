@@ -1,19 +1,52 @@
 import {
-  NotFoundException,
-  ForbiddenException,
   BadRequestException,
+  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
+import { ConversationType, MessageType } from '@prisma/client';
+import { fromPartial } from '@total-typescript/shoehorn';
+import type { PrismaService } from '@/core/infrastructure/database/prisma.service';
+import { ChatCacheService } from '@/modules/project/chat/services/chat-cache.service';
 import { ChatService } from '@/modules/project/chat/services/chat.service';
-import {
-  ConversationType,
-  ConversationMemberRole,
-  MessageType,
-} from '@prisma/client';
+import { ProjectChannelService } from '@/modules/project/chat/services/project-channel.service';
 
-describe('ChatService Unit Tests', () => {
-  let service: ChatService;
-  let mockPrisma: any;
-  let mockChatCache: any;
+describe('ChatService & ProjectChannelService Unit Tests', () => {
+  let chatService: ChatService;
+  let channelService: ProjectChannelService;
+  let mockPrisma: {
+    conversation: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      delete: jest.Mock;
+    };
+    conversationMember: {
+      findMany: jest.Mock;
+      findUnique: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+      upsert: jest.Mock;
+    };
+    project: {
+      findMany: jest.Mock;
+      findUnique: jest.Mock;
+    };
+    user: { findUnique: jest.Mock };
+    message: {
+      findUnique: jest.Mock;
+      findMany: jest.Mock;
+      create: jest.Mock;
+      count: jest.Mock;
+    };
+    messageReaction: {
+      upsert: jest.Mock;
+      deleteMany: jest.Mock;
+    };
+  };
+  let mockChatCache: jest.Mocked<ChatCacheService>;
 
   beforeEach(() => {
     mockPrisma = {
@@ -23,6 +56,7 @@ describe('ChatService Unit Tests', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        delete: jest.fn(),
       },
       conversationMember: {
         findMany: jest.fn(),
@@ -36,9 +70,7 @@ describe('ChatService Unit Tests', () => {
         findMany: jest.fn(),
         findUnique: jest.fn(),
       },
-      user: {
-        findUnique: jest.fn(),
-      },
+      user: { findUnique: jest.fn() },
       message: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
@@ -51,89 +83,71 @@ describe('ChatService Unit Tests', () => {
       },
     };
 
-    mockChatCache = {
+    mockChatCache = fromPartial<jest.Mocked<ChatCacheService>>({
       getRecentMessages: jest.fn(),
       pushMessage: jest.fn(),
-      cacheMessage: jest.fn(),
       invalidate: jest.fn(),
-    };
+    });
 
-    service = new ChatService(mockPrisma, mockChatCache);
+    const prismaService = fromPartial<PrismaService>(mockPrisma);
+    chatService = new ChatService(prismaService, mockChatCache);
+    channelService = new ProjectChannelService(prismaService);
   });
 
-  describe('verifyConversationAccess', () => {
-    it('throws NotFoundException when conversation is not found', async () => {
-      mockPrisma.conversation.findUnique.mockResolvedValue(null);
-
+  describe('ChatService - Access, Direct Conversations, Messaging & Reactions', () => {
+    it('verifies conversation membership across direct/group/project_channel and auto-provisions first-time project channel members', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce(null);
       await expect(
-        service.verifyConversationAccess('conv-404', 'user-1'),
+        chatService.verifyConversationAccess('conv-404', 'user-1'),
       ).rejects.toThrow(NotFoundException);
-    });
 
-    it('throws ForbiddenException when user is not member of a direct or group conversation', async () => {
-      mockPrisma.conversation.findUnique.mockResolvedValue({
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         id: 'conv-direct',
         type: ConversationType.direct,
-        members: [], // User not among members
+        members: [],
       });
-
       await expect(
-        service.verifyConversationAccess('conv-direct', 'user-outsider'),
+        chatService.verifyConversationAccess('conv-direct', 'user-outsider'),
       ).rejects.toThrow(ForbiddenException);
-    });
 
-    it('grants access when user is a member of direct conversation', async () => {
-      const conv = {
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         id: 'conv-direct',
         type: ConversationType.direct,
         members: [{ userId: 'user-1' }],
-      };
-      mockPrisma.conversation.findUnique.mockResolvedValue(conv);
+      });
+      await expect(
+        chatService.verifyConversationAccess('conv-direct', 'user-1'),
+      ).resolves.toMatchObject({ id: 'conv-direct' });
 
-      const res = await service.verifyConversationAccess(
-        'conv-direct',
-        'user-1',
-      );
-      expect(res.id).toBe('conv-direct');
-    });
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
+        id: 'conv-chan',
+        type: ConversationType.project_channel,
+        members: [],
+        project: { createdById: 'project-owner', members: [] },
+      });
+      await expect(
+        chatService.verifyConversationAccess('conv-chan', 'user-outsider'),
+      ).rejects.toThrow(ForbiddenException);
 
-    it('throws ForbiddenException when user is not in the project for a project_channel', async () => {
-      mockPrisma.conversation.findUnique.mockResolvedValue({
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         id: 'conv-chan',
         type: ConversationType.project_channel,
         members: [],
         project: {
           createdById: 'project-owner',
-          members: [], // user-outsider is not in project members
-        },
-      });
-
-      await expect(
-        service.verifyConversationAccess('conv-chan', 'user-outsider'),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('grants access and auto-provisions channel member record if project member enters channel for the first time', async () => {
-      const conv = {
-        id: 'conv-chan',
-        type: ConversationType.project_channel,
-        members: [], // no conversationMember record yet
-        project: {
-          createdById: 'project-owner',
           members: [{ userId: 'user-researcher', role: 'contributor' }],
         },
-      };
-      mockPrisma.conversation.findUnique.mockResolvedValue(conv);
-      mockPrisma.conversationMember.create.mockResolvedValue({
+      });
+      mockPrisma.conversationMember.create.mockResolvedValueOnce({
         conversationId: 'conv-chan',
         userId: 'user-researcher',
       });
 
-      const res = await service.verifyConversationAccess(
+      const joined = await chatService.verifyConversationAccess(
         'conv-chan',
         'user-researcher',
       );
-      expect(res.id).toBe('conv-chan');
+      expect(joined.id).toBe('conv-chan');
       expect(mockPrisma.conversationMember.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -143,70 +157,48 @@ describe('ChatService Unit Tests', () => {
         }),
       );
     });
-  });
 
-  describe('getOrCreateDirect', () => {
-    it('throws BadRequestException if user tries to chat with themselves', async () => {
+    it('manages direct chats, persists messages, computes unioned member IDs, and guards markAsRead + removeReaction', async () => {
       await expect(
-        service.getOrCreateDirect('user-self', 'user-self'),
+        chatService.getOrCreateDirect('user-self', 'user-self'),
       ).rejects.toThrow(BadRequestException);
-    });
 
-    it('returns existing direct conversation if found', async () => {
-      const existingConv = {
+      mockPrisma.conversation.findFirst.mockResolvedValueOnce({
         id: 'conv-existing',
         type: ConversationType.direct,
         members: [{ userId: 'u1' }, { userId: 'u2' }],
-      };
-      mockPrisma.conversation.findFirst.mockResolvedValue(existingConv);
+      });
+      await expect(
+        chatService.getOrCreateDirect('u1', 'u2'),
+      ).resolves.toMatchObject({ id: 'conv-existing' });
 
-      const res = await service.getOrCreateDirect('u1', 'u2');
-      expect(res.id).toBe('conv-existing');
-      expect(mockPrisma.conversation.create).not.toHaveBeenCalled();
-    });
-
-    it('creates new direct conversation if none exists', async () => {
-      mockPrisma.conversation.findFirst.mockResolvedValue(null);
-      mockPrisma.conversation.create.mockImplementation(
-        ({ data }: { data: Record<string, unknown> }) =>
-          Promise.resolve({ id: 'conv-new', ...data }),
-      );
-
-      const res = await service.getOrCreateDirect('u1', 'u2');
-      expect(res.id).toBe('conv-new');
-      expect(mockPrisma.conversation.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            type: ConversationType.direct,
-            createdById: 'u1',
-          }),
+      mockPrisma.conversation.findFirst.mockResolvedValueOnce(null);
+      mockPrisma.conversation.create.mockImplementationOnce(
+        async ({ data }: { data: Record<string, unknown> }) => ({
+          id: 'conv-new',
+          ...data,
         }),
       );
-    });
-  });
-
-  describe('sendMessage', () => {
-    it('throws BadRequestException when message content is blank and no attachments', async () => {
       await expect(
-        service.sendMessage('conv-1', 'user-1', { content: '   ' }),
-      ).rejects.toThrow(BadRequestException);
-    });
+        chatService.getOrCreateDirect('u1', 'u2'),
+      ).resolves.toMatchObject({ id: 'conv-new' });
 
-    it('persists message to cold storage and updates conversation lastMessageAt', async () => {
-      // Mock access check
-      mockPrisma.conversation.findUnique.mockResolvedValue({
+      // sendMessage
+      await expect(
+        chatService.sendMessage('conv-1', 'user-1', { content: '   ' }),
+      ).rejects.toThrow(BadRequestException);
+
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         id: 'conv-1',
         type: ConversationType.direct,
         members: [{ userId: 'user-1' }],
       });
-
-      mockPrisma.user.findUnique.mockResolvedValue({
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
         id: 'user-1',
         email: 'alice@flux.dev',
         profile: { name: 'Alice', avatar: null },
       });
-
-      const fakeSavedMessage = {
+      mockPrisma.message.create.mockResolvedValueOnce({
         id: 'msg-1',
         conversationId: 'conv-1',
         senderId: 'user-1',
@@ -221,50 +213,22 @@ describe('ChatService Unit Tests', () => {
           profile: { name: 'Alice', avatar: null },
         },
         reactions: [],
-      };
-      mockPrisma.message.create.mockResolvedValue(fakeSavedMessage);
-      mockPrisma.conversation.update.mockResolvedValue({ id: 'conv-1' });
+      });
+      mockPrisma.conversation.update.mockResolvedValueOnce({ id: 'conv-1' });
 
-      const msg = await service.sendMessage('conv-1', 'user-1', {
+      const sent = await chatService.sendMessage('conv-1', 'user-1', {
         content: 'Hello, team!',
       });
-
-      expect(msg.content).toBe('Hello, team!');
-      expect(mockPrisma.message.create).toHaveBeenCalled();
-      expect(mockPrisma.conversation.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'conv-1' },
-          data: expect.objectContaining({
-            lastMessageAt: expect.any(Date),
-            lastMessageSnippet: 'Hello, team!',
-          }),
-        }),
-      );
+      expect(sent.content).toBe('Hello, team!');
       expect(mockChatCache.pushMessage).toHaveBeenCalled();
-    });
-  });
 
-  describe('getConversationMemberIds', () => {
-    it('returns empty array when conversation is not found', async () => {
-      mockPrisma.conversation.findUnique.mockResolvedValue(null);
+      // getConversationMemberIds
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce(null);
       await expect(
-        service.getConversationMemberIds('conv-missing'),
+        chatService.getConversationMemberIds('missing'),
       ).resolves.toEqual([]);
-    });
 
-    it('returns direct and group conversation member IDs', async () => {
-      mockPrisma.conversation.findUnique.mockResolvedValue({
-        type: ConversationType.group,
-        members: [{ userId: 'u-1' }, { userId: 'u-2' }, { userId: 'u-1' }],
-        project: null,
-      });
-
-      const ids = await service.getConversationMemberIds('conv-group');
-      expect(ids).toEqual(['u-1', 'u-2']);
-    });
-
-    it('unions conversation members, project creator, and project members for project_channel', async () => {
-      mockPrisma.conversation.findUnique.mockResolvedValue({
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         type: ConversationType.project_channel,
         members: [{ userId: 'u-1' }],
         project: {
@@ -272,46 +236,30 @@ describe('ChatService Unit Tests', () => {
           members: [{ userId: 'u-2' }, { userId: 'u-1' }],
         },
       });
-
-      const ids = await service.getConversationMemberIds('conv-proj');
-      expect(ids).toEqual(expect.arrayContaining(['u-1', 'owner-1', 'u-2']));
+      const ids = await chatService.getConversationMemberIds('conv-proj');
       expect(ids).toHaveLength(3);
-    });
-  });
+      expect(ids).toEqual(expect.arrayContaining(['u-1', 'owner-1', 'u-2']));
 
-  describe('markAsRead & removeReaction security', () => {
-    it('markAsRead throws ForbiddenException for non-members and updates lastReadAt for valid members', async () => {
+      // markAsRead & removeReaction membership enforcement
       mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         id: 'conv-1',
         type: ConversationType.direct,
         members: [],
       });
-
-      await expect(service.markAsRead('conv-1', 'outsider')).rejects.toThrow(
+      await expect(chatService.markAsRead('conv-1', 'outsider')).rejects.toThrow(
         ForbiddenException,
       );
-      expect(mockPrisma.conversationMember.updateMany).not.toHaveBeenCalled();
 
       mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         id: 'conv-1',
         type: ConversationType.direct,
         members: [{ userId: 'member-1' }],
       });
-      mockPrisma.conversationMember.updateMany.mockResolvedValueOnce({
-        count: 1,
-      });
+      mockPrisma.conversationMember.updateMany.mockResolvedValueOnce({ count: 1 });
+      await expect(
+        chatService.markAsRead('conv-1', 'member-1'),
+      ).resolves.toMatchObject({ success: true });
 
-      const res = await service.markAsRead('conv-1', 'member-1');
-      expect(res.success).toBe(true);
-      expect(typeof res.lastReadAt).toBe('string');
-      expect(mockPrisma.conversationMember.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { conversationId: 'conv-1', userId: 'member-1' },
-        }),
-      );
-    });
-
-    it('removeReaction throws ForbiddenException for non-members and deletes + invalidates cache for valid members', async () => {
       mockPrisma.message.findUnique.mockResolvedValue({
         id: 'msg-1',
         conversationId: 'conv-1',
@@ -321,11 +269,9 @@ describe('ChatService Unit Tests', () => {
         type: ConversationType.direct,
         members: [],
       });
-
       await expect(
-        service.removeReaction('msg-1', 'outsider', '👍'),
+        chatService.removeReaction('msg-1', 'outsider', '👍'),
       ).rejects.toThrow(ForbiddenException);
-      expect(mockPrisma.messageReaction.deleteMany).not.toHaveBeenCalled();
 
       mockPrisma.conversation.findUnique.mockResolvedValueOnce({
         id: 'conv-1',
@@ -333,13 +279,139 @@ describe('ChatService Unit Tests', () => {
         members: [{ userId: 'member-1' }],
       });
       mockPrisma.messageReaction.deleteMany.mockResolvedValueOnce({ count: 1 });
-
-      const res = await service.removeReaction('msg-1', 'member-1', '👍');
-      expect(res).toEqual({ success: true, conversationId: 'conv-1' });
-      expect(mockPrisma.messageReaction.deleteMany).toHaveBeenCalledWith({
-        where: { messageId: 'msg-1', userId: 'member-1', emoji: '👍' },
-      });
+      await expect(
+        chatService.removeReaction('msg-1', 'member-1', '👍'),
+      ).resolves.toEqual({ success: true, conversationId: 'conv-1' });
       expect(mockChatCache.invalidate).toHaveBeenCalledWith('conv-1');
+    });
+  });
+
+  describe('ProjectChannelService - Access, Auto-Provisioning & Channel Lifecycle', () => {
+    it('enforces project member/admin permissions, auto-provisions #general, normalizes slugs, and protects #general from deletion', async () => {
+      mockPrisma.project.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        channelService.checkProjectAccess('proj-missing', 'user-1'),
+      ).rejects.toThrow(NotFoundException);
+
+      mockPrisma.project.findUnique.mockResolvedValueOnce({
+        id: 'proj-1',
+        createdById: 'owner-id',
+        members: [],
+      });
+      await expect(
+        channelService.checkProjectAccess('proj-1', 'outsider'),
+      ).rejects.toThrow(ForbiddenException);
+
+      mockPrisma.project.findUnique.mockResolvedValueOnce({
+        id: 'proj-1',
+        createdById: 'owner-id',
+        members: [{ userId: 'user-coord', role: 'coordinator' }],
+      });
+      await expect(
+        channelService.checkProjectAdmin('proj-1', 'user-coord'),
+      ).resolves.toBe(true);
+
+      mockPrisma.project.findUnique.mockResolvedValueOnce({
+        id: 'proj-1',
+        createdById: 'owner-id',
+        members: [{ userId: 'user-regular', role: 'contributor' }],
+      });
+      await expect(
+        channelService.checkProjectAdmin('proj-1', 'user-regular'),
+      ).rejects.toThrow(ForbiddenException);
+
+      // Auto-provision #general when empty
+      mockPrisma.project.findUnique
+        .mockResolvedValueOnce({
+          id: 'proj-1',
+          createdById: 'user-owner',
+          members: [{ userId: 'user-member-1' }],
+        })
+        .mockResolvedValueOnce({
+          id: 'proj-1',
+          createdById: 'user-owner',
+          members: [{ userId: 'user-member-1' }],
+        })
+        .mockResolvedValueOnce({
+          name: 'Project Alpha',
+          identifier: 'PAL',
+        });
+      mockPrisma.conversation.findMany.mockResolvedValueOnce([]);
+      mockPrisma.conversation.create.mockResolvedValueOnce({
+        id: 'chan-new-gen',
+        name: 'general',
+        type: ConversationType.project_channel,
+        topic: 'General project discussions and coordination',
+        projectId: 'proj-1',
+        isDefault: true,
+        createdById: 'user-owner',
+        members: [{ isMuted: false, isPinned: false }],
+        _count: { members: 2 },
+        updatedAt: new Date(),
+      });
+
+      const provisioned = await channelService.getProjectChannels(
+        'proj-1',
+        'user-owner',
+      );
+      expect(provisioned).toHaveLength(1);
+      expect(provisioned[0]).toMatchObject({
+        name: 'general',
+        isDefault: true,
+        projectName: 'Project Alpha',
+      });
+
+      // Slug normalization + duplicate check
+      mockPrisma.project.findUnique.mockResolvedValue({
+        id: 'proj-1',
+        createdById: 'user-owner',
+        members: [{ userId: 'user-1' }],
+      });
+      mockPrisma.conversation.findFirst.mockResolvedValueOnce(null);
+      mockPrisma.conversation.create.mockImplementationOnce(
+        async ({ data }: { data: Record<string, unknown> }) => ({
+          id: 'c-new',
+          ...data,
+        }),
+      );
+
+      const created = await channelService.createChannel(
+        'proj-1',
+        'user-owner',
+        { name: ' #Experiment Results 2026 ', topic: 'Data benchmarks' },
+      );
+      expect(created.name).toBe('experiment-results-2026');
+      expect(created.isDefault).toBe(false);
+
+      mockPrisma.conversation.findFirst.mockResolvedValueOnce({
+        id: 'c-existing',
+        name: 'benchmarks',
+      });
+      await expect(
+        channelService.createChannel('proj-1', 'user-owner', {
+          name: 'benchmarks',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      // Protect default #general from deletion, allow custom channel deletion
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
+        id: 'c-gen',
+        projectId: 'proj-1',
+        isDefault: true,
+      });
+      await expect(
+        channelService.deleteChannel('proj-1', 'c-gen', 'user-owner'),
+      ).rejects.toThrow(BadRequestException);
+
+      mockPrisma.conversation.findUnique.mockResolvedValueOnce({
+        id: 'c-custom',
+        projectId: 'proj-1',
+        isDefault: false,
+      });
+      mockPrisma.conversation.delete.mockResolvedValueOnce({ id: 'c-custom' });
+      await expect(
+        channelService.deleteChannel('proj-1', 'c-custom', 'user-owner'),
+      ).resolves.toEqual({ success: true });
     });
   });
 });

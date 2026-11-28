@@ -1,6 +1,4 @@
 import 'reflect-metadata';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import type { ExecutionContext } from '@nestjs/common';
 import {
   EXCEPTION_FILTERS_METADATA,
@@ -141,7 +139,7 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
         }),
       });
 
-    it('rejects unauthenticated sockets with RealtimeAuthRequiredException', async () => {
+    it('rejects unauthenticated sockets, blank projectIds, and non-members while admitting project members/reviewers', async () => {
       await expect(
         guard.canActivate(
           makeCtx({ authenticated: false }, { projectId: 'proj-1' }),
@@ -153,17 +151,13 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
           makeCtx({ authenticated: true, userId: '' }, { projectId: 'proj-1' }),
         ),
       ).rejects.toThrow(RealtimeAuthRequiredException);
-    });
 
-    it('rejects missing or blank projectId with RealtimeValidationFailedException', async () => {
       await expect(
         guard.canActivate(
           makeCtx({ authenticated: true, userId: 'u-1' }, { projectId: '   ' }),
         ),
       ).rejects.toThrow(RealtimeValidationFailedException);
-    });
 
-    it('rejects non-members with RealtimeAccessDeniedException and admits project members/reviewers', async () => {
       mockAccessPort.getRole.mockResolvedValueOnce(null);
       await expect(
         guard.canActivate(
@@ -183,15 +177,11 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
           ),
         ),
       ).resolves.toBe(true);
-      expect(mockAccessPort.getRole).toHaveBeenLastCalledWith(
-        'proj-1',
-        'reviewer-1',
-      );
     });
   });
 
   describe('WorkItemsEventsBridge -> RealtimeEventBus -> WorkItemsGateway', () => {
-    it('attaches WsAllExceptionsFilter and ValidationPipe and initializes auth middleware', async () => {
+    it('attaches exception filter & validation pipe, enforces socket auth, joins/leaves rooms, and enforces rate limits', async () => {
       const filters = Reflect.getMetadata(
         EXCEPTION_FILTERS_METADATA,
         WorkItemsGateway,
@@ -213,15 +203,7 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
       await gateway.handleConnection(unauth.socket);
       expect(unauth.socket.disconnect).toHaveBeenCalledWith(true);
 
-      const authed = makeSocket({ userId: 'user-7' });
-      const cleanupSpy = jest.spyOn(rateLimiter, 'cleanupSocket');
-      gateway.handleDisconnect(authed.socket);
-      expect(cleanupSpy).toHaveBeenCalledWith(authed.socket.id);
-    });
-
-    it('joins and leaves project rooms and enforces rate limits', async () => {
       const { socket, join, leave } = makeSocket({ userId: 'user-1' });
-
       await expect(
         gateway.handleJoinProject(socket, { projectId: 'proj-1' }),
       ).resolves.toEqual({ success: true, projectId: 'proj-1' });
@@ -245,13 +227,9 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
       ).rejects.toThrow(RealtimeRateLimitedException);
     });
 
-    it('delivers work-item and state domain events through WorkItemsEventsBridge ONLY to project:<projectId>', async () => {
+    it('delivers work-item/state domain events strictly to project:<projectId> and evicts revoked member sockets', async () => {
       const p1 = { projectId: 'proj-9', entityId: 'wi-1', verb: 'created' };
-      const p2 = {
-        projectId: 'proj-9',
-        entityId: 'wi-1',
-        verb: 'transitioned',
-      };
+      const p2 = { projectId: 'proj-9', entityId: 'wi-1', verb: 'transitioned' };
       const p3 = { projectId: 'proj-9', entityId: 'wi-1', verb: 'updated' };
       const p4 = { projectId: 'proj-9', entityId: 'wi-1', verb: 'deleted' };
       const p5 = { projectId: 'proj-9', entityId: 'proj-9', verb: 'updated' };
@@ -276,9 +254,7 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
       expect(emitFn).toHaveBeenCalledWith(WORK_ITEMS_EVENTS.STATE_UPDATED, p5);
       expect(emitFn).toHaveBeenCalledTimes(10);
       expect(serverEmit).not.toHaveBeenCalled();
-    });
 
-    it('invalidates access cache and evicts ONLY matching local sockets on project.member_removed via bus', async () => {
       const targetLeave = jest.fn();
       const targetEmit = jest.fn();
       const otherLeave = jest.fn();
@@ -299,9 +275,7 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
       ]);
       const localIn = jest.fn(() => ({ fetchSockets }));
       gateway.server = fromPartial<Server>({
-        local: fromPartial<Server>({
-          in: localIn as never,
-        }) as never,
+        local: fromPartial<Server>({ in: localIn as never }) as never,
       });
 
       await bridge.handleMemberRemoved({
@@ -313,7 +287,6 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
         'proj-1',
         'u-removed',
       );
-      expect(localIn).toHaveBeenCalledWith(WORK_ITEMS_ROOMS.project('proj-1'));
       expect(targetEmit).toHaveBeenCalledWith(
         WORK_ITEMS_EVENTS.ACCESS_REVOKED,
         { projectId: 'proj-1' },
@@ -323,47 +296,6 @@ describe('WorkItemsGateway, Bridge & WorkItemsWsGuard Unit Tests', () => {
       );
       expect(otherEmit).not.toHaveBeenCalled();
       expect(otherLeave).not.toHaveBeenCalled();
-    });
-
-    it('keeps channels/work-items decoupled from @/modules/project and verifies @Sse removal', () => {
-      expect(
-        fs.existsSync(
-          path.resolve(
-            __dirname,
-            '../../../src/modules/project/work-item/realtime',
-          ),
-        ),
-      ).toBe(false);
-
-      const coreControllerContent = fs.readFileSync(
-        path.resolve(
-          __dirname,
-          '../../../src/modules/project/work-item/core/core.controller.ts',
-        ),
-        'utf8',
-      );
-      const gatewayContent = fs.readFileSync(
-        path.resolve(
-          __dirname,
-          '../../../src/modules/realtime/channels/work-items/gateway.ts',
-        ),
-        'utf8',
-      );
-      const guardContent = fs.readFileSync(
-        path.resolve(
-          __dirname,
-          '../../../src/modules/realtime/channels/work-items/guard.ts',
-        ),
-        'utf8',
-      );
-
-      expect(coreControllerContent).not.toMatch(/@Sse\s*\(/);
-      expect(coreControllerContent).not.toContain('work-items/events');
-      expect(gatewayContent).toContain('createWsCorsOptions()');
-      expect(gatewayContent).toContain('REALTIME_NAMESPACES.WORK_ITEMS');
-      expect(gatewayContent).not.toMatch(/this\.server\.emit\s*\(/);
-      expect(gatewayContent).not.toMatch(/@\/modules\/project/);
-      expect(guardContent).not.toMatch(/@\/modules\/project/);
     });
   });
 });

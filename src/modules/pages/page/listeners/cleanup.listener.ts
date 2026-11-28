@@ -14,7 +14,7 @@ import {
   FilestoreRepository,
   FilestoreService,
 } from '@/modules/pages/filestore';
-import { IDocPersistor } from '@/modules/pages/docstore/domain/doc.ports';
+import { IDocPersistor } from '@/modules/pages/docstore';
 
 interface ProjectDeletedEvent {
   projectId?: string;

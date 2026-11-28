@@ -6,7 +6,7 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { getRecordSpaceId } from '@/modules/pages/core';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+import { ScopeRepository } from '@/modules/pages/docstore';
 import { PageRepository, type ResolvedSpaceLabel } from '../page.repository';
 
 export async function resolveProjectLabels(

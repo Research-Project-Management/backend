@@ -12,13 +12,12 @@ import { PrismaService, isUuid } from '@/core';
 import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
-  hydratePageDocLines,
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
   UserResolverService,
 } from '@/modules/pages/core';
-import { DocstoreService } from '@/modules/pages/docstore';
+import { DocstoreService, hydratePageDocLines } from '@/modules/pages/docstore';
 import {
   InvalidTemplateError,
   TemplateForbiddenError,

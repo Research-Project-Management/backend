@@ -9,8 +9,11 @@
     "src/realtime.ts",
     "src/realtime.module.ts",
     "prisma/seed.ts",
-    "scripts/*.{ts,mjs}"
+    "scripts/ops/*.ts",
+    "scripts/gates/run-gates.ts",
+    "scripts/gates/run-unit-tests-ci.ts",
+    "scripts/gates/verify-diff-coverage.ts"
   ],
   "project": ["src/**/*.ts", "scripts/**/*.{ts,mjs}", "prisma/**/*.ts"],
-  "ignoreDependencies": ["lint-staged", "dictionary-.*"]
+  "ignoreDependencies": ["dictionary-.*"]
 }
