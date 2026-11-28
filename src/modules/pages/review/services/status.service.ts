@@ -12,7 +12,7 @@ import { isPrismaUniqueConstraintError } from '@/modules/pages/core/utils/page-s
 import { PageService } from '@/modules/pages/page/services/page.service';
 import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { ReviewRoundInfo } from '@/modules/pages/docstore/domain';
+import { ReviewRoundInfo } from '@/modules/pages/docstore/domain/doc-range';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 import { Role } from '@/modules/project/access';
 import { reviewTransitionPolicy } from '../domain/review.policy';

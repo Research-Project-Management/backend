@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/structure/dto/node.dto.ts
- * Data Transfer Objects for Manuscript Structure API.
+ * modules/pages/structure/dto/node.dto.ts
+ * Data Transfer Objects for Pages Structure API.
  */
 
 import {
@@ -62,7 +62,7 @@ export class CreateNodeDto {
 
   @ApiPropertyOptional({
     description:
-      'Optional parent Manuscript Page UUID isolating VFS tree within a Space',
+      'Optional parent Page UUID isolating VFS tree within a Space',
   })
   @IsUUID()
   @IsOptional()

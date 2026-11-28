@@ -1,7 +1,7 @@
 /**
  * filestore/adapters/filestore.adapters.ts
- * Driven Storage & Content-Hashing Adapters for Manuscripts Filestore:
- * - ContentHasherAdapter (Port: IContentHasherPort)
+ * Driven Storage Adapters & Content Hashing Helpers for Pages Filestore:
+ * - ContentHasherAdapter (Direct Git-blob SHA-1 + SHA-256 stream/buffer hasher)
  * - PlatformBinaryStorageAdapter (Port: IBinaryStoragePort -> unified with @/modules/files)
  * - LocalDiskBinaryStorageAdapter (Port: IBinaryStoragePort - standalone/test fallback adapter)
  */
@@ -15,22 +15,21 @@ import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
+import { IBinaryStoragePort } from '../domain/filestore.ports';
 import {
-  IBinaryStoragePort,
-  IContentHasherPort,
   StorageObjectMetadata,
   StorageRangeOptions,
   StorageUploadOptions,
   StreamHashResult,
-  ContentHash,
-  StorageKey,
+} from '../types/filestore.types';
+import { ContentHash, StorageKey } from '../domain/file.entity';
+import {
   FilestoreValidationException,
   MAX_FILE_SIZE_BYTES,
   StorageQuotaExceededException,
-} from '../filestore.types';
+} from '../domain/filestore.errors';
 
-@Injectable()
-export class ContentHasherAdapter extends IContentHasherPort {
+export class ContentHasherAdapter {
   public async hashStream(stream: Readable): Promise<StreamHashResult> {
     const tempDir = path.join(os.tmpdir(), 'flux-filestore-spool');
     await fs.promises.mkdir(tempDir, { recursive: true });
@@ -127,7 +126,7 @@ export { ContentHasherAdapter as CryptoGitBlobHasherAdapter };
 
 /**
  * Unified Platform Binary Storage Adapter (Overleaf Filestore -> Flux FilesModule bridge).
- * Delegates all physical object I/O for manuscript binary assets and cold-tier doc archives
+ * Delegates all physical object I/O for page binary assets and cold-tier doc archives
  * to FilesModule (`FILES_PORT` / `IFilesPort`),
  * eliminating duplicate S3Client instances and fragmented disk storage.
  */

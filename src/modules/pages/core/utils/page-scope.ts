@@ -250,7 +250,7 @@ export function resolvePageControllerCoordinates(
     pageId?: string;
     docId?: string;
   },
-  resolvedProject?: string | { id?: string } | null,
+  resolvedProject?: string | { id?: string; spaceId?: string } | null,
   queryPageId?: string,
   req?: unknown,
 ): { spaceId: string; pageId?: string } {
@@ -260,14 +260,16 @@ export function resolvePageControllerCoordinates(
       : undefined;
   const reqSpaceId =
     typeof reqCtx?.resolvedSpaceId === 'string'
-      ? reqCtx.resolvedSpaceId
+      ? reqCtx.resolvedSpaceId.trim() || undefined
       : undefined;
   const reqPageId =
     typeof reqCtx?.resolvedPageId === 'string'
-      ? reqCtx.resolvedPageId
+      ? reqCtx.resolvedPageId.trim() || undefined
       : undefined;
   const authorized =
-    typeof resolvedProject === 'string' ? resolvedProject : resolvedProject?.id;
+    typeof resolvedProject === 'string'
+      ? resolvedProject.trim() || undefined
+      : (resolvedProject?.spaceId ?? resolvedProject?.id)?.trim() || undefined;
   const spaceId =
     authorized ||
     reqSpaceId ||

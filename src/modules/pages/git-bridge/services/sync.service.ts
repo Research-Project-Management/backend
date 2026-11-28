@@ -170,7 +170,10 @@ export class SyncService {
           path.repo,
           content,
           undefined,
-          pageId ? { pageId } : undefined,
+          {
+            syncStructureNode: false,
+            ...(pageId ? { pageId } : {}),
+          },
         );
         await this.structure.createNode(
           spaceId,
@@ -586,13 +589,20 @@ export class SyncService {
   ): Promise<boolean> {
     const node = await this.findNode(spaceId, pageId, path.project);
     if (!node) return false;
-    if (node.docId) {
-      await this.docstore.patchDoc(spaceId, node.docId, { deleted: true });
+    try {
+      await this.structure.deleteNode(spaceId, node.id);
+    } catch (err: unknown) {
+      const status =
+        (err as { status?: number; statusCode?: number })?.status ??
+        (err as { status?: number; statusCode?: number })?.statusCode;
+      if (
+        status === 404 ||
+        (err instanceof Error && err.name === 'NodeNotFoundError')
+      ) {
+        return true;
+      }
+      throw err;
     }
-    if (node.fileId) {
-      await this.filestore.deleteFile(spaceId, node.fileId, false);
-    }
-    await this.structure.deleteNode(spaceId, node.id);
     return true;
   }
 

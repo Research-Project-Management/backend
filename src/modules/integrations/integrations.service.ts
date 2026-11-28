@@ -1,11 +1,17 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
   Optional,
   Logger,
 } from '@nestjs/common';
-import { RedisCacheService } from '@/core';
+import { RedisCacheService, isUuid } from '@/core';
+import {
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+} from '@/modules/pages/core/ports/live-collaboration.port';
+import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { INTEGRATIONS_CACHE_KEYS } from './integrations.cache-keys';
 import { UserIntegration } from '@prisma/client';
 import { IntegrationsRepository } from './integrations.repository';
@@ -70,6 +76,11 @@ export class IntegrationsService {
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional() private readonly structureService?: StructureService,
     @Optional() private readonly redis?: RedisCacheService,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    private readonly liveCollab?: LiveCollaborationPort,
+    @Optional()
+    private readonly domainEventBus?: PageDomainEventBus,
   ) {
     this.providers.set(this.zoteroProvider.provider, this.zoteroProvider);
     this.providers.set(this.mendeleyProvider.provider, this.mendeleyProvider);
@@ -517,12 +528,39 @@ export class IntegrationsService {
     );
   }
 
+  private async notifyBibDocMutated(
+    spaceId: string,
+    docId: string,
+    lines: string[],
+    version: number,
+  ): Promise<void> {
+    if (this.domainEventBus) {
+      await this.domainEventBus.publish({
+        type: 'manuscript.document.mutated',
+        projectId: spaceId,
+        docId,
+        lines,
+        version,
+        source: 'citations',
+        occurredAt: Date.now(),
+      });
+    } else {
+      await this.liveCollab
+        ?.applyExternalText(spaceId, docId, lines.join('\n'))
+        .catch(() => {});
+    }
+  }
+
   async syncPageCollection(
     userId: string,
     provider: IntegrationProviderType,
     dto: SyncCollectionDto,
   ) {
-    await this.repo.assertUserPageAccess(userId, dto.pageId, 'write');
+    const page = await this.repo.requireAuthorizedPage(
+      userId,
+      dto.pageId,
+      'write',
+    );
     const conn = await this.repo.findConnection(userId, provider);
     if (!conn) {
       throw new NotFoundException(
@@ -552,24 +590,37 @@ export class IntegrationsService {
       );
     }
 
+    const normalizedBibPath = `/${targetBibFile}`;
+    const lines = bibtexContent.split(/\r?\n/);
+
     if (this.docstoreService && this.structureService) {
       try {
         const existingNode = await this.structureService.getNodeByPath(
-          dto.pageId,
-          targetBibFile,
+          page.spaceId,
+          normalizedBibPath,
+          page.id,
         );
         if (existingNode && existingNode.docId) {
+          await this.liveCollab
+            ?.flushDocs(page.spaceId, [existingNode.docId])
+            .catch(() => []);
           const currentDoc = await this.docstoreService
-            .getDoc(dto.pageId, existingNode.docId)
+            .getDoc(page.spaceId, existingNode.docId)
             .catch(() => null);
-          const lines = bibtexContent.split(/\r?\n/);
+          const nextVersion = (currentDoc?.version ?? 0) + 1;
           await this.docstoreService.updateDoc(
-            dto.pageId,
+            page.spaceId,
             existingNode.docId,
             {
               lines,
-              version: (currentDoc?.version ?? 0) + 1,
+              version: nextVersion,
             },
+          );
+          await this.notifyBibDocMutated(
+            page.spaceId,
+            existingNode.docId,
+            lines,
+            nextVersion,
           );
         } else {
           if (existingNode) {
@@ -577,15 +628,29 @@ export class IntegrationsService {
               `Target file "${targetBibFile}" already exists as a non-document node.`,
             );
           }
-          const doc = await this.docstoreService.createDoc(dto.pageId, {
-            path: targetBibFile,
+          const doc = await this.docstoreService.createDoc(page.spaceId, {
+            path: normalizedBibPath,
             text: bibtexContent,
+            lines,
+            pageId: page.id,
           });
-          await this.structureService.createNode(dto.pageId, {
-            name: targetBibFile,
-            type: 'DOC',
-            docId: doc._id,
-          });
+          await this.structureService.createNode(
+            page.spaceId,
+            {
+              path: normalizedBibPath,
+              name: targetBibFile,
+              type: 'DOC',
+              docId: doc._id,
+              pageId: page.id,
+            },
+            page.id,
+          );
+          await this.notifyBibDocMutated(
+            page.spaceId,
+            doc._id,
+            lines,
+            doc.version ?? 1,
+          );
         }
       } catch (docErr: unknown) {
         const errMsg =
@@ -600,15 +665,16 @@ export class IntegrationsService {
       typeof this.filestoreService.uploadFileFromBuffer === 'function'
     ) {
       await this.filestoreService.uploadFileFromBuffer(
-        dto.pageId,
+        page.spaceId,
         targetBibFile,
         Buffer.from(bibtexContent, 'utf-8'),
         'application/x-bibtex',
+        { pageId: page.id },
       );
     }
 
     const link = await this.repo.upsertReferenceLink({
-      pageId: dto.pageId,
+      pageId: page.id,
       userIntegrationId: conn.id,
       collectionId: dto.collectionId,
       collectionName: dto.collectionName || dto.collectionId,
@@ -752,10 +818,14 @@ export class IntegrationsService {
   }
 
   async pushPageToGithub(userId: string, dto: PushGithubDto) {
-    await this.repo.assertUserPageAccess(userId, dto.pageId, 'write');
+    const page = await this.repo.requireAuthorizedPage(
+      userId,
+      dto.pageId,
+      'write',
+    );
     const { token } = await this.getDecryptedGithubToken(userId);
 
-    const link = await this.repo.findGithubLink(dto.pageId);
+    const link = await this.repo.findGithubLink(page.id);
     if (!link) {
       throw new BadRequestException(
         'This page is not linked to a GitHub repository. Please link a repository first.',
@@ -766,8 +836,9 @@ export class IntegrationsService {
     const branch = dto.branch || link.branch || 'main';
 
     const entries = await this.exportService.collectProjectEntries(
-      dto.pageId,
+      page.spaceId,
       false,
+      page.id,
     );
     if (entries.length === 0) {
       throw new BadRequestException('Page has no files to commit.');
@@ -802,10 +873,14 @@ export class IntegrationsService {
   }
 
   async pullPageFromGithub(userId: string, dto: PullGithubDto) {
-    await this.repo.assertUserPageAccess(userId, dto.pageId, 'write');
+    const page = await this.repo.requireAuthorizedPage(
+      userId,
+      dto.pageId,
+      'write',
+    );
     const { token } = await this.getDecryptedGithubToken(userId);
 
-    const link = await this.repo.findGithubLink(dto.pageId);
+    const link = await this.repo.findGithubLink(page.id);
     if (!link) {
       throw new BadRequestException(
         'This page is not linked to a GitHub repository. Please link a repository first.',
@@ -832,9 +907,11 @@ export class IntegrationsService {
     );
 
     const summary = await this.importService.hydrateProjectEntries(
-      dto.pageId,
+      page.spaceId,
       archiveEntries,
       userId,
+      { overwrite: true },
+      page.id,
     );
 
     await this.repo.updateGithubLinkLastSynced(link.id);
@@ -850,15 +927,56 @@ export class IntegrationsService {
   }
 
   async importGithubRepo(userId: string, dto: ImportGithubRepoDto) {
-    await this.repo.assertUserPageAccess(userId, dto.pageId, 'manage');
+    const rawPageId = dto.pageId?.trim() || undefined;
+    const rawSpaceId = dto.spaceId?.trim() || undefined;
+    const defaultTitle =
+      dto.title?.trim() ||
+      dto.repoFullName.split('/')[1]?.trim() ||
+      'Imported Repository';
+
+    let targetSpaceId: string;
+    let targetPageId: string | undefined;
+
+    const existingPage =
+      rawPageId && isUuid(rawPageId) && !rawSpaceId
+        ? await this.repo.findActivePageById(rawPageId)
+        : rawPageId && isUuid(rawPageId) && rawSpaceId
+          ? await this.repo.findActivePageById(rawPageId)
+          : null;
+
+    const treatAsExistingPage =
+      Boolean(existingPage) &&
+      (!rawSpaceId || existingPage!.id !== existingPage!.spaceId);
+
+    if (treatAsExistingPage && existingPage) {
+      const authorizedPage = await this.repo.requireAuthorizedPage(
+        userId,
+        existingPage.id,
+        'write',
+      );
+      targetSpaceId = authorizedPage.spaceId;
+      targetPageId = authorizedPage.id;
+    } else {
+      const authorizedSpace = await this.repo.resolveAndAuthorizeSpace(
+        userId,
+        rawSpaceId ?? rawPageId ?? 'personal',
+        'write',
+      );
+      targetSpaceId = authorizedSpace.spaceId;
+    }
+
     const { token, connId } = await this.getDecryptedGithubToken(userId);
     const branch = dto.branch || 'main';
 
-    const pulledFiles = await this.githubProvider.pullProjectTree({
+    const pulledResult = await this.githubProvider.pullProjectTree({
       decryptedToken: token,
       repoFullName: dto.repoFullName,
       branch,
     });
+
+    const pulledFiles = Array.isArray(pulledResult) ? pulledResult : [];
+    const commitSha =
+      (pulledResult as { commitSha?: string })?.commitSha ?? '';
 
     if (pulledFiles.length === 0) {
       throw new BadRequestException(
@@ -866,32 +984,52 @@ export class IntegrationsService {
       );
     }
 
+    if (!targetPageId) {
+      const createdPage = await this.repo.createPageInSpace({
+        spaceId: targetSpaceId,
+        title: defaultTitle,
+        createdById: userId,
+      });
+      targetPageId = createdPage.id;
+    }
+
     const archiveEntries = pulledFiles.map((file) =>
       ArchiveEntryVo.create(file.path, file.data),
     );
 
     const summary = await this.importService.hydrateProjectEntries(
-      dto.pageId,
+      targetSpaceId,
       archiveEntries,
       userId,
+      { overwrite: true, defaultTitle },
+      targetPageId,
     );
 
     const link = await this.repo.upsertGithubLink({
-      pageId: dto.pageId,
+      pageId: targetPageId,
       userIntegrationId: connId,
       repoFullName: dto.repoFullName,
       branch,
     });
     await this.repo.updateGithubLinkLastSynced(link.id);
 
+    const importedCount = pulledFiles.length;
+    const rootDocId = summary.rootDocId || targetPageId;
+
     return {
       success: true,
+      pageId: targetPageId,
+      rootDocId,
+      rootDocPath: summary.rootDocPath,
+      spaceId: targetSpaceId,
+      isPersonal: targetSpaceId.toLowerCase() === userId.toLowerCase(),
+      importedCount,
+      filesImported: importedCount,
+      commitSha,
       repoFullName: dto.repoFullName,
       branch,
-      filesImported: pulledFiles.length,
+      title: summary.title || defaultTitle,
       syncedAt: new Date(),
-      rootDocId: summary.rootDocId,
-      rootDocPath: summary.rootDocPath,
       summary: summary.toJSON(),
     };
   }

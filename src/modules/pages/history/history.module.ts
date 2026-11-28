@@ -5,6 +5,8 @@
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
+import { FilesModule } from '@/modules/files/files.module';
+import { PagesCoreModule } from '@/modules/pages/core/core.module';
 import { StructureModule } from '@/modules/pages/structure/structure.module';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
@@ -21,7 +23,14 @@ import { SnapshotRestorerAdapter } from './adapters/restorer.adapter';
 import { DiffEngine } from './domain/diff';
 
 @Module({
-  imports: [PrismaModule, StructureModule, DocstoreModule, FilestoreModule],
+  imports: [
+    PrismaModule,
+    FilesModule,
+    PagesCoreModule,
+    StructureModule,
+    DocstoreModule,
+    FilestoreModule,
+  ],
   controllers: [HistoryController],
   providers: [
     SnapshotService,

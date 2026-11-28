@@ -18,7 +18,7 @@ import {
 } from '@/modules/project/work-item/history/history.service';
 import { WorkItemFacade } from '@/modules/project/work-item/work-item.facade';
 import { CoreService } from '@/modules/project/work-item/core/core.service';
-import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { DomainActivityEvent } from '@/modules/project/activity/events/activity.events';
 
 describe('Work-Item Submodules Comprehensive Unit Suite', () => {
   // ── 1. ArchiveService ──────────────────────────────────────────────────────

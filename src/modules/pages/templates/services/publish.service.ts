@@ -12,7 +12,7 @@ import { PrismaService, isUuid } from '@/core';
 import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { hydratePageDocLines } from '@/modules/pages/docstore/services/doc-occ.helper';
+import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
@@ -120,6 +120,16 @@ export class PublishService {
       await this.gallery.assertCanManage(existing, userId);
     }
 
+    const previousBlobIds = new Set<string>(
+      (existing?.files ?? [])
+        .map((f) => f.blobId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const currentBlobIds = new Set<string>(blobIds);
+    const newlyAddedBlobIds = blobIds.filter(
+      (id) => !previousBlobIds.has(id),
+    );
+
     const authorName =
       existing?.author || (await this.resolveUserName(userId)) || null;
     const mainFile =
@@ -148,10 +158,55 @@ export class PublishService {
 
     await this.repo.save(manifest);
 
-    if (this.filesPort && blobIds.length > 0) {
+    // Clean up newly-orphaned TemplateBlob rows and release orphaned FileBlob CAS references on republish
+    let orphanedBlobIds: string[] = [];
+    if (existing) {
+      if (this.prisma.templateBlob?.findMany) {
+        const orphans = await Promise.resolve(
+          this.prisma.templateBlob.findMany({
+            where: { templateFiles: { none: {} } },
+            select: { contentHash: true, blobId: true },
+          }),
+        ).catch(() => []);
+        if (orphans.length > 0) {
+          orphanedBlobIds = orphans
+            .map((o) => o.blobId)
+            .filter((id): id is string => Boolean(id));
+          if (this.prisma.templateBlob?.deleteMany) {
+            await Promise.resolve(
+              this.prisma.templateBlob.deleteMany({
+                where: {
+                  contentHash: { in: orphans.map((o) => o.contentHash) },
+                },
+              }),
+            ).catch(() => undefined);
+          }
+        }
+      } else {
+        orphanedBlobIds = Array.from(previousBlobIds).filter(
+          (id) => !currentBlobIds.has(id),
+        );
+      }
+    }
+
+    if (
+      typeof this.filesPort?.acquireBlob === 'function' &&
+      newlyAddedBlobIds.length > 0
+    ) {
       await Promise.all(
-        blobIds.map((id) =>
+        newlyAddedBlobIds.map((id) =>
           Promise.resolve(this.filesPort!.acquireBlob(id)).catch(() => null),
+        ),
+      );
+    }
+
+    if (
+      typeof this.filesPort?.releaseBlob === 'function' &&
+      orphanedBlobIds.length > 0
+    ) {
+      await Promise.all(
+        orphanedBlobIds.map((id) =>
+          Promise.resolve(this.filesPort!.releaseBlob(id)).catch(() => null),
         ),
       );
     }

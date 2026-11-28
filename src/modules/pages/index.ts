@@ -5,7 +5,6 @@
  */
 
 export * from './pages.module';
-export * from './pages.facade';
 export { PagesCoreModule } from './core/core.module';
 export { PagesConfigService } from './core/config/pages.config';
 export { PageModule } from './page/page.module';
@@ -13,9 +12,19 @@ export { PageService } from './page/services/page.service';
 export { PageScaffoldService } from './page/services/scaffold.service';
 
 // Subsystem 1: Virtual File System & Storage
-export * from './filestore';
-export * from './docstore';
-export * from './structure';
+export { FilestoreModule } from './filestore/filestore.module';
+export { FilestoreService } from './filestore/filestore.service';
+export { FilestoreRepository } from './filestore/filestore.repository';
+export * from './filestore/domain/filestore.errors';
+export * from './filestore/domain/file.entity';
+export * from './filestore/domain/filestore.ports';
+export * from './filestore/types/filestore.types';
+export { DocstoreModule } from './docstore/docstore.module';
+export { DocstoreService } from './docstore/docstore.service';
+export { DocstoreRepository } from './docstore/repositories/docstore.repository';
+export { StructureModule } from './structure/structure.module';
+export { StructureService } from './structure/structure.service';
+export { StructureRepository } from './structure/structure.repository';
 
 // Subsystem 3: Compilation & CLSI
 export * from './clsi/clsi.module';
@@ -52,7 +61,6 @@ export * from './history/domain/diff';
 export * from './history/domain/snapshot';
 export * from './history/domain/label';
 export * from './history/domain/errors';
-export * from './history/domain/ports';
 
 // Subsystem 5: Academic Authoring & Packaging
 export { SpellingModule } from './spelling/spelling.module';

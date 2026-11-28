@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/docstore/dto/doc.dto.ts
- * Data Transfer Objects for Manuscripts Docstore REST endpoints.
+ * modules/pages/docstore/dto/doc.dto.ts
+ * Data Transfer Objects for Pages Docstore REST endpoints.
  * Matches Overleaf HttpController request/response schemas.
  */
 
@@ -14,7 +14,7 @@ import {
   IsDateString,
 } from 'class-validator';
 import { Prisma } from '@prisma/client';
-import { DocRanges } from '../domain';
+import { DocRanges } from '@/modules/pages/docstore/domain/doc-range';
 
 export class CreateDocDto {
   @ApiProperty({
@@ -48,7 +48,7 @@ export class CreateDocDto {
   @IsOptional()
   ranges?: DocRanges;
 
-  @ApiPropertyOptional({ description: 'Owning ManuscriptPage UUID' })
+  @ApiPropertyOptional({ description: 'Owning Page UUID' })
   @IsOptional()
   @IsString()
   pageId?: string | null;
@@ -134,7 +134,7 @@ export class DocResponseDto {
   projectId?: string;
 
   @ApiPropertyOptional({
-    description: 'Owning ManuscriptPage identifier',
+    description: 'Owning Page identifier',
     nullable: true,
   })
   pageId?: string | null;

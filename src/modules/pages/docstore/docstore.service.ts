@@ -15,26 +15,21 @@ const gunzipAsync = promisify(zlib.gunzip);
 const gzipAsync = promisify(zlib.gzip);
 import { WorkspaceFile } from '@/modules/pages/core/types/workspace-file';
 import {
-  IDocRepository,
   IDocPersistor,
-  IDocHasher,
-  TextDoc,
-  DocRanges,
-  LineArray,
-  NoopDiffChecker,
   DocstoreMetrics,
   DocstoreMetricsSummary,
+} from './domain/doc.ports';
+import { computeDocSha256 } from './domain/doc-hasher';
+import { DocstoreRepository } from './repositories/docstore.repository';
+import { TextDoc, NoopDiffChecker } from './domain/text-doc.entity';
+import { DocRanges } from './domain/doc-range';
+import { LineArray } from './domain/line-array';
+import {
   DocNotFoundError,
   DocModifiedError,
   Md5MismatchError,
   NullByteDetectedError,
-  computeDocSha256,
-} from './domain';
-import {
-  IncludedProjectDoc,
-  ExportFormattedDocResult,
-  transpileLatexDocument,
-} from '@/modules/pages/export-import/domain/latex-export.domain';
+} from './domain/doc.errors';
 import {
   CreateDocDto,
   UpdateDocDto,
@@ -55,8 +50,6 @@ export interface UpdateDocResult {
   rev: number;
 }
 
-export type { ExportFormattedDocResult };
-
 @Injectable()
 export class DocstoreService {
   private readonly logger = new Logger(DocstoreService.name);
@@ -64,17 +57,38 @@ export class DocstoreService {
   private readonly inflightUnarchives = new Map<string, Promise<TextDoc>>();
 
   constructor(
-    @Inject(IDocRepository)
-    private readonly docRepository: IDocRepository,
-    @Optional()
-    @Inject(IDocHasher)
-    private readonly docHasher?: IDocHasher,
+    private readonly docRepository: DocstoreRepository,
     @Optional()
     @Inject(IDocPersistor)
     docPersistor?: IDocPersistor,
   ) {
-    this.docPersistor =
-      docPersistor ?? (docRepository as unknown as IDocPersistor);
+    this.docPersistor = docPersistor ?? this.resolvePersistor(docRepository);
+  }
+
+  private isDocPersistor(
+    repo: unknown,
+  ): repo is IDocPersistor {
+    return (
+      typeof repo === 'object' &&
+      repo !== null &&
+      'sendStream' in repo &&
+      typeof (repo as IDocPersistor).sendStream === 'function'
+    );
+  }
+
+  private resolvePersistor(repo: unknown): IDocPersistor {
+    if (this.isDocPersistor(repo)) {
+      return repo;
+    }
+    throw new Error('DocstoreService requires an IDocPersistor implementation');
+  }
+
+  public buildArchiveStorageKey(
+    projectId: string,
+    docId: string,
+    rev: number,
+  ): string {
+    return `${projectId}/${docId}-${rev}.json`;
   }
 
   private async decodeArchivedPayload(rawBuffer: Buffer): Promise<{
@@ -340,9 +354,7 @@ export class DocstoreService {
       dto.lines || (dto.text ? LineArray.textToLines(dto.text) : ['']);
     LineArray.validateLinesSize(lines);
 
-    const hash = this.docHasher
-      ? this.docHasher.computeHash(lines)
-      : computeDocSha256(lines);
+    const hash = computeDocSha256(lines);
     const doc = await this.docRepository.createDoc({
       ...(dto.id ? { id: dto.id } : {}),
       projectId,
@@ -418,9 +430,7 @@ export class DocstoreService {
       };
     }
 
-    const hash = this.docHasher
-      ? this.docHasher.computeHash(lines)
-      : computeDocSha256(lines);
+    const hash = computeDocSha256(lines);
 
     const { doc, modified } = await this.docRepository.updateDoc(
       projectId,
@@ -484,15 +494,6 @@ export class DocstoreService {
     }
   }
 
-  public transpileDocumentForExport(params: {
-    rawFilename: string;
-    content: string;
-    format: string;
-    projectDocs?: IncludedProjectDoc[];
-  }): ExportFormattedDocResult {
-    return transpileLatexDocument(params);
-  }
-
   public async archiveDoc(projectId: string, docId: string): Promise<void> {
     const doc = await this.docRepository.getDoc(projectId, docId);
     if (!doc) {
@@ -512,7 +513,7 @@ export class DocstoreService {
       );
     }
 
-    const key = `${projectId}/${doc.id}-${doc.rev}.json`;
+    const key = this.buildArchiveStorageKey(projectId, doc.id, doc.rev);
     const { buffer, sourceMd5 } = await this.encodeArchivePayload(payload);
     const stream = Readable.from(buffer);
     const clearLines = this.docPersistor.isDurableStorageConfigured
@@ -583,7 +584,7 @@ export class DocstoreService {
       payloads,
       COLD_HYDRATION_CONCURRENCY,
       async ({ doc, payload }) => {
-        const key = `${projectId}/${doc.id}.json`;
+        const key = this.buildArchiveStorageKey(projectId, doc.id, doc.rev);
         const { buffer, sourceMd5 } = await this.encodeArchivePayload(payload);
         const stream = Readable.from(buffer);
 
@@ -596,6 +597,9 @@ export class DocstoreService {
           clearLines,
         );
         if (!archived) {
+          await Promise.resolve(this.docPersistor.deleteObject(key)).catch(
+            () => {},
+          );
           this.logger.warn(
             `Skipped marking document ${doc.id} as archived due to concurrent rev modification`,
           );

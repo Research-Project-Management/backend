@@ -42,7 +42,7 @@ import {
   ReorderNodeDto,
   TreeNodeDto,
 } from './dto/node.dto';
-import { NodeNotFoundError, StructureError } from './domain';
+import { NodeNotFoundError, StructureError } from './domain/structure.errors';
 import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
 
 @ApiTags('Pages - Virtual Tree & Structure')
@@ -247,6 +247,7 @@ export class StructureController {
     @Param('spaceId') spaceId?: string,
     @Param('pageId') paramPageId?: string,
     @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
@@ -260,7 +261,7 @@ export class StructureController {
         }
         return node.toJSON();
       },
-      undefined,
+      queryPageId,
       req,
     );
   }
@@ -307,6 +308,7 @@ export class StructureController {
     @Param('spaceId') spaceId?: string,
     @Param('pageId') paramPageId?: string,
     @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
@@ -321,7 +323,7 @@ export class StructureController {
         );
         return node.toJSON();
       },
-      undefined,
+      queryPageId,
       req,
     );
   }
@@ -338,6 +340,7 @@ export class StructureController {
     @Param('spaceId') spaceId?: string,
     @Param('pageId') paramPageId?: string,
     @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
@@ -352,7 +355,7 @@ export class StructureController {
         );
         return node.toJSON();
       },
-      undefined,
+      queryPageId,
       req,
     );
   }
@@ -365,6 +368,7 @@ export class StructureController {
     @Param('spaceId') spaceId?: string,
     @Param('pageId') paramPageId?: string,
     @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
@@ -381,7 +385,7 @@ export class StructureController {
           nodes: deleted.map((n) => n.toJSON()),
         };
       },
-      undefined,
+      queryPageId,
       req,
     );
   }
@@ -419,6 +423,7 @@ export class StructureController {
     @Param('spaceId') spaceId?: string,
     @Param('pageId') paramPageId?: string,
     @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
@@ -432,7 +437,7 @@ export class StructureController {
         );
         return rootDoc.toJSON();
       },
-      undefined,
+      queryPageId,
       req,
     );
   }
@@ -447,6 +452,7 @@ export class StructureController {
     @Param('spaceId') spaceId?: string,
     @Param('pageId') paramPageId?: string,
     @Param('docId') paramDocId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
@@ -460,7 +466,7 @@ export class StructureController {
           dto.sortOrder,
         );
       },
-      undefined,
+      queryPageId,
       req,
     );
   }

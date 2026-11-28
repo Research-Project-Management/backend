@@ -8,7 +8,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CoreRepository } from './core.repository';
 import { Role, EntityType, Prisma } from '@prisma/client';
-import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { DomainActivityEvent } from '@/modules/project/activity/events/activity.events';
 import { RedisCacheService } from '@/core';
 import { CACHE_KEYS, CACHE_TTL_SECONDS } from './constants/cache.constant';
 import { CreateProjectDto } from './dto/create.dto';

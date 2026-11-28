@@ -18,6 +18,8 @@ export interface FileSnapshotProps {
   sizeBytes: number;
   lines?: string[] | null;
   isRootDoc?: boolean;
+  storageKey?: string | null;
+  blobId?: string | null;
 }
 
 export class FileSnapshotVo {
@@ -29,6 +31,8 @@ export class FileSnapshotVo {
   public readonly sizeBytes: number;
   public readonly lines?: string[] | null;
   public readonly isRootDoc: boolean;
+  public readonly storageKey?: string | null;
+  public readonly blobId?: string | null;
 
   private constructor(props: FileSnapshotProps) {
     this.path = props.path.startsWith('/') ? props.path : `/${props.path}`;
@@ -39,6 +43,8 @@ export class FileSnapshotVo {
     this.sizeBytes = props.sizeBytes;
     this.lines = props.lines ? [...props.lines] : null;
     this.isRootDoc = props.isRootDoc ?? false;
+    this.storageKey = props.storageKey ?? null;
+    this.blobId = props.blobId ?? null;
   }
 
   public static createDoc(
@@ -66,6 +72,8 @@ export class FileSnapshotVo {
     fileId: string,
     hash: string,
     sizeBytes: number,
+    storageKey?: string | null,
+    blobId?: string | null,
   ): FileSnapshotVo {
     return new FileSnapshotVo({
       path,
@@ -75,6 +83,8 @@ export class FileSnapshotVo {
       sizeBytes,
       lines: null,
       isRootDoc: false,
+      storageKey: storageKey ?? null,
+      blobId: blobId ?? null,
     });
   }
 
@@ -92,6 +102,7 @@ export class FileSnapshotVo {
       sizeBytes: this.sizeBytes,
       lines: this.lines,
       isRootDoc: this.isRootDoc,
+      ...(this.storageKey ? { storageKey: this.storageKey } : {}),
     };
   }
 }
@@ -261,6 +272,8 @@ export interface RawSnapshotFileEntry {
   content?: string | null;
   textContent?: string | null;
   isRootDoc?: boolean;
+  storageKey?: string | null;
+  blobId?: string | null;
 }
 
 export class SnapshotNormalizer {
@@ -352,6 +365,8 @@ export class SnapshotNormalizer {
             typeof obj.isRootDoc === 'boolean'
               ? obj.isRootDoc
               : resolvedPath === '/main.tex',
+          storageKey: obj.storageKey ?? null,
+          blobId: obj.blobId ?? null,
         };
 
         const vo = FileSnapshotVo.fromProps(props);

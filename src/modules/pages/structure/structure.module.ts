@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/structure/structure.module.ts
- * NestJS Module for Manuscript Project File Tree & Hierarchy Subsystem.
+ * modules/pages/structure/structure.module.ts
+ * NestJS Module for Pages File Tree & Hierarchy Subsystem.
  */
 
 import { Module } from '@nestjs/common';
@@ -10,16 +10,11 @@ import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 import { StructureController } from './structure.controller';
 import { StructureService } from './structure.service';
 import { StructureRepository } from './structure.repository';
-import { IStructureRepository } from './domain';
 
 @Module({
   imports: [PrismaModule, DocstoreModule, FilestoreModule],
   controllers: [StructureController],
-  providers: [
-    StructureService,
-    StructureRepository,
-    { provide: IStructureRepository, useExisting: StructureRepository },
-  ],
-  exports: [StructureService, StructureRepository, IStructureRepository],
+  providers: [StructureService, StructureRepository],
+  exports: [StructureService, StructureRepository],
 })
 export class StructureModule {}

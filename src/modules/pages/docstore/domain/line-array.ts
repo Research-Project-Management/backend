@@ -91,6 +91,3 @@ export class LineArray {
 }
 
 export const textToLines = LineArray.textToLines;
-
-/** @deprecated Use LineArray */
-export { LineArray as LineArrayEngine };

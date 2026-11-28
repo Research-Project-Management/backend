@@ -21,15 +21,22 @@ export interface PageDocRanges {
   [key: string]: unknown;
 }
 
-export interface UpdatePageContentParams {
+export interface UpdatePageMetadataParams {
+  title?: string;
+  description?: string;
+  status?: 'draft' | 'published' | 'archived';
+  compiler?: string;
+  texlive?: string;
+  spellLang?: string;
+  rootDocId?: string;
+}
+
+export interface UpdatePageContentParams extends UpdatePageMetadataParams {
   content?: string;
   lines?: string[];
-  title?: string;
   version?: number;
   expectedRev?: number;
   expectedVersion?: number;
-  status?: 'draft' | 'published' | 'archived';
-  description?: string;
 }
 
 export interface PageLifecycleContext {

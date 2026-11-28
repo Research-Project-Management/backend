@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityType } from '@prisma/client';
-import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { DomainActivityEvent } from '@/modules/project/activity/events/activity.events';
 import { RedisCacheService } from '@/core';
 import { CACHE_KEYS } from '../core/constants/cache.constant';
 import { CoreRepository } from '../core/core.repository';

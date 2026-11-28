@@ -1,7 +1,7 @@
 /**
- * modules/manuscripts/docstore/services/search-replace.service.ts
+ * modules/pages/docstore/services/search-replace.service.ts
  * Domain/Application service encapsulating project-wide full-text/regex search and batch replace
- * across manuscript documents with DocstoreService contentHash integrity and Yjs live sync.
+ * across page documents with DocstoreService contentHash integrity and Yjs live sync.
  */
 
 import {
@@ -25,7 +25,7 @@ import {
   NOOP_LIVE_COLLABORATION,
 } from '@/modules/pages/core/ports/live-collaboration.port';
 import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { buildSearchRegex, replaceInText } from '../domain';
+import { buildSearchRegex, replaceInText } from '@/modules/pages/docstore/domain/text-replace';
 
 export interface SearchDocumentsParams {
   query: string;
@@ -58,56 +58,10 @@ export class SearchReplaceService {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    liveCollabOrLegacyRef?:
-      | LiveCollaborationPort
-      | {
-          get?: (
-            token: unknown,
-            opts?: unknown,
-          ) => LiveCollaborationPort | null;
-        }
-      | unknown,
+    liveCollab?: LiveCollaborationPort,
     @Optional() private readonly domainEventBus?: PageDomainEventBus,
-    @Optional()
-    injectedLiveCollab?: LiveCollaborationPort,
   ) {
-    let resolved: LiveCollaborationPort | null | undefined = injectedLiveCollab;
-    if (!resolved || typeof resolved.applyExternalText !== 'function') {
-      if (
-        liveCollabOrLegacyRef &&
-        typeof (liveCollabOrLegacyRef as LiveCollaborationPort)
-          .applyExternalText === 'function'
-      ) {
-        resolved = liveCollabOrLegacyRef as LiveCollaborationPort;
-      } else if (
-        liveCollabOrLegacyRef &&
-        typeof (
-          liveCollabOrLegacyRef as {
-            get?: (
-              token: unknown,
-              opts?: unknown,
-            ) => LiveCollaborationPort | null;
-          }
-        ).get === 'function'
-      ) {
-        try {
-          resolved = (
-            liveCollabOrLegacyRef as {
-              get: (
-                token: unknown,
-                opts?: unknown,
-              ) => LiveCollaborationPort | null;
-            }
-          ).get(LiveCollaborationPort, { strict: false });
-        } catch {
-          resolved = null;
-        }
-      }
-    }
-    this.liveCollab =
-      resolved && typeof resolved.applyExternalText === 'function'
-        ? resolved
-        : NOOP_LIVE_COLLABORATION;
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
   private getLiveCollaboration(): LiveCollaborationPort {
@@ -226,7 +180,7 @@ export class SearchReplaceService {
                 ),
             )
           : resolveSpaceRootDocIds(
-              this.prisma as unknown as PageScopeDbClient,
+              this.prisma,
               projectId,
             ),
       ]);

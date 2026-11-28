@@ -4,9 +4,11 @@
  */
 
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
+import * as crypto from 'node:crypto';
 import * as pathPosix from 'node:path/posix';
-import { Prisma } from '@prisma/client';
-import { PrismaService, mapWithConcurrency } from '@/core';
+import { PrismaService, isUuid } from '@/core';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { ensureCanonicalPageId } from '@/modules/pages/core/utils/page-scope';
 import {
   LiveCollaborationPort,
@@ -18,19 +20,27 @@ import { IDistributedLockPort } from '@/modules/pages/core/ports/distributed-loc
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import type { PageNodeEntity } from '@/modules/pages/structure/domain';
+import type { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
 import { HistoryRepository } from '../history.repository';
-import {
-  ISnapshotRestorerPort,
-  RestoreResult,
-  RestoreSingleFileResult,
-} from '../domain/ports';
-import { Snapshot } from '../domain/snapshot';
-import { FileSnapshotVo } from '../domain/snapshot';
+import { SnapshotCollectorAdapter } from './collector.adapter';
+import { Snapshot, FileSnapshotVo } from '../domain/snapshot';
 import { SnapshotFileNotFoundException } from '../domain/errors';
 
+export interface RestoreResult {
+  restoredFilesCount: number;
+  restoredDocIds: string[];
+}
+
+export interface RestoreSingleFileResult {
+  path: string;
+  docId?: string | null;
+  fileId?: string | null;
+  content?: string;
+  rev?: number;
+}
+
 @Injectable()
-export class SnapshotRestorerAdapter extends ISnapshotRestorerPort {
+export class SnapshotRestorerAdapter {
   private readonly logger = new Logger(SnapshotRestorerAdapter.name);
   private readonly liveCollab: LiveCollaborationPort;
 
@@ -49,8 +59,12 @@ export class SnapshotRestorerAdapter extends ISnapshotRestorerPort {
     private readonly historyRepository?: HistoryRepository,
     @Optional()
     private readonly filestoreService?: FilestoreService,
+    @Optional()
+    private readonly collector?: SnapshotCollectorAdapter,
+    @Optional()
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {
-    super();
     this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
@@ -64,6 +78,8 @@ export class SnapshotRestorerAdapter extends ISnapshotRestorerPort {
       domainEventBus: this.domainEventBus,
       historyRepository: this.historyRepository,
       filestoreService: this.filestoreService,
+      collector: this.collector,
+      filesPort: this.filesPort,
     };
   }
 
@@ -116,12 +132,11 @@ export class SnapshotRestorerAdapter extends ISnapshotRestorerPort {
       return [];
     });
 
-    // Pre-Restore Safety Guard: Snapshot current state if repository or prisma available to prevent partial restore data loss
+      // Pre-Restore Safety Guard: Snapshot current state if repository or prisma available to prevent partial restore data loss
     await createPreRestoreSafetySnapshot(
       deps,
       projectId,
       snapshot,
-      currentNodes,
       targetPageId,
     );
 
@@ -290,39 +305,60 @@ export class SnapshotRestorerAdapter extends ISnapshotRestorerPort {
             syncedVersion,
           );
         }
-      } else if (fileVo.type === 'file' && fileVo.fileId) {
-        await undeleteFileRecord(deps, projectId, fileVo.fileId);
-        if (existingNode) {
-          if (
-            existingNode.type !== 'FILE' ||
-            existingNode.fileId !== fileVo.fileId
-          ) {
-            if (existingNode.docId) {
-              evictedDocIds.push(existingNode.docId);
+      } else if (
+        fileVo.type === 'file' &&
+        (fileVo.fileId || fileVo.storageKey)
+      ) {
+        const restoredFileId = await restorePinnedBinaryFile(
+          deps,
+          projectId,
+          filePath,
+          fileVo,
+          targetPageId,
+        );
+        if (restoredFileId) {
+          if (existingNode) {
+            if (
+              existingNode.type !== 'FILE' ||
+              existingNode.fileId !== restoredFileId
+            ) {
+              if (existingNode.docId) {
+                evictedDocIds.push(existingNode.docId);
+              }
+              await this.structureService.deleteNode(projectId, existingNode.id);
+              await this.structureService.createNode(
+                projectId,
+                {
+                  name: fileName,
+                  path: filePath,
+                  type: 'FILE',
+                  fileId: restoredFileId,
+                },
+                targetPageId,
+              );
+            } else if (typeof this.structureService.updateNodeFileId === 'function') {
+              await this.structureService
+                .updateNodeFileId(
+                  projectId,
+                  existingNode.id,
+                  restoredFileId,
+                  fileVo.sizeBytes,
+                  fileVo.hash || null,
+                )
+                .catch(() => undefined);
             }
-            await this.structureService.deleteNode(projectId, existingNode.id);
+          } else {
             await this.structureService.createNode(
               projectId,
               {
                 name: fileName,
                 path: filePath,
                 type: 'FILE',
-                fileId: fileVo.fileId,
+                fileId: restoredFileId,
               },
               targetPageId,
             );
           }
-        } else {
-          await this.structureService.createNode(
-            projectId,
-            {
-              name: fileName,
-              path: filePath,
-              type: 'FILE',
-              fileId: fileVo.fileId,
-            },
-            targetPageId,
-          );
         }
       }
     }
@@ -376,6 +412,234 @@ interface RestorerDeps {
   domainEventBus?: PageDomainEventBus;
   historyRepository?: HistoryRepository;
   filestoreService?: FilestoreService;
+  collector?: SnapshotCollectorAdapter;
+  filesPort?: IFilesPort;
+}
+
+const RESTORE_MIME_MAP: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.eps': 'application/postscript',
+};
+
+function inferMimeFromPath(filePath: string): string {
+  const ext = pathPosix.extname(filePath).toLowerCase();
+  return RESTORE_MIME_MAP[ext] || 'application/octet-stream';
+}
+
+async function resolvePinnedFileBlobId(
+  deps: Pick<RestorerDeps, 'prisma' | 'filesPort'>,
+  fileVo: FileSnapshotVo,
+  pinnedStorageKey: string,
+): Promise<string | null> {
+  if (fileVo.blobId && isUuid(fileVo.blobId)) {
+    return fileVo.blobId;
+  }
+
+  if (deps.prisma?.fileBlob?.findFirst) {
+    const byKey = await Promise.resolve(
+      deps.prisma.fileBlob.findFirst({
+        where: { storageKey: pinnedStorageKey },
+        select: { id: true },
+      }),
+    ).catch(() => null);
+    if (byKey?.id) return byKey.id;
+  }
+
+  const cleanHash = (fileVo.hash || '').trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(cleanHash)) {
+    if (typeof deps.filesPort?.findBlobByHash === 'function') {
+      const byPort = await deps.filesPort
+        .findBlobByHash(cleanHash)
+        .catch(() => null);
+      if (byPort?.id) return byPort.id;
+    }
+    if (deps.prisma?.fileBlob?.findFirst) {
+      const byHash = await Promise.resolve(
+        deps.prisma.fileBlob.findFirst({
+          where: { contentHash: Buffer.from(cleanHash, 'hex') },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      if (byHash?.id) return byHash.id;
+    }
+  }
+
+  return null;
+}
+
+async function restorePinnedBinaryFile(
+  deps: RestorerDeps,
+  projectId: string,
+  filePath: string,
+  fileVo: FileSnapshotVo,
+  targetPageId?: string,
+): Promise<string | null> {
+  let pinnedStorageKey = fileVo.storageKey?.trim() || null;
+  let pinnedHash = (fileVo.hash || '').trim();
+  let pinnedSizeBytes = fileVo.sizeBytes;
+
+  if (
+    !pinnedStorageKey &&
+    pinnedHash &&
+    deps.historyRepository?.findBlobInSpace
+  ) {
+    const blobRecord = await deps.historyRepository
+      .findBlobInSpace(projectId, pinnedHash)
+      .catch(() => null);
+    if (blobRecord?.storageKey) {
+      pinnedStorageKey = blobRecord.storageKey.trim();
+      pinnedSizeBytes = pinnedSizeBytes || blobRecord.sizeBytes;
+    }
+  }
+
+  if (!pinnedStorageKey) {
+    await undeleteFileRecord(deps, projectId, fileVo.fileId);
+    return fileVo.fileId ?? null;
+  }
+
+  if (!deps.prisma?.pageFile) {
+    await undeleteFileRecord(deps, projectId, fileVo.fileId);
+    return fileVo.fileId ?? null;
+  }
+
+  const targetBlobId = await resolvePinnedFileBlobId(
+    deps,
+    fileVo,
+    pinnedStorageKey,
+  );
+  const relPath = filePath.replace(/^\/+/, '');
+
+  const existingFile =
+    fileVo.fileId && isUuid(fileVo.fileId) && deps.prisma.pageFile.findFirst
+      ? await Promise.resolve(
+          deps.prisma.pageFile.findFirst({
+            where: { id: fileVo.fileId, spaceId: projectId },
+            select: {
+              id: true,
+              blobId: true,
+              storageKey: true,
+              hash: true,
+              sizeBytes: true,
+              rev: true,
+              deletedAt: true,
+            },
+          }),
+        ).catch(() => null)
+      : null;
+
+  if (existingFile) {
+    const wasDeleted = existingFile.deletedAt !== null;
+    const blobChanged =
+      existingFile.storageKey !== pinnedStorageKey ||
+      existingFile.blobId !== targetBlobId ||
+      (pinnedHash && existingFile.hash.trim() !== pinnedHash);
+
+    const netBytesDelta = wasDeleted
+      ? BigInt(pinnedSizeBytes)
+      : BigInt(pinnedSizeBytes) - BigInt(existingFile.sizeBytes ?? 0);
+
+    if (
+      netBytesDelta > 0n &&
+      typeof deps.filesPort?.reserveQuota === 'function'
+    ) {
+      await deps.filesPort
+        .reserveQuota(projectId, netBytesDelta)
+        .catch(() => undefined);
+    } else if (
+      netBytesDelta < 0n &&
+      typeof deps.filesPort?.releaseQuota === 'function'
+    ) {
+      await deps.filesPort
+        .releaseQuota(projectId, -netBytesDelta)
+        .catch(() => undefined);
+    }
+
+    if (wasDeleted) {
+      if (targetBlobId && typeof deps.filesPort?.acquireBlob === 'function') {
+        await deps.filesPort.acquireBlob(targetBlobId).catch(() => null);
+      }
+    } else if (blobChanged) {
+      if (
+        targetBlobId &&
+        targetBlobId !== existingFile.blobId &&
+        typeof deps.filesPort?.acquireBlob === 'function'
+      ) {
+        await deps.filesPort.acquireBlob(targetBlobId).catch(() => null);
+      }
+      if (
+        existingFile.blobId &&
+        existingFile.blobId !== targetBlobId &&
+        typeof deps.filesPort?.releaseBlob === 'function'
+      ) {
+        await deps.filesPort
+          .releaseBlob(existingFile.blobId)
+          .catch(() => undefined);
+      }
+    }
+
+    await deps.prisma.pageFile.updateMany({
+      where: { id: existingFile.id, spaceId: projectId },
+      data: {
+        storageKey: pinnedStorageKey,
+        hash: pinnedHash || existingFile.hash,
+        sizeBytes: pinnedSizeBytes,
+        blobId: targetBlobId,
+        lastKnownPath: relPath,
+        deletedAt: null,
+        rev: (existingFile.rev ?? 0) + 1,
+      },
+    });
+
+    return existingFile.id;
+  }
+
+  if (deps.prisma.pageFile.create) {
+    const canonicalPageId = await ensureCanonicalPageId(
+      deps.prisma,
+      projectId,
+      targetPageId,
+    );
+    const newFileId =
+      fileVo.fileId && isUuid(fileVo.fileId)
+        ? fileVo.fileId
+        : crypto.randomUUID();
+
+    if (
+      pinnedSizeBytes > 0 &&
+      typeof deps.filesPort?.reserveQuota === 'function'
+    ) {
+      await deps.filesPort
+        .reserveQuota(projectId, BigInt(pinnedSizeBytes))
+        .catch(() => undefined);
+    }
+    if (targetBlobId && typeof deps.filesPort?.acquireBlob === 'function') {
+      await deps.filesPort.acquireBlob(targetBlobId).catch(() => null);
+    }
+
+    await deps.prisma.pageFile.create({
+      data: {
+        id: newFileId,
+        spaceId: projectId,
+        pageId: canonicalPageId,
+        blobId: targetBlobId,
+        lastKnownPath: relPath,
+        mimeType: inferMimeFromPath(filePath),
+        sizeBytes: pinnedSizeBytes,
+        hash: pinnedHash,
+        storageKey: pinnedStorageKey,
+        bucketName: 'manuscript-files',
+        deletedAt: null,
+      },
+    });
+    return newFileId;
+  }
+
+  return fileVo.fileId ?? null;
 }
 
 async function undeleteDocRecord(
@@ -492,112 +756,47 @@ async function createPreRestoreSafetySnapshot(
   deps: RestorerDeps,
   projectId: string,
   snapshot: Snapshot,
-  currentNodes: PageNodeEntity[],
   targetPageId?: string,
 ): Promise<void> {
-  const resolvedHistoryRepo = deps.historyRepository;
-  if (!resolvedHistoryRepo && !deps.prisma) return;
+  const resolvedHistoryRepo =
+    deps.historyRepository ??
+    (deps.prisma
+      ? new HistoryRepository(deps.prisma, deps.filesPort)
+      : undefined);
+  if (!resolvedHistoryRepo) return;
 
   try {
-    const backupFilesMap = new Map<string, FileSnapshotVo>();
-    const backupEntries = await mapWithConcurrency(
-      currentNodes,
-      8,
-      async (node) => {
-        if (node.isFolder()) return null;
-        if (node.isDoc() && node.docId) {
-          try {
-            const doc = await deps.docstoreService.getDoc(
-              projectId,
-              node.docId,
-            );
-            return {
-              path: node.path,
-              vo: FileSnapshotVo.createDoc(
-                node.path,
-                node.docId,
-                doc.lines || [''],
-                doc.hash || '',
-                node.isRootDoc,
-              ),
-            };
-          } catch {
-            // ignore doc fetch errors during safety backup
-            return null;
-          }
-        } else if (node.type === 'FILE' && node.fileId) {
-          return {
-            path: node.path,
-            vo: FileSnapshotVo.createFile(
-              node.path,
-              node.fileId,
-              node.hash || '',
-              node.sizeBytes || 0,
-            ),
-          };
-        }
-        return null;
-      },
+    const collector =
+      deps.collector ??
+      new SnapshotCollectorAdapter(
+        deps.structureService,
+        deps.docstoreService,
+        (deps.filestoreService ?? ({} as FilestoreService)),
+        deps.liveCollab,
+        undefined,
+        deps.filesPort,
+      );
+
+    const backupFilesMap = await collector.collectCurrentState(
+      projectId,
+      targetPageId,
     );
-    for (const item of backupEntries) {
-      if (item) {
-        backupFilesMap.set(item.path, item.vo);
-      }
-    }
+    if (backupFilesMap.size === 0) return;
 
-    const backupSummary =
-      'Pre-restore automatic safety snapshot before restoring to v' +
-      snapshot.version;
-
-    if (resolvedHistoryRepo) {
-      const latestVersion = await resolvedHistoryRepo.getLatestVersion(
-        projectId,
-        targetPageId,
-      );
-      const safetySnapshot = Snapshot.create({
-        projectId,
-        spaceId: projectId,
-        pageId: targetPageId,
-        version: latestVersion + 1,
-        summary: backupSummary,
-        isAutomatic: true,
-        files: backupFilesMap,
-      });
-      await resolvedHistoryRepo.saveSnapshot(safetySnapshot);
-    } else if (deps.prisma) {
-      const snapshotPageId = await ensureCanonicalPageId(
-        deps.prisma,
-        projectId,
-        targetPageId,
-      );
-      const latestSnap = await deps.prisma.pageSnapshot.findFirst({
-        where: { spaceId: projectId, pageId: snapshotPageId },
-        orderBy: { version: 'desc' },
-        select: { version: true },
-      });
-      const backupVersion = (latestSnap?.version ?? 0) + 1;
-      const safetySnapshot = Snapshot.create({
-        projectId,
-        spaceId: projectId,
-        pageId: snapshotPageId,
-        version: backupVersion,
-        summary: backupSummary,
-        isAutomatic: true,
-        files: backupFilesMap,
-      });
-      const filesJson = safetySnapshot.toFilesJson();
-      const sizeBytes = Buffer.byteLength(JSON.stringify(filesJson), 'utf8');
-      await (deps.prisma.pageSnapshot as any).create({
-        data: {
-          spaceId: projectId,
-          pageId: snapshotPageId,
-          version: backupVersion,
-          summary: backupSummary,
-          isAutomatic: true,
-          totalBytes: sizeBytes,
-        },
-      });
-    }
+    const latestVersion = await resolvedHistoryRepo.getLatestVersion(
+      projectId,
+      targetPageId,
+    );
+    const safetySnapshot = Snapshot.create({
+      projectId,
+      spaceId: projectId,
+      pageId: targetPageId,
+      version: latestVersion + 1,
+      summary: `Pre-restore automatic safety snapshot before restoring to v${snapshot.version}`,
+      isAutomatic: true,
+      files: backupFilesMap,
+    });
+    await resolvedHistoryRepo.saveSnapshot(safetySnapshot);
   } catch (backupErr) {
     deps.logger.warn(
       'Could not create pre-restore safety snapshot: ' + String(backupErr),
@@ -725,40 +924,60 @@ async function restoreSingleFileToStateHelper(
       content,
       rev: syncedRev,
     };
-  } else if (fileVo.type === 'file' && fileVo.fileId) {
-    await undeleteFileRecord(deps, projectId, fileVo.fileId);
-    if (existingNode) {
-      if (
-        existingNode.type !== 'FILE' ||
-        existingNode.fileId !== fileVo.fileId
-      ) {
-        await deps.structureService.deleteNode(projectId, existingNode.id);
+  } else if (fileVo.type === 'file' && (fileVo.fileId || fileVo.storageKey)) {
+    const restoredFileId = await restorePinnedBinaryFile(
+      deps,
+      projectId,
+      targetPath,
+      fileVo,
+      targetPageId,
+    );
+    if (restoredFileId) {
+      if (existingNode) {
+        if (
+          existingNode.type !== 'FILE' ||
+          existingNode.fileId !== restoredFileId
+        ) {
+          await deps.structureService.deleteNode(projectId, existingNode.id);
+          await deps.structureService.createNode(
+            projectId,
+            {
+              name: fileName,
+              path: targetPath,
+              type: 'FILE',
+              fileId: restoredFileId,
+            },
+            targetPageId,
+          );
+        } else if (
+          typeof deps.structureService.updateNodeFileId === 'function'
+        ) {
+          await deps.structureService
+            .updateNodeFileId(
+              projectId,
+              existingNode.id,
+              restoredFileId,
+              fileVo.sizeBytes,
+              fileVo.hash || null,
+            )
+            .catch(() => undefined);
+        }
+      } else {
         await deps.structureService.createNode(
           projectId,
           {
             name: fileName,
             path: targetPath,
             type: 'FILE',
-            fileId: fileVo.fileId,
+            fileId: restoredFileId,
           },
           targetPageId,
         );
       }
-    } else {
-      await deps.structureService.createNode(
-        projectId,
-        {
-          name: fileName,
-          path: targetPath,
-          type: 'FILE',
-          fileId: fileVo.fileId,
-        },
-        targetPageId,
-      );
     }
     return {
       path: targetPath,
-      fileId: fileVo.fileId,
+      fileId: restoredFileId,
     };
   }
 

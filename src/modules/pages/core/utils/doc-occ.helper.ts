@@ -1,5 +1,5 @@
 /**
- * modules/pages/docstore/services/doc-occ.helper.ts
+ * modules/pages/core/utils/doc-occ.helper.ts
  * PageDoc hydration, lookup, response formatting, and OCC helper functions.
  */
 
@@ -10,9 +10,9 @@ import {
   getRecordSpaceId,
   isRecordDeleted,
 } from '@/modules/pages/core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/structure/domain';
-import { DocstoreService } from '../docstore.service';
-import { DocModifiedError } from '../domain';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import type { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 
 export async function hydratePageDocLines(
   docstoreService: DocstoreService,
@@ -317,7 +317,7 @@ export async function executeDocstoreUpdateWithOcc(
       expectedRev,
     });
   } catch (err) {
-    if (err instanceof DocModifiedError) {
+    if (err instanceof PagesDomainError && err.code === 'DOC_VERSION_CONFLICT') {
       const latest = await docstoreService
         .getDoc(projectId, record.id)
         .catch(() => null);

@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/domain/text-replace.ts
+ * modules/pages/docstore/domain/text-replace.ts
  * Pure search/replace rules shared by project-wide replace endpoints.
  */
 

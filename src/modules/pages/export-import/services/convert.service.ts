@@ -6,7 +6,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { isUuid } from '@/core';
+import { PrismaService, isUuid } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
@@ -52,6 +52,7 @@ export class ConvertService {
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
     @Optional() pandoc?: PandocAdapter,
+    @Optional() private readonly prisma?: PrismaService,
   ) {
     this.zipEngine = zipEngine ?? new ZipAdapter();
     this.pandoc = pandoc ?? new PandocAdapter();
@@ -83,12 +84,27 @@ export class ConvertService {
       fileName,
     );
 
+    const strippedFileName = fileName
+      .trim()
+      .replace(/\.(docx|md|markdown)$/i, '')
+      .trim();
+    const fallbackTitle =
+      transpiled.detectedTitle?.trim() ||
+      (strippedFileName && strippedFileName.toLowerCase() !== 'document'
+        ? strippedFileName
+        : undefined);
+
+    const explicitPageId = pageId?.trim() || undefined;
     const summary = await this.hydrator.hydrateProjectEntries(
       projectId,
       transpiled.entries,
       userId,
-      'main.tex',
-      pageId,
+      {
+        preferredRootDoc: 'main.tex',
+        defaultTitle: fallbackTitle,
+        createNewPage: input.createNewPage ?? !explicitPageId,
+      },
+      explicitPageId,
     );
     return summary.toJSON();
   }
@@ -125,6 +141,52 @@ export class ConvertService {
     return transpileMarkdownToLatex(buffer.toString('utf8'), fileName);
   }
 
+  public async exportSpaceDocument(params: {
+    spaceId: string;
+    pageId?: string;
+    format?: string;
+    includeChildren?: boolean | string;
+  }): Promise<ExportFormattedDocResult> {
+    const { spaceId, format, includeChildren } = params;
+    let targetDocOrPageId = params.pageId?.trim() || undefined;
+
+    if (!targetDocOrPageId && this.prisma?.page?.findFirst) {
+      const page = await Promise.resolve(
+        this.prisma.page.findFirst({
+          where: { spaceId, deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, rootDocId: true },
+        }),
+      ).catch(() => null);
+      targetDocOrPageId = page?.rootDocId || page?.id;
+    } else if (
+      targetDocOrPageId &&
+      isUuid(targetDocOrPageId) &&
+      this.prisma?.page?.findFirst
+    ) {
+      const page = await Promise.resolve(
+        this.prisma.page.findFirst({
+          where: { id: targetDocOrPageId, spaceId, deletedAt: null },
+          select: { id: true, rootDocId: true },
+        }),
+      ).catch(() => null);
+      if (page?.rootDocId) {
+        targetDocOrPageId = page.rootDocId;
+      }
+    }
+
+    if (!targetDocOrPageId) {
+      throw new NotFoundException(`No exportable document found in space ${spaceId}`);
+    }
+
+    return this.exportSingleDocument({
+      pageId: targetDocOrPageId,
+      format,
+      includeChildren,
+      project: spaceId,
+    });
+  }
+
   public async exportSingleDocument(params: {
     pageId: string;
     format?: string;
@@ -142,11 +204,34 @@ export class ConvertService {
     }
 
     const activeProjectId = resolveActiveProjectId(params.project);
+    let targetDocId = pageId;
     let doc = activeProjectId
       ? await this.docstoreService
-          .getDoc(activeProjectId, pageId)
+          .getDoc(activeProjectId, targetDocId)
           .catch(() => null)
-      : await this.docstoreService.getDocById(pageId);
+      : await this.docstoreService.getDocById(targetDocId);
+
+    if (!doc && this.prisma?.page?.findFirst) {
+      const page = await Promise.resolve(
+        this.prisma.page.findFirst({
+          where: {
+            id: pageId,
+            ...(activeProjectId ? { spaceId: activeProjectId } : {}),
+            deletedAt: null,
+          },
+          select: { spaceId: true, rootDocId: true },
+        }),
+      ).catch(() => null);
+      if (page?.rootDocId) {
+        targetDocId = page.rootDocId;
+        const lookupSpaceId = activeProjectId || page.spaceId;
+        doc = lookupSpaceId
+          ? await this.docstoreService
+              .getDoc(lookupSpaceId, targetDocId)
+              .catch(() => null)
+          : await this.docstoreService.getDocById(targetDocId);
+      }
+    }
 
     if (!doc) {
       throw new NotFoundException(`Document ${pageId} not found`);
@@ -157,12 +242,12 @@ export class ConvertService {
 
     if (docProjectId) {
       const flushed = await this.liveCollab
-        .flushDocs(docProjectId, [pageId])
+        .flushDocs(docProjectId, [targetDocId])
         .catch(() => []);
       if (flushed.length > 0) {
         doc =
           (await this.docstoreService
-            .getDoc(docProjectId, pageId)
+            .getDoc(docProjectId, targetDocId)
             .catch(() => null)) || doc;
       }
     }

@@ -23,10 +23,10 @@ import {
   resolveCanonicalPageId,
   resolveProjectIdByEntityId,
 } from '../../core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/structure/domain';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { hydratePageDocLines } from '@/modules/pages/docstore/services/doc-occ.helper';
+import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
 
 import {
   type CreatePageFileParams,

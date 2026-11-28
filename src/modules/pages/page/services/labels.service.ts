@@ -29,25 +29,31 @@ export async function resolveAndAssignLabelsForDoc(
   pageId: string,
   labelIds: string[],
 ) {
-  const doc = await pageScopeRepo.findDocInProject(projectId, pageId);
-  if (!doc) {
-    throw new NotFoundException({
-      statusCode: 404,
-      code: 'RESOURCE_NOT_FOUND',
-      message: `Document ${pageId} not found`,
-    });
-  }
-
   const repo =
     prismaOrRepo instanceof PageRepository
       ? prismaOrRepo
       : new PageRepository(prismaOrRepo);
 
-  const targetProjectId = getRecordSpaceId(doc) || projectId;
+  const ownedPage = await repo.findActivePageInSpace(projectId, pageId);
+  let canonicalPageId = ownedPage?.id ?? null;
+  let targetProjectId = ownedPage?.spaceId ?? projectId;
+
+  if (!canonicalPageId) {
+    const doc = await pageScopeRepo.findDocInProject(projectId, pageId);
+    if (!doc) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Page ${pageId} not found`,
+      });
+    }
+    canonicalPageId = doc.pageId || pageId;
+    targetProjectId = getRecordSpaceId(doc) || projectId;
+  }
+
   const labels = await resolveProjectLabels(repo, targetProjectId, labelIds);
 
   // Persist to 3NF page_labels join table (source of truth)
-  const canonicalPageId = doc.pageId || pageId;
   await repo.replacePageLabels(
     canonicalPageId,
     labels.map((l) => l.id),

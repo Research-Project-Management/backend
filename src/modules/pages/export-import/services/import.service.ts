@@ -11,11 +11,19 @@ import { resolveImportFormat } from '../domain/latex-import.domain';
 import { PageArchiveHydratorAdapter } from '../adapters/hydrator.adapter';
 import { ZipAdapter } from '../adapters/zip.adapter';
 import { ImportSummaryResponseDto } from '../dto/import.dto';
+import type { HydrateProjectOptions } from '../types/archive.types';
 import { ConvertService } from './convert.service';
 
 const MAX_URL_IMPORT_BYTES = Math.min(25 * 1024 * 1024, MAX_SINGLE_FILE_BYTES);
 const URL_FETCH_TIMEOUT_MS = 15_000;
 const MAX_REDIRECT_HOPS = 3;
+
+function stripArchiveExtension(fileName?: string): string | undefined {
+  if (!fileName) return undefined;
+  const base = fileName.trim().replace(/\.(zip|docx|md|markdown)$/i, '').trim();
+  if (!base || base.toLowerCase() === 'archive') return undefined;
+  return base;
+}
 
 @Injectable()
 export class ImportService {
@@ -33,14 +41,14 @@ export class ImportService {
     projectId: string,
     entries: ArchiveEntryVo[],
     userId?: string | null,
-    preferredRootDoc?: string,
+    preferredRootDocOrOptions?: string | HydrateProjectOptions,
     pageId?: string,
   ): Promise<ImportSummaryVo> {
     return this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
       userId,
-      preferredRootDoc,
+      preferredRootDocOrOptions,
       pageId,
     );
   }
@@ -51,15 +59,28 @@ export class ImportService {
     userId?: string | null,
     preferredRootDoc?: string,
     pageId?: string,
+    options?: { fileName?: string; createNewPage?: boolean },
   ): Promise<ImportSummaryResponseDto> {
-    const extracted = await this.zipEngine.extractZip(zipBuffer);
-    const entries = validateExtractedArchiveEntries(extracted);
+    const { entries: rawEntries, skippedFiles } =
+      typeof this.zipEngine.extractZipWithSkipped === 'function'
+        ? await this.zipEngine.extractZipWithSkipped(zipBuffer)
+        : {
+            entries: await this.zipEngine.extractZip(zipBuffer),
+            skippedFiles: [] as string[],
+          };
+    const entries = validateExtractedArchiveEntries(rawEntries);
+    const explicitPageId = pageId?.trim() || undefined;
     const summary = await this.hydrator.hydrateProjectEntries(
       projectId,
       entries,
       userId,
-      preferredRootDoc,
-      pageId,
+      {
+        preferredRootDoc,
+        defaultTitle: stripArchiveExtension(options?.fileName),
+        skippedFiles,
+        createNewPage: options?.createNewPage ?? !explicitPageId,
+      },
+      explicitPageId,
     );
     return summary.toJSON();
   }
@@ -233,7 +254,10 @@ export class ImportService {
     userId?: string,
   ): Promise<void> {
     if (fileName.toLowerCase().endsWith('.zip')) {
-      await this.importProjectZip(spaceId, buffer, userId, undefined, pageId);
+      await this.importProjectZip(spaceId, buffer, userId, undefined, pageId, {
+        fileName,
+        createNewPage: !pageId,
+      });
       return;
     }
 

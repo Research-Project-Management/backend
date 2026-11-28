@@ -147,7 +147,7 @@ export class ScopeRepository {
   }
 
   /**
-   * Finds a manuscript file asset conditioned on projectId.
+   * Finds a page file asset conditioned on projectId.
    */
   async findFileInProject(
     projectId: string,

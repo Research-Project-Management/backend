@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { YourWorkService } from '@/modules/project/your-work/your-work.service';
 import { YourWorkRepository } from '@/modules/project/your-work/your-work.repository';
-import { ActivityService } from '@/modules/activity/activity.service';
+import { ActivityService } from '@/modules/project/activity/activity.service';
 
 describe('YourWorkService', () => {
   let service: YourWorkService;

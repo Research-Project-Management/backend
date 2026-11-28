@@ -12,21 +12,21 @@ import {
   filterRecordsByPageScope,
   resolveCanonicalPageId,
 } from '@/modules/pages/core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/structure/domain';
-import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { ensurePrismaFolderChain } from '@/modules/pages/core/utils/folder-chain';
+import { IBinaryStoragePort } from './domain/filestore.ports';
 import {
-  IPageBinaryAssetRepository,
-  IBinaryStoragePort,
-  IContentHasherPort,
   StorageObjectMetadata,
   StorageRangeOptions,
   StorageUploadOptions,
   StreamHashResult,
+} from './types/filestore.types';
+import {
   PageBinaryAsset,
   ContentHash,
   StorageKey,
-  DuplicateFileException,
-} from './filestore.types';
+} from './domain/file.entity';
+import { DuplicateFileException } from './domain/filestore.errors';
 import {
   ContentHasherAdapter,
   CryptoGitBlobHasherAdapter,
@@ -102,7 +102,7 @@ export class PageBinaryAssetMapper {
 }
 
 @Injectable()
-export class FilestoreRepository extends IPageBinaryAssetRepository {
+export class FilestoreRepository {
   private readonly logger = new Logger(FilestoreRepository.name);
   private readonly storage: IBinaryStoragePort;
   private readonly hasher: ContentHasherAdapter;
@@ -112,7 +112,6 @@ export class FilestoreRepository extends IPageBinaryAssetRepository {
     @Optional() @Inject(IBinaryStoragePort) storage?: IBinaryStoragePort,
     @Optional() hasher?: ContentHasherAdapter,
   ) {
-    super();
     this.storage = storage ?? new LocalDiskBinaryStorageAdapter();
     this.hasher = hasher ?? new ContentHasherAdapter();
   }
@@ -364,8 +363,13 @@ export class FilestoreRepository extends IPageBinaryAssetRepository {
   ): Promise<void> {
     if (!this.prisma.pageNode?.findFirst) return;
     const parsed = NodePathVo.parse(relativePath);
-    const trimmedPageId = pageId?.trim() || undefined;
-    const pageFilter = trimmedPageId ? { pageId: trimmedPageId } : {};
+    const effectivePageId = await ensureCanonicalPageId(
+      this.prisma,
+      projectId,
+      pageId,
+      { autoCreate: false },
+    );
+    const pageFilter = effectivePageId ? { pageId: effectivePageId } : {};
 
     const existingAtTarget = await Promise.resolve(
       this.prisma.pageNode.findFirst({
@@ -403,26 +407,32 @@ export class FilestoreRepository extends IPageBinaryAssetRepository {
     projectId: string,
     candidatePageId?: string | null,
   ): Promise<string | undefined> {
-    if (!candidatePageId || !isUuid(candidatePageId)) {
-      return undefined;
+    const trimmedCandidate = candidatePageId?.trim() || undefined;
+    if (!trimmedCandidate || !isUuid(trimmedCandidate)) {
+      return await ensureCanonicalPageId(this.prisma, projectId, undefined, {
+        autoCreate: false,
+      });
     }
 
     if (this.prisma.page?.findUnique) {
       const page = await Promise.resolve(
         this.prisma.page.findUnique({
-          where: { id: candidatePageId },
-          select: { id: true, spaceId: true },
+          where: { id: trimmedCandidate },
+          select: { id: true, spaceId: true, deletedAt: true },
         }),
       ).catch(() => null);
-      if (page?.id) {
-        return page.spaceId === projectId ? page.id : undefined;
+      if (page?.id && !page.deletedAt) {
+        if (!page.spaceId || page.spaceId === projectId) {
+          return page.id;
+        }
+        return undefined;
       }
     }
 
     if (this.prisma.pageDoc?.findFirst) {
       const doc = await Promise.resolve(
         this.prisma.pageDoc.findFirst({
-          where: { id: candidatePageId, spaceId: projectId },
+          where: { id: trimmedCandidate, spaceId: projectId },
           select: { id: true, pageId: true },
         }),
       ).catch(() => null);
@@ -434,9 +444,16 @@ export class FilestoreRepository extends IPageBinaryAssetRepository {
     const canonical = await resolveCanonicalPageId(
       this.prisma,
       projectId,
-      candidatePageId,
+      trimmedCandidate,
     ).catch(() => undefined);
-    return canonical || candidatePageId;
+    if (canonical) return canonical;
+
+    return await ensureCanonicalPageId(
+      this.prisma,
+      projectId,
+      trimmedCandidate,
+      { autoCreate: false },
+    );
   }
 
   public async findById(id: string): Promise<PageBinaryAsset | null> {
@@ -506,16 +523,52 @@ export class FilestoreRepository extends IPageBinaryAssetRepository {
     return result.count > 0;
   }
 
+  public async purge(
+    projectId: string,
+    fileId: string,
+    pageId?: string | null,
+  ): Promise<boolean> {
+    const trimmedPageId = pageId?.trim() || undefined;
+    if (this.prisma?.pageNode?.deleteMany) {
+      await this.prisma.pageNode.deleteMany({
+        where: {
+          spaceId: projectId,
+          fileId,
+        },
+      });
+    }
+    if (this.prisma?.pageFile?.deleteMany) {
+      const res = await this.prisma.pageFile.deleteMany({
+        where: {
+          id: fileId,
+          spaceId: projectId,
+          ...(trimmedPageId ? { pageId: trimmedPageId } : {}),
+        },
+      });
+      return res.count > 0;
+    }
+    if (this.prisma?.pageFile?.delete) {
+      await this.prisma.pageFile.delete({ where: { id: fileId } });
+      return true;
+    }
+    return false;
+  }
+
   public async findByProjectAndName(
     projectId: string,
     name: string,
     pageId?: string | null,
   ): Promise<PageBinaryAsset | null> {
-    const trimmedPageId = pageId?.trim() || undefined;
+    const effectivePageId = await ensureCanonicalPageId(
+      this.prisma,
+      projectId,
+      pageId,
+      { autoCreate: false },
+    );
     const record = await this.prisma.pageFile.findFirst({
       where: {
         spaceId: projectId,
-        ...(trimmedPageId ? { pageId: trimmedPageId } : {}),
+        pageId: effectivePageId,
         lastKnownPath: name,
         deletedAt: null,
       },
@@ -631,7 +684,6 @@ export class FilestoreRepository extends IPageBinaryAssetRepository {
     return await this.prisma.pageFile.count({
       where: {
         hash,
-        deletedAt: null,
       },
     });
   }

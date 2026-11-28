@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import type {
+  ISandboxRunner,
   WordCountFileStats,
   WordCountSection,
   WordCountStats,
@@ -158,9 +159,20 @@ export function parseTexcountBriefOutput(
 
 export class TexcountCliAdapter {
   private readonly bin: string;
+  private readonly sandboxRunner?: ISandboxRunner;
 
-  constructor(bin = process.env.TEXCOUNT_BIN || 'texcount') {
-    this.bin = bin;
+  constructor(
+    binOrRunner: string | ISandboxRunner = process.env.TEXCOUNT_BIN ||
+      'texcount',
+    sandboxRunner?: ISandboxRunner,
+  ) {
+    if (typeof binOrRunner === 'string') {
+      this.bin = binOrRunner;
+      this.sandboxRunner = sandboxRunner;
+    } else {
+      this.bin = process.env.TEXCOUNT_BIN || 'texcount';
+      this.sandboxRunner = binOrRunner;
+    }
   }
 
   public async countFiles(params: {
@@ -201,17 +213,38 @@ export class TexcountCliAdapter {
         normalizedRoot,
       ];
 
-      const { stdout } = await execFileAsync(this.bin, args, {
-        cwd: tmpDir,
-        timeout: params.timeoutMs ?? 10_000,
-        maxBuffer: 2 * 1024 * 1024,
-        env: {
-          PATH: process.env.PATH || '',
-          HOME: tmpDir,
-          TMPDIR: tmpDir,
-          LANG: 'C.UTF-8',
-        },
-      });
+      const timeoutMs = params.timeoutMs ?? 10_000;
+      const env = {
+        PATH: process.env.PATH || '',
+        HOME: tmpDir,
+        TMPDIR: tmpDir,
+        LANG: 'C.UTF-8',
+      };
+
+      let stdout = '';
+      if (this.sandboxRunner) {
+        const execResult = await this.sandboxRunner.run(this.bin, args, {
+          cwd: tmpDir,
+          timeoutMs,
+          maxOutputBytes: 2 * 1024 * 1024,
+          env,
+        });
+        if (
+          execResult.timedOut ||
+          (execResult.exitCode !== 0 && !execResult.stdout)
+        ) {
+          return null;
+        }
+        stdout = execResult.stdout;
+      } else {
+        const execResult = await execFileAsync(this.bin, args, {
+          cwd: tmpDir,
+          timeout: timeoutMs,
+          maxBuffer: 2 * 1024 * 1024,
+          env,
+        });
+        stdout = execResult.stdout;
+      }
 
       const parsed = parseTexcountBriefOutput(stdout, normalizedRoot);
       if (!parsed) return null;

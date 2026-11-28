@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { mapWithConcurrency } from '@/core';
 import {
   IIntegrationProvider,
   IntegrationProviderType,
@@ -7,6 +8,8 @@ import {
   OAuthInitiationResult,
   RemoteCollectionItem,
 } from './integration-provider.interface';
+
+const GITHUB_BLOB_CONCURRENCY = 6;
 
 interface GitHubRepoItem {
   id: number;
@@ -481,62 +484,56 @@ export class GithubProvider implements IIntegrationProvider {
       }
     }
 
-    const commitRes = await fetch(
-      `https://api.github.com/repos/${safeRepo}/git/commits/${latestCommitSha}`,
-      { headers },
-    );
-    if (!commitRes.ok) {
-      throw new Error(
-        `Failed to fetch base commit ${latestCommitSha}: HTTP ${commitRes.status}`,
-      );
-    }
-    const commitData = (await commitRes.json()) as { tree: { sha: string } };
-    const baseTreeSha = commitData.tree.sha;
-
-    const treeEntries: Array<{
-      path: string;
-      mode: '100644';
-      type: 'blob';
-      sha: string;
-    }> = [];
-
+    const uniqueFilesByPath = new Map<string, Buffer>();
     for (const file of files) {
       const cleanPath = file.path.replace(/^\/+/, '');
       if (
         !cleanPath ||
         cleanPath.startsWith('.git/') ||
         !this.isSafeGitTreePath(cleanPath)
-      )
+      ) {
         continue;
-
-      const base64Content = file.data.toString('base64');
-      const blobRes = await fetch(
-        `https://api.github.com/repos/${safeRepo}/git/blobs`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            content: base64Content,
-            encoding: 'base64',
-          }),
-        },
-      );
-
-      if (!blobRes.ok) {
-        const errText = await blobRes.text();
-        throw new Error(
-          `Failed to upload blob for ${cleanPath}: HTTP ${blobRes.status} ${errText}`,
-        );
       }
-
-      const blobData = (await blobRes.json()) as { sha: string };
-      treeEntries.push({
-        path: cleanPath,
-        mode: '100644',
-        type: 'blob',
-        sha: blobData.sha,
-      });
+      uniqueFilesByPath.set(cleanPath, file.data);
     }
+
+    const validFiles = Array.from(uniqueFilesByPath.entries()).map(
+      ([cleanPath, data]) => ({ cleanPath, data }),
+    );
+
+    const treeEntries = await mapWithConcurrency(
+      validFiles,
+      GITHUB_BLOB_CONCURRENCY,
+      async ({ cleanPath, data }) => {
+        const base64Content = data.toString('base64');
+        const blobRes = await fetch(
+          `https://api.github.com/repos/${safeRepo}/git/blobs`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              content: base64Content,
+              encoding: 'base64',
+            }),
+          },
+        );
+
+        if (!blobRes.ok) {
+          const errText = await blobRes.text();
+          throw new Error(
+            `Failed to upload blob for ${cleanPath}: HTTP ${blobRes.status} ${errText}`,
+          );
+        }
+
+        const blobData = (await blobRes.json()) as { sha: string };
+        return {
+          path: cleanPath,
+          mode: '100644' as const,
+          type: 'blob' as const,
+          sha: blobData.sha,
+        };
+      },
+    );
 
     const treeRes = await fetch(
       `https://api.github.com/repos/${safeRepo}/git/trees`,
@@ -544,7 +541,6 @@ export class GithubProvider implements IIntegrationProvider {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          base_tree: baseTreeSha,
           tree: treeEntries,
         }),
       },
@@ -622,7 +618,7 @@ export class GithubProvider implements IIntegrationProvider {
     decryptedToken: string;
     repoFullName: string;
     branch?: string;
-  }): Promise<Array<{ path: string; data: Buffer }>> {
+  }): Promise<Array<{ path: string; data: Buffer }> & { commitSha?: string }> {
     const { decryptedToken, repoFullName } = params;
     const safeRepo = this.validateRepoFullName(repoFullName);
     const branch = params.branch || 'main';
@@ -668,8 +664,6 @@ export class GithubProvider implements IIntegrationProvider {
       tree: Array<{ path: string; type: string; sha: string; size?: number }>;
     };
 
-    const pulledFiles: Array<{ path: string; data: Buffer }> = [];
-
     const blobEntries = (treeData.tree || []).filter(
       (item) =>
         item.type === 'blob' &&
@@ -677,34 +671,43 @@ export class GithubProvider implements IIntegrationProvider {
         this.isSafeGitTreePath(item.path),
     );
 
-    for (const item of blobEntries) {
-      try {
-        const blobRes = await fetch(
-          `https://api.github.com/repos/${safeRepo}/git/blobs/${item.sha}`,
-          { headers },
-        );
-        if (!blobRes.ok) continue;
+    const downloaded = await mapWithConcurrency(
+      blobEntries,
+      GITHUB_BLOB_CONCURRENCY,
+      async (item): Promise<{ path: string; data: Buffer } | null> => {
+        try {
+          const blobRes = await fetch(
+            `https://api.github.com/repos/${safeRepo}/git/blobs/${item.sha}`,
+            { headers },
+          );
+          if (!blobRes.ok) return null;
 
-        const blobJson = (await blobRes.json()) as {
-          content: string;
-          encoding: string;
-        };
+          const blobJson = (await blobRes.json()) as {
+            content: string;
+            encoding: string;
+          };
 
-        const buffer =
-          blobJson.encoding === 'base64'
-            ? Buffer.from(blobJson.content, 'base64')
-            : Buffer.from(blobJson.content, 'utf8');
+          const buffer =
+            blobJson.encoding === 'base64'
+              ? Buffer.from(blobJson.content, 'base64')
+              : Buffer.from(blobJson.content, 'utf8');
 
-        pulledFiles.push({
-          path: item.path,
-          data: buffer,
-        });
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Could not pull blob ${item.path}: ${errMsg}`);
-      }
-    }
+          return {
+            path: item.path,
+            data: buffer,
+          };
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Could not pull blob ${item.path}: ${errMsg}`);
+          return null;
+        }
+      },
+    );
 
-    return pulledFiles;
+    const pulledFiles = downloaded.filter(
+      (f): f is { path: string; data: Buffer } => f !== null,
+    );
+
+    return Object.assign(pulledFiles, { commitSha: latestCommitSha });
   }
 }

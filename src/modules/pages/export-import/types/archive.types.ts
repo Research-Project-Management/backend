@@ -34,6 +34,14 @@ export interface ExportProjectZipStreamOutput {
   hasCompiledPdf: boolean;
 }
 
+export interface HydrateProjectOptions {
+  preferredRootDoc?: string;
+  overwrite?: boolean;
+  defaultTitle?: string;
+  skippedFiles?: string[];
+  createNewPage?: boolean;
+}
+
 export interface ConvertDocumentInput {
   projectId: string;
   fileBuffer: Buffer;
@@ -41,4 +49,5 @@ export interface ConvertDocumentInput {
   format?: 'docx' | 'md';
   userId?: string | null;
   pageId?: string;
+  createNewPage?: boolean;
 }

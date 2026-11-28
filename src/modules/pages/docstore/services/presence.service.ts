@@ -17,6 +17,7 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   LivePresenceUser,
+  NOOP_LIVE_COLLABORATION,
 } from '@/modules/pages/core/ports/live-collaboration.port';
 
 export interface ActivePresenceUser {
@@ -90,15 +91,10 @@ export class PresenceService implements OnModuleDestroy {
     private readonly prisma: PrismaService,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
+    liveCollab?: LiveCollaborationPort,
   ) {
     this.liveCollab =
-      liveCollabOrLegacyRef &&
-      typeof (liveCollabOrLegacyRef as LiveCollaborationPort).getPresence ===
-        'function' &&
-      !(liveCollabOrLegacyRef as { isNoop?: boolean }).isNoop
-        ? (liveCollabOrLegacyRef as LiveCollaborationPort)
-        : null;
+      liveCollab && liveCollab !== NOOP_LIVE_COLLABORATION ? liveCollab : null;
   }
 
   public onModuleDestroy(): void {
@@ -120,15 +116,29 @@ export class PresenceService implements OnModuleDestroy {
       return cached.projectId;
     }
 
-    const doc = await this.prisma.pageDoc.findUnique({
-      where: { id },
-      select: { spaceId: true },
-    });
-    let resolved =
-      doc?.spaceId ?? (doc as { projectId?: string } | null)?.projectId ?? null;
+    let resolved: string | null = null;
+    if (this.prisma.page?.findUnique) {
+      const page = await Promise.resolve(
+        this.prisma.page.findUnique({
+          where: { id },
+          select: { spaceId: true, deletedAt: true },
+        }),
+      ).catch(() => null);
+      if (page && !page.deletedAt && page.spaceId) {
+        resolved = page.spaceId;
+      }
+    }
+    if (!resolved) {
+      const doc = await this.prisma.pageDoc.findUnique({
+        where: { id },
+        select: { spaceId: true },
+      });
+      resolved =
+        doc?.spaceId ?? (doc as { projectId?: string } | null)?.projectId ?? null;
+    }
     if (!resolved) {
       const node = await this.prisma.pageNode.findFirst({
-        where: { OR: [{ id }, { spaceId: id }] },
+        where: { OR: [{ id }, { pageId: id }, { spaceId: id }] },
         select: { spaceId: true },
       });
       resolved =

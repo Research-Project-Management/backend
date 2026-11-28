@@ -13,10 +13,9 @@ import {
 } from '@nestjs/common';
 import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
-import { ILibrarySyncPort } from '../domain/citations.ports';
 
 @Injectable()
-export class LibrarySyncAdapter implements ILibrarySyncPort {
+export class LibrarySyncAdapter {
   private readonly logger = new Logger(LibrarySyncAdapter.name);
 
   constructor(

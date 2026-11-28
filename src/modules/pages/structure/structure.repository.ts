@@ -10,33 +10,27 @@ import {
   ensureCanonicalPageId,
   filterRecordsByPageScope,
 } from '@/modules/pages/core/utils/page-scope';
-import {
-  IStructureRepository,
-  CreateNodeParams,
-  PageNodeEntity,
-  NodePathVo,
-  ParsedFolderSegment,
-} from './domain';
+import { CreateNodeParams } from './domain/structure.ports';
+import { PageNodeEntity } from './domain/node.entity';
+import { NodePathVo, ParsedFolderSegment } from '@/modules/pages/core/utils/node-path';
 import {
   NODE_HYDRATION_INCLUDE,
   type HydratedPageNodeRow,
   ensureFolderChainInTxHelper,
   ensurePrismaFolderChain,
   mapHydratedRowToPageNodeEntity,
-} from './repositories/folder-chain.helper';
+} from './repositories/folder-chain';
 import {
   deleteSubtreeHelper,
   moveSubtreeHelper,
   renameSingleNodeHelper,
-} from './repositories/subtree-mutation.helper';
+} from './repositories/subtree-mutation';
 
 export { ensurePrismaFolderChain };
 
 @Injectable()
-export class StructureRepository extends IStructureRepository {
-  constructor(private readonly prisma: PrismaService) {
-    super();
-  }
+export class StructureRepository {
+  constructor(private readonly prisma: PrismaService) {}
 
   public async ensureFolderChainInTx(
     tx: Prisma.TransactionClient,
@@ -176,9 +170,14 @@ export class StructureRepository extends IStructureRepository {
       include: NODE_HYDRATION_INCLUDE,
       orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
     });
+    const activeNodes = trimmedPageId
+      ? nodes
+      : nodes.filter(
+          (n) => !(n as HydratedPageNodeRow).page?.deletedAt,
+        );
     const scoped = trimmedPageId
-      ? filterRecordsByPageScope(nodes, trimmedPageId, projectId)
-      : nodes;
+      ? filterRecordsByPageScope(activeNodes, trimmedPageId, projectId)
+      : activeNodes;
     return scoped.map((n) =>
       mapHydratedRowToPageNodeEntity(n as HydratedPageNodeRow),
     );

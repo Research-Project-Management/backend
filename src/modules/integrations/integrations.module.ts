@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
+import { PagesCoreModule } from '@/modules/pages/core/core.module';
 import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
 import { ExportImportModule } from '@/modules/pages/export-import/export-import.module';
 import { IntegrationsController } from './integrations.controller';
@@ -15,6 +16,7 @@ import { StructureModule } from '@/modules/pages/structure/structure.module';
 @Module({
   imports: [
     PrismaModule,
+    PagesCoreModule,
     FilestoreModule,
     ExportImportModule,
     DocstoreModule,

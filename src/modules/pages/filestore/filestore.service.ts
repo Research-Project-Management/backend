@@ -11,19 +11,23 @@ import { Readable } from 'node:stream';
 import { isUuid } from '@/core';
 import { BlobStatus, type IFilesPort } from '@/modules/files/types/files.type';
 import { FILES_PORT } from '@/modules/files/files.constant';
-import { NodePathVo } from '@/modules/pages/structure/domain';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import { FilestoreRepository } from './filestore.repository';
 import {
   PageBinaryAsset,
   StorageKey,
   ByteRange,
+} from './domain/file.entity';
+import {
   FileNotFoundException,
+  MAX_FILE_SIZE_BYTES,
+  StorageQuotaExceededException,
+} from './domain/filestore.errors';
+import {
   StorageObjectMetadata,
   StreamPageBinaryAssetOutput,
   GetFileHeadOutput,
-  MAX_FILE_SIZE_BYTES,
-  StorageQuotaExceededException,
-} from './filestore.types';
+} from './types/filestore.types';
 
 @Injectable()
 export class FilestoreService {
@@ -132,15 +136,13 @@ export class FilestoreService {
     const sanitizedName = PageBinaryAsset.sanitizeFilename(name);
 
     const candidatePageId = options?.pageId?.trim() || undefined;
-    let effectivePageId =
+    const validCandidatePageId =
       candidatePageId && isUuid(candidatePageId) ? candidatePageId : undefined;
-    if (
-      effectivePageId &&
-      typeof this.repository.resolvePageId === 'function'
-    ) {
+    let effectivePageId = validCandidatePageId;
+    if (typeof this.repository.resolvePageId === 'function') {
       effectivePageId = await this.repository.resolvePageId(
         projectId,
-        effectivePageId,
+        validCandidatePageId,
       );
     }
 
@@ -405,7 +407,7 @@ export class FilestoreService {
   }
 
   /**
-   * List all files in a manuscript project.
+   * List all files in a page space.
    */
   public async listFiles(
     projectId: string,
@@ -446,12 +448,14 @@ export class FilestoreService {
   }
 
   /**
-   * Delete file record and optionally garbage-collect unreferenced physical CAS blob.
+   * Soft-deletes (`permanent = false`) or permanently purges (`permanent = true`) a binary file.
+   * Soft-delete preserves `FileBlob` CAS ref-count and `SpaceQuota` while restorable in Trash;
+   * permanent purge releases `FileBlob` ref-count, decrements `SpaceQuota`, and GCs unreferenced blobs.
    */
   public async deleteFile(
     projectId: string,
     fileId: string,
-    purgeBlob = false,
+    permanent = false,
     pageId?: string | null,
   ): Promise<void> {
     const file = await this.repository.findByProjectAndId(
@@ -459,26 +463,57 @@ export class FilestoreService {
       fileId,
       pageId,
     );
-    if (!file || file.deleted) {
+    if (!file || (!permanent && file.deleted)) {
       throw new FileNotFoundException(fileId, projectId);
     }
 
-    const atomicDeleteResult =
-      typeof this.repository.markDeletedIfActive === 'function'
-        ? await this.repository.markDeletedIfActive(projectId, fileId, pageId)
-        : null;
+    if (!permanent) {
+      const atomicDeleteResult =
+        typeof this.repository.markDeletedIfActive === 'function'
+          ? await this.repository.markDeletedIfActive(projectId, fileId, pageId)
+          : null;
 
-    if (atomicDeleteResult === false) {
-      throw new FileNotFoundException(fileId, projectId);
-    }
-    if (atomicDeleteResult === true) {
-      file.markDeleted();
-    } else {
-      file.markDeleted();
-      await this.repository.save(file);
+      if (atomicDeleteResult === false) {
+        throw new FileNotFoundException(fileId, projectId);
+      }
+      if (atomicDeleteResult === true) {
+        file.markDeleted();
+      } else {
+        file.markDeleted();
+        await this.repository.save(file);
+      }
+
+      this.eventEmitter?.emit('pages.file-tree.change', {
+        projectId,
+        change: {
+          action: 'delete',
+          node: {
+            id: fileId,
+            fileId,
+          },
+        },
+      });
+      return;
     }
 
-    // Reclaim unified platform Space StorageQuota upon deletion
+    // Permanent purge: remove DB row(s), release SpaceQuota and FileBlob CAS ref-count
+    let purgedFromDb = false;
+    if (typeof this.repository.purge === 'function') {
+      purgedFromDb = await this.repository.purge(projectId, fileId, pageId);
+    }
+    if (!purgedFromDb && !file.deleted) {
+      const atomicDeleteResult =
+        typeof this.repository.markDeletedIfActive === 'function'
+          ? await this.repository.markDeletedIfActive(projectId, fileId, pageId)
+          : null;
+      if (atomicDeleteResult === true) {
+        file.markDeleted();
+      } else if (atomicDeleteResult === null) {
+        file.markDeleted();
+        await this.repository.save(file);
+      }
+    }
+
     if (
       file.sizeBytes > 0 &&
       typeof this.filesPort?.releaseQuota === 'function'
@@ -492,7 +527,6 @@ export class FilestoreService {
         });
     }
 
-    // Release reference in unified platform StorageBlob CAS ledger
     if (typeof this.filesPort?.releaseBlob === 'function') {
       if (file.blobId) {
         try {
@@ -530,11 +564,11 @@ export class FilestoreService {
       },
     });
 
-    if (purgeBlob) {
+    if (typeof this.repository.countReferencesByHash === 'function') {
       const remainingRefs = await this.repository.countReferencesByHash(
         file.hash.getValue(),
       );
-      if (remainingRefs === 0) {
+      if (remainingRefs === 0 && typeof this.repository.deleteObject === 'function') {
         try {
           await this.repository.deleteObject(
             file.bucketName,
@@ -691,7 +725,8 @@ export class FilestoreService {
   }
 
   /**
-   * Restores a soft-deleted file record in the project (used for Memento/Saga rollback).
+   * Restores a soft-deleted file record in the project (used for Memento/Saga rollback and Trash restore).
+   * Note: Soft-delete keeps SpaceQuota and StorageBlob CAS ref-counts intact, so restore is a pure DB flip.
    */
   public async restoreFile(
     projectId: string,
@@ -703,9 +738,8 @@ export class FilestoreService {
       return true;
     }
 
-    let wonAtomicRestore = true;
     if (typeof this.repository.markRestoredIfDeleted === 'function') {
-      wonAtomicRestore = await this.repository.markRestoredIfDeleted(
+      const wonAtomicRestore = await this.repository.markRestoredIfDeleted(
         projectId,
         fileId,
       );
@@ -718,30 +752,6 @@ export class FilestoreService {
       await this.repository.save(file);
     }
 
-    if (
-      file.sizeBytes > 0 &&
-      typeof this.filesPort?.reserveQuota === 'function'
-    ) {
-      await this.filesPort
-        .reserveQuota(projectId, BigInt(file.sizeBytes))
-        .catch(() => {});
-    }
-    if (typeof this.filesPort?.acquireBlob === 'function') {
-      let targetBlobId = file.blobId;
-      if (
-        !targetBlobId &&
-        file.hash &&
-        typeof this.filesPort?.findBlobByHash === 'function'
-      ) {
-        const blob = await this.filesPort
-          .findBlobByHash(file.hash.getValue())
-          .catch(() => null);
-        targetBlobId = blob?.id ?? null;
-      }
-      if (targetBlobId) {
-        await this.filesPort.acquireBlob(targetBlobId).catch(() => null);
-      }
-    }
     return true;
   }
 

@@ -22,6 +22,7 @@ import { LocalProcessRunner } from './sandbox/local.sandbox';
 import { DockerSandboxRunner } from './sandbox/docker.sandbox';
 import { LatexmkEngine } from './adapters/latexmk.adapter';
 import { ClsiHealthCheck } from './adapters/health.adapter';
+import { TexcountCliAdapter } from './adapters/texcount.adapter';
 import { ISandboxRunner } from './domain/ports';
 import {
   parseSandboxConfig,
@@ -93,6 +94,15 @@ export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
         const latexmkBin =
           configService.get<string>('LATEXMK_BIN') || 'latexmk';
         return new LatexmkEngine(runner, latexmkBin, 'pdflatex');
+      },
+      inject: [CLSI_SANDBOX_RUNNER, ConfigService],
+    },
+    {
+      provide: TexcountCliAdapter,
+      useFactory: (runner: ISandboxRunner, configService: ConfigService) => {
+        const texcountBin =
+          configService.get<string>('TEXCOUNT_BIN') || 'texcount';
+        return new TexcountCliAdapter(texcountBin, runner);
       },
       inject: [CLSI_SANDBOX_RUNNER, ConfigService],
     },

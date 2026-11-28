@@ -3,7 +3,7 @@
  * Domain Entity representing a Folder, Document, or Binary Asset node in a Page's Virtual Tree.
  */
 
-import { NodePathVo } from './node-path';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import {
   CannotDeleteRootFolderError,
   CyclicMoveError,

@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/domain/doc.errors.ts
+ * modules/pages/docstore/domain/doc.errors.ts
  * Domain errors matching Overleaf Docstore specifications.
  */
 

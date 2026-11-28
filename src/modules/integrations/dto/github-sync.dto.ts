@@ -77,10 +77,20 @@ export class PullGithubDto {
 }
 
 export class ImportGithubRepoDto {
-  @ApiProperty({ description: 'Target Page UUID' })
+  @ApiPropertyOptional({ description: 'Target Page UUID (when importing into an existing page)' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  pageId!: string;
+  pageId?: string;
+
+  @ApiPropertyOptional({ description: 'Target Space ID (e.g. "personal" or Project UUID when creating a new page)' })
+  @IsOptional()
+  @IsString()
+  spaceId?: string;
+
+  @ApiPropertyOptional({ description: 'Optional custom Page title' })
+  @IsOptional()
+  @IsString()
+  title?: string;
 
   @ApiProperty({
     description: 'GitHub repository full name (owner/repo)',

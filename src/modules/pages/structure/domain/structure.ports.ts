@@ -1,9 +1,9 @@
 /**
  * modules/pages/structure/domain/structure.ports.ts
- * Port interfaces for Page Virtual Tree nodes, root doc detection, and tree mutation broadcasts.
+ * Domain parameter types for Page Virtual Tree nodes.
  */
 
-import { PageNodeEntity, PageNodeType } from './node.entity';
+import { PageNodeType } from './node.entity';
 
 export interface CreateNodeParams {
   projectId: string;
@@ -18,79 +18,4 @@ export interface CreateNodeParams {
   sizeBytes?: number;
   hash?: string | null;
   sortOrder?: number;
-}
-
-export abstract class IStructureRepository {
-  abstract createNode(params: CreateNodeParams): Promise<PageNodeEntity>;
-  abstract findById(
-    projectId: string,
-    nodeId: string,
-  ): Promise<PageNodeEntity | null>;
-  abstract findByPath(
-    projectId: string,
-    path: string,
-    pageId?: string | null,
-  ): Promise<PageNodeEntity | null>;
-  abstract findByFileId?(
-    projectId: string,
-    fileId: string,
-    pageId?: string | null,
-  ): Promise<PageNodeEntity | null>;
-  abstract getAllNodes(
-    projectId: string,
-    pageId?: string | null,
-  ): Promise<PageNodeEntity[]>;
-  abstract getRootDoc(
-    projectId: string,
-    pageId?: string | null,
-  ): Promise<PageNodeEntity | null>;
-  abstract setRootDoc(projectId: string, nodeId: string): Promise<void>;
-  abstract unsetRootDoc(
-    projectId: string,
-    pageId?: string | null,
-  ): Promise<void>;
-  abstract moveSubtree(
-    projectId: string,
-    sourcePath: string,
-    destPath: string,
-    newParentId: string | null,
-    options?: { nodeId?: string; pageId?: string | null },
-  ): Promise<void>;
-  abstract renameNode(
-    projectId: string,
-    nodeId: string,
-    newName: string,
-    newPath: string,
-  ): Promise<PageNodeEntity>;
-  abstract deleteSubtree(
-    projectId: string,
-    path: string,
-    pageId?: string | null,
-  ): Promise<PageNodeEntity[]>;
-  abstract updateSortOrder(
-    projectId: string,
-    nodeId: string,
-    sortOrder: number,
-  ): Promise<void>;
-  abstract updateNodeFileId?(
-    projectId: string,
-    nodeId: string,
-    fileId: string,
-    sizeBytes?: number,
-    hash?: string | null,
-  ): Promise<PageNodeEntity>;
-  abstract countNodes(
-    projectId: string,
-    pageId?: string | null,
-  ): Promise<number>;
-  abstract docExistsInProject?(
-    projectId: string,
-    docId: string,
-    pageId?: string | null,
-  ): Promise<boolean>;
-  abstract fileExistsInProject?(
-    projectId: string,
-    fileId: string,
-    pageId?: string | null,
-  ): Promise<boolean>;
 }

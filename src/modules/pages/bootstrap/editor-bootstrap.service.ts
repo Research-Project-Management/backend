@@ -16,14 +16,17 @@ import { PageDoc, PageNode } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { Role, RoleHierarchy } from '@/modules/project/access';
 import { PageService } from '@/modules/pages/page/services/page.service';
-import { isRecordDeleted } from '@/modules/pages/core/utils/page-scope';
+import {
+  filterRecordsByPageScope,
+  isRecordDeleted,
+} from '@/modules/pages/core/utils/page-scope';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   findPageRecordWithNode,
   formatPageByIdResponse,
-} from '@/modules/pages/docstore/services/doc-occ.helper';
+} from '@/modules/pages/core/utils/doc-occ.helper';
 import { StructureService } from '@/modules/pages/structure/structure.service';
-import { NodePathVo } from '@/modules/pages/structure/domain';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import {
   ClsiService,
   type EditorLastBuildSummary,
@@ -101,6 +104,11 @@ const PAGE_ROW_SELECT = {
   id: true,
   rootDocId: true,
   title: true,
+  description: true,
+  status: true,
+  compiler: true,
+  texlive: true,
+  spellLang: true,
   spaceId: true,
   deletedAt: true,
 } as const;
@@ -189,25 +197,13 @@ export class EditorBootstrapService {
       });
     }
 
-    const [
-      projectRow,
-      deletedDocs,
-      entryRecord,
-      initialPageRow,
-      githubLinkRow,
-    ] = await Promise.all([
+    const [projectRow, entryRecord, initialPageRow] = await Promise.all([
       Promise.resolve(
         this.prisma.project?.findUnique?.({
           where: { id: spaceId },
           select: { id: true, name: true },
         }),
       ).catch(() => null),
-      Promise.resolve(
-        this.prisma.pageDoc?.findMany?.({
-          where: { spaceId, deletedAt: { not: null } },
-          select: { id: true },
-        }),
-      ).catch(() => []),
       findPageRecordWithNode(this.prisma, params.pageOrProjectId, spaceId),
       params.pageOrProjectId === spaceId
         ? Promise.resolve(
@@ -225,22 +221,6 @@ export class EditorBootstrapService {
               }),
             ).catch(() => null)
           : Promise.resolve(null),
-      params.userId && isUuid(params.userId) && isUuid(params.pageOrProjectId)
-        ? Promise.resolve(
-            this.prisma.pageGithubLink?.findFirst?.({
-              where: {
-                pageId: params.pageOrProjectId,
-                page: { spaceId, deletedAt: null },
-              },
-              select: {
-                id: true,
-                repoFullName: true,
-                branch: true,
-                lastSyncedAt: true,
-              },
-            }),
-          ).catch(() => null)
-        : Promise.resolve(null),
     ]);
 
     if (params.pageOrProjectId !== spaceId) {
@@ -293,42 +273,94 @@ export class EditorBootstrapService {
         ? pageRow
         : null;
 
-    const manuscriptPageId =
+    // Always resolve a concrete effectivePageId (even in single-page or personal spaces)
+    // so pageNode, pageDoc, pageFile, and pageGithubLink queries never leak across Pages.
+    const effectivePageId =
       validPageRow?.id ||
-      (entryPageId && entryPageId !== spaceId ? entryPageId : undefined) ||
-      (!isRecordDeleted(entryRecord) && entryRecord?.id !== spaceId
-        ? entryRecord?.id
-        : undefined);
+      entryPageId ||
+      (!isRecordDeleted(entryRecord) ? entryRecord?.id : undefined) ||
+      spaceId;
+    const manuscriptPageId = effectivePageId;
 
-    const allNodes = await this.structureService.getAllNodes(
+    const [allNodes, deletedDocs, activePageFiles, githubLinkRow] =
+      await Promise.all([
+        this.structureService.getAllNodes(
+          spaceId,
+          undefined,
+          effectivePageId,
+        ),
+        this.prisma.pageDoc?.findMany
+          ? Promise.resolve(
+              this.prisma.pageDoc.findMany({
+                where: {
+                  spaceId,
+                  pageId: effectivePageId,
+                  deletedAt: { not: null },
+                },
+                select: { id: true },
+              }),
+            ).catch(() => [])
+          : Promise.resolve([]),
+        this.prisma.pageFile?.findMany
+          ? Promise.resolve(
+              this.prisma.pageFile.findMany({
+                where: {
+                  spaceId,
+                  pageId: effectivePageId,
+                  deletedAt: null,
+                },
+                select: { id: true },
+              }),
+            ).catch(() => null)
+          : Promise.resolve(null),
+        validPageRow?.id && this.prisma.pageGithubLink?.findFirst
+          ? Promise.resolve(
+              this.prisma.pageGithubLink.findFirst({
+                where: {
+                  pageId: validPageRow.id,
+                },
+                select: {
+                  id: true,
+                  repoFullName: true,
+                  branch: true,
+                  lastSyncedAt: true,
+                },
+              }),
+            ).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+    const scopedAllNodes = filterRecordsByPageScope(
+      allNodes,
+      effectivePageId,
       spaceId,
-      undefined,
-      manuscriptPageId,
     );
-
-    const scopedAllNodes =
-      validPageRow && allNodes.some((n) => n.pageId === validPageRow.id)
-        ? allNodes.filter((n) => n.pageId === validPageRow.id)
-        : allNodes;
 
     const deletedDocIds = new Set(
       Array.isArray(deletedDocs)
         ? deletedDocs.map((d) => d.id).filter(Boolean)
         : [],
     );
+    const activeFileIds = Array.isArray(activePageFiles)
+      ? new Set(activePageFiles.map((f) => f.id).filter(Boolean))
+      : null;
 
     const validNodes = scopedAllNodes.filter((node) => {
       if (node.type === 'DOC' && node.docId && deletedDocIds.has(node.docId)) {
         return false;
       }
+      if (
+        node.type === 'FILE' &&
+        node.fileId &&
+        activeFileIds !== null &&
+        !activeFileIds.has(node.fileId)
+      ) {
+        return false;
+      }
       return true;
     });
 
-    const hasScopedPageContext = Boolean(
-      validPageRow ||
-      (entryPageId && entryPageId !== spaceId) ||
-      validNodes.some((n) => Boolean(n.pageId && n.pageId !== spaceId)),
-    );
+    const hasScopedPageContext = Boolean(effectivePageId);
 
     const rootNode =
       (validPageRow?.rootDocId
@@ -470,9 +502,26 @@ export class EditorBootstrapService {
 
     const tree: EditorBootstrapTreeNodeDto[] =
       validNodes.length > 0
-        ? validNodes.map(
-            (n) => n.toJSON() as unknown as EditorBootstrapTreeNodeDto,
-          )
+        ? validNodes.map((n): EditorBootstrapTreeNodeDto => ({
+            id: n.id,
+            spaceId: n.spaceId,
+            projectId: n.projectId,
+            pageId: n.pageId ?? canonicalPageId,
+            parentId: n.parentId,
+            type: n.type,
+            name: n.name,
+            path: n.path,
+            depth: n.depth,
+            docId: n.docId,
+            fileId: n.fileId,
+            isRootDoc: n.isRootDoc,
+            sizeBytes: n.sizeBytes,
+            hash: n.hash,
+            rev: n.rev,
+            sortOrder: n.sortOrder,
+            createdAt: n.createdAt.toISOString(),
+            updatedAt: n.updatedAt.toISOString(),
+          }))
         : [
             {
               id: rootRecord.node?.id || rootRecord.id,
@@ -585,18 +634,17 @@ export class EditorBootstrapService {
       fallbackToRoot,
     };
 
-    const githubLink =
-      projectRow && githubLinkRow
-        ? {
-            id: githubLinkRow.id,
-            repoFullName: githubLinkRow.repoFullName,
-            branch: githubLinkRow.branch || 'main',
-            lastSyncedAt:
-              githubLinkRow.lastSyncedAt instanceof Date
-                ? githubLinkRow.lastSyncedAt.toISOString()
-                : (githubLinkRow.lastSyncedAt ?? null),
-          }
-        : null;
+    const githubLink = githubLinkRow
+      ? {
+          id: githubLinkRow.id,
+          repoFullName: githubLinkRow.repoFullName,
+          branch: githubLinkRow.branch || 'main',
+          lastSyncedAt:
+            githubLinkRow.lastSyncedAt instanceof Date
+              ? githubLinkRow.lastSyncedAt.toISOString()
+              : (githubLinkRow.lastSyncedAt ?? null),
+        }
+      : null;
 
     return {
       workspace: {
@@ -606,6 +654,15 @@ export class EditorBootstrapService {
         rootDocId: rootRecord.id,
         projectName: projectRow?.name ?? null,
         title: workspaceTitle,
+        ...(validPageRow?.description !== undefined
+          ? { description: validPageRow.description }
+          : {}),
+        ...(validPageRow?.status ? { status: validPageRow.status } : {}),
+        ...(validPageRow?.compiler ? { compiler: validPageRow.compiler } : {}),
+        ...(validPageRow?.texlive ? { texlive: validPageRow.texlive } : {}),
+        ...(validPageRow?.spellLang
+          ? { spellLang: validPageRow.spellLang }
+          : {}),
         mainFilePath,
         permissions: {
           role: normalizedRole,
@@ -636,6 +693,7 @@ export class EditorBootstrapService {
         .findFirst({
           where: {
             spaceId,
+            ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
             deletedAt: null,
             OR: [{ id: explicitFileId }, { node: { id: explicitFileId } }],
           },
@@ -667,38 +725,15 @@ export class EditorBootstrapService {
         include: { node: true },
       })
       .catch(() => null);
-    if (scopedCandidate) {
-      const scopedCandidatePageId = (
-        scopedCandidate as { pageId?: string | null }
-      ).pageId;
-      if (
-        !isScopedPage ||
-        scopedCandidatePageId === canonicalPageId ||
-        scopedCandidate.id === rootDocId
-      ) {
-        return scopedCandidate;
-      }
-    }
-
-    const legacyCandidate = await this.prisma.pageDoc
-      .findFirst({
-        where: {
-          spaceId,
-          deletedAt: null,
-          OR: pathOr,
-        },
-        include: { node: true },
-      })
-      .catch(() => null);
-    if (!legacyCandidate) return null;
+    if (!scopedCandidate) return null;
     return matchesPageScope(
-      legacyCandidate,
+      scopedCandidate,
       spaceId,
       canonicalPageId,
       rootDocId,
       isScopedPage,
     )
-      ? legacyCandidate
+      ? scopedCandidate
       : null;
   }
 }

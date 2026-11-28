@@ -4,7 +4,7 @@ import {
   PageBinaryAsset,
   ContentHash,
   StorageKey,
-} from '@/modules/pages/filestore/filestore.types';
+} from '@/modules/pages/filestore/domain/file.entity';
 import { FilestoreRepository } from '@/modules/pages/filestore/filestore.repository';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { StructureRepository } from '@/modules/pages/structure/structure.repository';
@@ -186,7 +186,8 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
         path: '/appendix.tex',
         docId: '77777777-7777-4777-8777-777777777777',
       });
-      const pageNodeCreateMock = mockPrisma.pageNode.create as jest.Mock<
+      const pageNodeCreateMock = mockPrisma.pageNode
+        .create as unknown as jest.Mock<
         unknown,
         [{ data: Record<string, unknown> }]
       >;
@@ -353,7 +354,8 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       expect(upsertArg.create.pageId).toBe(PAGE_ID);
 
       // Node creation triggered by syncFileNode must not include redundant sizeBytes/hash/isRootDoc
-      const syncNodeCreateMock = mockPrisma.pageNode.create as jest.Mock<
+      const syncNodeCreateMock = mockPrisma.pageNode
+        .create as unknown as jest.Mock<
         unknown,
         [{ data: Record<string, unknown> }]
       >;
@@ -366,8 +368,9 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       expect(nodeCreateCall?.data).not.toHaveProperty('hash');
       expect(nodeCreateCall?.data).not.toHaveProperty('isRootDoc');
 
-      // Delete prefers direct releaseBlob(file.blobId)
-      const entityForDelete = PageBinaryAsset.reconstitute({
+      // Soft-delete (permanent=false) keeps CAS blob ref-count alive for Trash restore;
+      // permanent purge (permanent=true) releases blob via blobId
+      const entityForSoftDelete = PageBinaryAsset.reconstitute({
         id: FILE_ID,
         projectId: SPACE_ID,
         pageId: PAGE_ID,
@@ -380,9 +383,31 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       });
       jest
         .spyOn(repo, 'findByProjectAndId')
-        .mockResolvedValueOnce(entityForDelete);
+        .mockResolvedValueOnce(entityForSoftDelete);
 
-      await service.deleteFile(SPACE_ID, FILE_ID);
+      await service.deleteFile(SPACE_ID, FILE_ID, false);
+      expect(releaseBlob).not.toHaveBeenCalled();
+
+      const entityForPurge = PageBinaryAsset.reconstitute({
+        id: FILE_ID,
+        projectId: SPACE_ID,
+        pageId: PAGE_ID,
+        blobId: BLOB_ID,
+        name: 'figures/diagram.png',
+        mimeType: 'image/png',
+        sizeBytes: 128,
+        hash: ContentHash.create(shaHex),
+        storageKey: StorageKey.fromRawKey('blobs/cas/diagram'),
+        deleted: true,
+        deletedAt: new Date(),
+      });
+      jest
+        .spyOn(repo, 'findByProjectAndId')
+        .mockResolvedValueOnce(entityForPurge);
+      jest.spyOn(repo, 'purge').mockResolvedValueOnce(true);
+      jest.spyOn(repo, 'countReferencesByHash').mockResolvedValueOnce(0);
+
+      await service.deleteFile(SPACE_ID, FILE_ID, true);
       expect(releaseBlob).toHaveBeenCalledWith(BLOB_ID);
     });
   });
@@ -541,6 +566,7 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       const createdNodes: Array<Record<string, unknown>> = [];
       const updatedPages: Array<Record<string, unknown>> = [];
       const acquireBlob = jest.fn().mockResolvedValue({});
+      const reserveQuota = jest.fn().mockResolvedValue(undefined);
 
       const mockPrisma = {
         page: {
@@ -618,13 +644,18 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
         {
           applyExternalText: jest.fn(),
           flushDocs,
+          flushDoc: jest.fn(),
+          evictDoc: jest.fn(),
+          getPresence: jest.fn(),
         },
         undefined,
         undefined,
-        { acquireBlob } as any,
+        { acquireBlob, reserveQuota } as any,
       );
 
       const res = await pageService.duplicatePage(PAGE_ID, SPACE_ID);
+
+      expect(reserveQuota).toHaveBeenCalledWith(SPACE_ID, 4096n);
 
       expect(flushDocs).toHaveBeenCalledWith(
         SPACE_ID,

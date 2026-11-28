@@ -71,3 +71,22 @@ export class DistributedLockTimeoutError extends PagesDomainError {
     this.maxWaitMs = maxWaitMs;
   }
 }
+
+export class StructureError extends PagesDomainError {
+  constructor(message: string, httpStatus = 400, code = 'STRUCTURE_ERROR') {
+    super(message, {
+      code,
+      statusCode: httpStatus,
+    });
+  }
+}
+
+export class InvalidNodeNameError extends StructureError {
+  constructor(name: string, reason?: string) {
+    super(
+      `Invalid node name '${name}'${reason ? `: ${reason}` : ''}`,
+      400,
+      'STRUCTURE_INVALID_NODE_NAME',
+    );
+  }
+}

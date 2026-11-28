@@ -15,7 +15,11 @@ import {
   buildZipBuffer,
   createZipStream,
 } from '@/modules/pages/core/utils/zip-builder';
-import { parseTexcountBriefOutput } from '@/modules/pages/clsi/adapters/texcount.adapter';
+import {
+  TexcountCliAdapter,
+  parseTexcountBriefOutput,
+} from '@/modules/pages/clsi/adapters/texcount.adapter';
+import { CompileSourceService } from '@/modules/pages/clsi/services/compile-source.service';
 import {
   PandocAdapter,
   normalizePandocExportFormat,
@@ -377,6 +381,70 @@ describe('CLSI Production Contract Suite', () => {
       });
       expect(parsed!.perFileStats).toHaveLength(2);
       expect(parsed!.perFileStats[1].path).toBe('sections/appendix.tex');
+    });
+
+    it('routes texcount execution through injected ISandboxRunner and scopes CompileSourceService.planFiles queries by pageId', async () => {
+      const sandboxRun = jest.fn().mockResolvedValue({
+        exitCode: 0,
+        stdout: '15+2+0 (1/0/0/0) File: main.tex\n',
+        stderr: '',
+        timedOut: false,
+      });
+      const adapter = new TexcountCliAdapter('texcount', {
+        name: 'mock-sandbox',
+        run: sandboxRun,
+      });
+      const stats = await adapter.countFiles({
+        files: { 'main.tex': '\\section{Intro}\nHello sandbox world.' },
+        rootFile: 'main.tex',
+      });
+      expect(sandboxRun).toHaveBeenCalledTimes(1);
+      expect(stats?.totalWords).toBe(17);
+
+      const SPACE_ID = '11111111-1111-4111-8111-111111111111';
+      const PAGE_ID = '22222222-2222-4222-8222-222222222222';
+      const DOC_ID = '33333333-3333-4333-8333-333333333333';
+      const pageNodeFindMany = jest.fn().mockResolvedValue([]);
+      const pageDocFindMany = jest.fn().mockResolvedValue([]);
+      const pageFileFindMany = jest.fn().mockResolvedValue([]);
+
+      const compileSource = new CompileSourceService({
+        page: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          findFirst: jest.fn().mockResolvedValue({ id: PAGE_ID }),
+        },
+        pageDoc: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ pageId: PAGE_ID, spaceId: SPACE_ID }),
+          findMany: pageDocFindMany,
+        },
+        pageNode: { findMany: pageNodeFindMany },
+        pageFile: { findMany: pageFileFindMany },
+      } as never);
+
+      const ctx = await compileSource.resolvePageCompileContext(
+        { pageId: DOC_ID },
+        SPACE_ID,
+      );
+      expect(ctx).toEqual({ spaceId: SPACE_ID, pageId: PAGE_ID });
+
+      await compileSource.planFiles(SPACE_ID, { spaceId: SPACE_ID }, PAGE_ID);
+      expect(pageNodeFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { spaceId: SPACE_ID, pageId: PAGE_ID },
+        }),
+      );
+      expect(pageDocFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { spaceId: SPACE_ID, pageId: PAGE_ID, deletedAt: null },
+        }),
+      );
+      expect(pageFileFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { spaceId: SPACE_ID, pageId: PAGE_ID, deletedAt: null },
+        }),
+      );
     });
   });
 

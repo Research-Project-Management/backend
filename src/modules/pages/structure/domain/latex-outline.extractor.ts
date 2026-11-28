@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/structure/domain/latex-outline.extractor.ts
+ * modules/pages/structure/domain/latex-outline.extractor.ts
  * Pure domain service extracting structural LaTeX outlines (headings, figures,
  * tables, Beamer slides, appendices, and abstracts) for single files or multi-file projects.
  */

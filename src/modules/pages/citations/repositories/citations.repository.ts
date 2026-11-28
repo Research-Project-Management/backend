@@ -19,7 +19,8 @@ import {
 } from '@nestjs/common';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { PageNodeEntity, NodePathVo } from '@/modules/pages/structure/domain';
+import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 import {
@@ -29,21 +30,14 @@ import {
 import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { DistributedLockService } from '@/core';
 
-import {
-  ICitationsAggregatorPort,
-  ILibrarySyncPort,
-  IBibtexParserPort,
-} from '../domain/citations.ports';
 import { BibEntry, BibliographyFile } from '../domain/bib-entry.domain';
 import { BibtexParser, ConflictPolicy } from '../domain/bibtex.domain';
 import { LibrarySyncAdapter } from '../services/sync.service';
 
 @Injectable()
-export class CitationsRepository
-  implements ICitationsAggregatorPort, ILibrarySyncPort
-{
+export class CitationsRepository {
   private readonly logger = new Logger(CitationsRepository.name);
-  protected bibParser: IBibtexParserPort;
+  protected bibParser: BibtexParser;
 
   constructor(
     @Optional()

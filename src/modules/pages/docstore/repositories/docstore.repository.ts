@@ -12,20 +12,23 @@ import {
   ensureCanonicalPageId,
   filterRecordsByPageScope,
 } from '@/modules/pages/core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/structure/domain';
-import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { ensurePrismaFolderChain } from '@/modules/pages/core/utils/folder-chain';
+import { TextDoc } from '@/modules/pages/docstore/domain/text-doc.entity';
+import { DocModifiedError, DocNotFoundError } from '@/modules/pages/docstore/domain/doc.errors';
+import { DocRanges } from '@/modules/pages/docstore/domain/doc-range';
 import {
-  TextDoc,
-  DocModifiedError,
-  DocNotFoundError,
-  DocRanges,
   DocstoreMetrics,
   CreateDocData,
   UpdateDocData,
   PatchDocData,
-} from '../domain';
+} from '@/modules/pages/docstore/domain/doc.ports';
 
 export type { CreateDocData, UpdateDocData, PatchDocData };
+
+function toInputJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
 
 @Injectable()
 export class DocstoreRepository {
@@ -131,21 +134,19 @@ export class DocstoreRepository {
     projectId: string,
     pageId?: string,
   ): Promise<TextDoc[]> {
-    const hasCustomPageScope = Boolean(
-      pageId && pageId !== projectId && isUuid(pageId),
-    );
+    const hasPageScope = Boolean(pageId && isUuid(pageId));
     const rawRecords = await this.prisma.pageDoc.findMany({
       where: {
         spaceId: projectId,
         deletedAt: null,
-        ...(hasCustomPageScope ? { pageId } : {}),
+        ...(hasPageScope ? { pageId } : {}),
       },
       orderBy: {
         lastKnownPath: 'asc',
       },
     });
 
-    const records = hasCustomPageScope
+    const records = hasPageScope
       ? filterRecordsByPageScope(rawRecords, pageId, projectId)
       : rawRecords;
 
@@ -202,10 +203,12 @@ export class DocstoreRepository {
         lines: data.lines,
         rev: 1,
         version: data.version ?? 0,
-        ranges: (data.ranges || {
-          changes: [],
-          comments: [],
-        }) as unknown as Prisma.InputJsonValue,
+        ranges: toInputJson(
+          data.ranges || {
+            changes: [],
+            comments: [],
+          },
+        ),
         hash: data.hash || '',
         sizeBytes,
         inStorage: false,
@@ -277,7 +280,7 @@ export class DocstoreRepository {
         data: {
           lines: data.lines,
           version: data.version,
-          ranges: resolvedRanges as unknown as Prisma.InputJsonValue,
+          ranges: toInputJson(resolvedRanges),
           hash: resolvedHash,
           sizeBytes,
           inStorage: false,
@@ -337,7 +340,7 @@ export class DocstoreRepository {
         version: data.version,
         ...(data.ranges !== undefined
           ? {
-              ranges: data.ranges as unknown as Prisma.InputJsonValue,
+              ranges: toInputJson(data.ranges),
             }
           : {}),
         ...(data.hash ? { hash: data.hash } : {}),
@@ -399,13 +402,13 @@ export class DocstoreRepository {
     }
     if (patch.ranges !== undefined) {
       const existingRanges = (current.ranges as DocRanges) || {};
-      updateData.ranges = {
+      updateData.ranges = toInputJson({
         ...existingRanges,
         ...patch.ranges,
         ...(patch.ranges.review === undefined && existingRanges.review
           ? { review: existingRanges.review }
           : {}),
-      } as unknown as Prisma.InputJsonValue;
+      });
     }
 
     const runPatch = async (
@@ -530,7 +533,7 @@ export class DocstoreRepository {
         inStorage: false,
         storageKey: null,
         lines: lines,
-        ranges: mergedRanges as unknown as Prisma.InputJsonValue,
+        ranges: toInputJson(mergedRanges),
         sizeBytes,
       },
     });

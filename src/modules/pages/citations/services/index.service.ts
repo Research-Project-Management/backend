@@ -5,6 +5,7 @@
  */
 
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { LRUCache } from 'lru-cache';
 import { RedisCacheService } from '@/core';
 import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
@@ -46,6 +47,21 @@ export class CitationIndexService implements OnModuleInit {
         },
       );
     }
+  }
+
+  @OnEvent('pages.page.deleted', { async: true })
+  public async handlePagePurged(payload?: {
+    pageId?: string;
+    spaceId?: string;
+    projectId?: string;
+  }): Promise<void> {
+    const scopeId = payload?.spaceId || payload?.projectId || payload?.pageId;
+    if (!scopeId) return;
+    await this.invalidateSpace(scopeId, payload?.pageId).catch((err) => {
+      this.logger.warn(
+        `Failed to evict citation cache for purged page ${payload?.pageId ?? scopeId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   }
 
   private buildCacheKey(spaceId: string, pageId?: string): string {

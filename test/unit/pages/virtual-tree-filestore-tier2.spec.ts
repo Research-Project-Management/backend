@@ -6,27 +6,31 @@ import {
   InvalidNodeNameError,
   CyclicMoveError,
   NodeNotFoundError,
-  NodePathVo,
-  PageNodeEntity,
-  IStructureRepository,
-} from '@/modules/pages/structure/domain';
+} from '@/modules/pages/structure/domain/structure.errors';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
 import { StructureRepository } from '@/modules/pages/structure/structure.repository';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import {
   PageBinaryAsset,
   ContentHash,
   StorageKey,
+} from '@/modules/pages/filestore/domain/file.entity';
+import {
   DuplicateFileException,
   FilestoreValidationException,
   StorageQuotaExceededException,
   FileNotFoundException,
   InvalidByteRangeException,
-} from '@/modules/pages/filestore/filestore.types';
+} from '@/modules/pages/filestore/domain/filestore.errors';
 import { PageBinaryAssetResponseDto } from '@/modules/pages/filestore/dto/file-response.dto';
 import { FilestoreRepository } from '@/modules/pages/filestore/filestore.repository';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { filterRecordsByPageScope } from '@/modules/pages/core/utils/page-scope';
-import { findPageRecordWithNode } from '@/modules/pages/docstore/services/doc-occ.helper';
+import {
+  filterRecordsByPageScope,
+  resolvePageControllerCoordinates,
+} from '@/modules/pages/core/utils/page-scope';
+import { findPageRecordWithNode } from '@/modules/pages/core/utils/doc-occ.helper';
 import { applyPageMetadataAndTitleUpdates } from '@/modules/pages/page/services/content.service';
 import {
   type IFilesPort,
@@ -180,6 +184,42 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
           deletedAt: null,
         },
       });
+      // Even when pageId is omitted, findByProjectAndName resolves canonical pageId and ALWAYS includes it in where
+      pageFileFindFirst.mockClear();
+      const multiPageFilestoreRepo = new FilestoreRepository(
+        {
+          page: {
+            findFirst: jest.fn().mockResolvedValue({ id: PAGE_B_ID }),
+          },
+          pageFile: { findFirst: pageFileFindFirst },
+        } as unknown as PrismaService,
+        {
+          sendStream: jest.fn(),
+          getObjectStream: jest.fn(),
+          getObjectMetadata: jest.fn(),
+          getSignedDownloadUrl: jest.fn(),
+          checkObjectExists: jest.fn(),
+          deleteObject: jest.fn(),
+        },
+      );
+      await multiPageFilestoreRepo.findByProjectAndName(SPACE_ID, 'fig.png');
+      expect(pageFileFindFirst).toHaveBeenCalledWith({
+        where: {
+          spaceId: SPACE_ID,
+          pageId: PAGE_B_ID,
+          lastKnownPath: 'fig.png',
+          deletedAt: null,
+        },
+      });
+
+      // Controller coordinate resolution respects req.resolvedPageId when queryPageId is omitted
+      const coords = resolvePageControllerCoordinates(
+        { spaceId: PAGE_B_ID },
+        SPACE_ID,
+        undefined,
+        { resolvedSpaceId: SPACE_ID, resolvedPageId: PAGE_B_ID },
+      );
+      expect(coords).toEqual({ spaceId: SPACE_ID, pageId: PAGE_B_ID });
     });
   });
 
@@ -203,9 +243,9 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
       });
 
       const createNodeMock = jest.fn();
-      const mockRepo: jest.Mocked<IStructureRepository> = {
+      const mockRepo = {
         createNode: createNodeMock,
-        findById: jest.fn(async (_s, id) => {
+        findById: jest.fn(async (_s: string, id: string) => {
           if (id === 'folder-a') return folderInPageA;
           if (id === 'folder-b') return folderInPageB;
           return null;
@@ -221,7 +261,7 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         deleteSubtree: jest.fn(),
         updateSortOrder: jest.fn(),
         countNodes: jest.fn().mockResolvedValue(2),
-      };
+      } as unknown as StructureRepository;
 
       const service = new StructureService(mockRepo);
 
@@ -289,9 +329,10 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
   });
 
   describe('4. Filestore CAS RefCount, Collision Guard, Restore & Tombstone Revival', () => {
-    it('releases blobId on subtree delete even with 40-char SHA-1 PageFile.hash, and acquires blob on restoreFile', async () => {
+    it('releases blobId on permanent purge even with 40-char SHA-1 PageFile.hash, and avoids double-acquiring blob/quota on restoreFile', async () => {
       const releaseBlob = jest.fn().mockResolvedValue(undefined);
       const acquireBlob = jest.fn().mockResolvedValue(null);
+      const reserveQuota = jest.fn().mockResolvedValue(undefined);
       const saveMock = jest.fn(async (f: PageBinaryAsset) => f);
       const findByProjectAndId = jest.fn().mockResolvedValue(
         PageBinaryAsset.reconstitute({
@@ -318,9 +359,14 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         {
           releaseBlob,
           acquireBlob,
+          reserveQuota,
           findBlobByHash: jest.fn(),
         } as unknown as IFilesPort,
       );
+
+      await service.restoreFile(SPACE_ID, FILE_ID);
+      expect(acquireBlob).not.toHaveBeenCalled();
+      expect(reserveQuota).not.toHaveBeenCalled();
 
       await service.reclaimDeletedFilesQuotaAndBlobs(
         SPACE_ID,
@@ -335,9 +381,6 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
         ],
       );
       expect(releaseBlob).toHaveBeenCalledWith(BLOB_OLD_ID);
-
-      await service.restoreFile(SPACE_ID, FILE_ID);
-      expect(acquireBlob).toHaveBeenCalledWith(BLOB_OLD_ID);
     });
 
     it('rejects DOC/FOLDER path collisions before quota/upload while destroying spool stream, and releases old blob on overwrite', async () => {
@@ -535,6 +578,26 @@ describe('Khối 2 / Tầng 2 — Virtual Tree, Filestore CAS & Multi-Page Isola
       expect(pageUpdateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { title: 'Deep Learning Survey' },
+        }),
+      );
+
+      // Dotted display titles like "Draft v1.2" must NEVER strip .tex or rename main.tex
+      pageUpdateMany.mockClear();
+      await applyPageMetadataAndTitleUpdates(
+        titlePrisma,
+        DOC_ID,
+        {
+          spaceId: SPACE_ID,
+          lastKnownPath: 'main.tex',
+          ranges: {},
+        },
+        { title: 'Draft v1.2' },
+      );
+      expect(pageNodeUpdateMany).not.toHaveBeenCalled();
+      expect(pageDocUpdate).not.toHaveBeenCalled();
+      expect(pageUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { title: 'Draft v1.2' },
         }),
       );
     });

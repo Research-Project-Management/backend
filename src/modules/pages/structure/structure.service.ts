@@ -1,12 +1,9 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import {
-  IStructureRepository,
-  PageNodeEntity,
-  FileTreeBuilder,
-  StructureError,
-  NodeNotFoundError,
-  LatexOutlineEntryDto,
-} from './domain';
+import { StructureRepository } from './structure.repository';
+import { PageNodeEntity } from './domain/node.entity';
+import { FileTreeBuilder } from './domain/tree-builder';
+import { StructureError, NodeNotFoundError } from './domain/structure.errors';
+import { LatexOutlineEntryDto } from './domain/latex-outline.extractor';
 import {
   CreateNodeDto,
   MoveNodeDto,
@@ -29,7 +26,7 @@ import {
   mkdirpInternalHelper,
   moveNodeHelper,
   renameNodeHelper,
-} from './services/node-mutation.helper';
+} from './services/node-mutation';
 import {
   type CachedDocSymbols,
   type ProjectSymbolCitationDto,
@@ -43,7 +40,7 @@ import {
   buildCompilerPayloadHelper,
   getProjectOutlineHelper,
   getProjectSymbolsHelper,
-} from './services/project-symbols.helper';
+} from './services/symbols-extractor';
 
 export type {
   CompilationPayload,
@@ -64,28 +61,24 @@ export class StructureService {
   private readonly docSymbolsCache = new Map<string, CachedDocSymbols>();
 
   constructor(
-    @Inject(IStructureRepository)
-    private readonly repository: IStructureRepository,
+    private readonly repository: StructureRepository,
     @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional()
     @Inject(PageDomainEventBus)
-    domainEventBus?: PageDomainEventBus | unknown,
-    @Optional()
-    legacyEventBus?: PageDomainEventBus,
+    domainEventBus?: PageDomainEventBus,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     private readonly injectedLiveCollab?: LiveCollaborationPort,
   ) {
-    const resolvedBus =
-      legacyEventBus ??
-      (domainEventBus &&
-      typeof (domainEventBus as PageDomainEventBus).publish === 'function'
-        ? (domainEventBus as PageDomainEventBus)
-        : undefined);
+    if (!domainEventBus && process.env.NODE_ENV !== 'test') {
+      this.logger.warn(
+        'StructureService initialized without injected PageDomainEventBus; falling back to local bus.',
+      );
+    }
     this.domainEventBus =
-      resolvedBus ?? new PageDomainEventBus(this.injectedLiveCollab);
+      domainEventBus ?? new PageDomainEventBus(this.injectedLiveCollab);
   }
 
   private getMutationContext(): NodeMutationContext {

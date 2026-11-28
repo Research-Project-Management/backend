@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { ChatService } from '@/modules/chat/services/chat.service';
+import { ChatService } from '@/modules/project/chat/services/chat.service';
 import {
   ConversationType,
   ConversationMemberRole,

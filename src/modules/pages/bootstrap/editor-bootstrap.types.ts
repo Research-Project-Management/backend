@@ -29,6 +29,11 @@ export interface EditorBootstrapWorkspaceDto {
   rootDocId: string;
   projectName: string | null;
   title: string;
+  description?: string | null;
+  status?: string;
+  compiler?: string;
+  texlive?: string;
+  spellLang?: string;
   mainFilePath: string;
   permissions: EditorBootstrapPermissionsDto;
   githubLink: EditorBootstrapGithubLinkDto | null;

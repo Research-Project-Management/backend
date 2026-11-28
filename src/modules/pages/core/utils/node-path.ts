@@ -1,9 +1,9 @@
 /**
- * modules/manuscripts/structure/core/domain/node-path.ts
- * Value Object for Virtual Paths & Names in the Manuscript File Tree.
+ * modules/pages/core/utils/node-path.ts
+ * Value Object for Virtual Paths & Names in the Pages File Tree.
  */
 
-import { InvalidNodeNameError } from './structure.errors';
+import { InvalidNodeNameError } from '../domain/errors';
 
 export const MAX_VIRTUAL_TREE_DEPTH = 32;
 export const MAX_VIRTUAL_PATH_LENGTH = 1000;

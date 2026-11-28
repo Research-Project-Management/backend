@@ -261,10 +261,10 @@ export class CompileService {
             prevBuildState,
           });
 
-          const resolvedRunner = await this.resolveAvailableEngine(
+          const compilerFlag = await this.resolveAvailableEngine(
             prepared.resolvedEngine,
           );
-          if (!resolvedRunner) {
+          if (!compilerFlag) {
             const errorMsg =
               'No supported TeX engine (latexmk/pdflatex) was found in PATH or sandbox runner. Please install TeX Live (latexmk), or configure CLSI_URL / Docker runner.';
             return CompileResults.failure({
@@ -279,7 +279,7 @@ export class CompileService {
           const timeoutMs =
             dto.timeoutMs || DEFAULT_COMPILE_TIMEOUT_LIMITS.manualMs;
           const stopOnFirstError = dto.stopOnFirstError ?? false;
-          const engineResult = await resolvedRunner.engineToUse.compile(
+          const engineResult = await this.latexmkEngine.compile(
             {
               cwd: scratchDir,
               mainFile: prepared.mainFile,
@@ -288,12 +288,12 @@ export class CompileService {
               draft: dto.draft ?? false,
               syntaxOnly: dto.syntaxOnly ?? false,
               force: shouldForceLatexmk,
-              compilerOverride: resolvedRunner.compilerFlag,
+              compilerOverride: compilerFlag,
               texLiveVersion: dto.texLiveVersion,
               signal: dto.signal,
               onLogChunk: dto.onLogChunk,
             },
-            resolvedRunner.compilerFlag,
+            compilerFlag,
           );
 
           if (dto.signal?.aborted) {
@@ -668,29 +668,15 @@ export class CompileService {
     });
   }
 
-  /**
-   * Chain of Responsibility / Fallback Strategy: Resolves primary or secondary TeX engine.
-   */
   private async resolveAvailableEngine(
     preferred: 'pdflatex' | 'xelatex' | 'lualatex',
-  ): Promise<{
-    engineToUse: ILatexEngine;
-    compilerFlag: 'pdflatex' | 'xelatex' | 'lualatex';
-  } | null> {
-    const engineToUse: ILatexEngine = this.latexmkEngine;
-    let compilerFlag: 'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex';
-
-    if (preferred === 'xelatex') {
-      compilerFlag = 'xelatex';
-    } else if (preferred === 'lualatex') {
-      compilerFlag = 'lualatex';
+  ): Promise<'pdflatex' | 'xelatex' | 'lualatex' | null> {
+    if (!(await this.latexmkEngine.isAvailable())) {
+      return null;
     }
-
-    if (await engineToUse.isAvailable()) {
-      return { engineToUse, compilerFlag };
-    }
-
-    return null;
+    return preferred === 'xelatex' || preferred === 'lualatex'
+      ? preferred
+      : 'pdflatex';
   }
 
   /**

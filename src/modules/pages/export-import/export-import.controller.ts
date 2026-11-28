@@ -27,7 +27,7 @@ import {
   Role,
 } from '@/modules/project/access';
 import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
-import { UserRateLimit, UserRateLimitGuard } from '@/core';
+import { UserRateLimit, UserRateLimitGuard, isUuid } from '@/core';
 
 import { ExportService } from './services/export.service';
 import { ImportService } from './services/import.service';
@@ -90,6 +90,27 @@ async function readUploadPayload(
   throw new BadRequestException(errorMessage);
 }
 
+function resolveRequestUserId(req?: unknown): string | null {
+  const user = (
+    req as { user?: { sub?: string; id?: string; userId?: string } } | undefined
+  )?.user;
+  return user?.sub || user?.id || user?.userId || null;
+}
+
+function resolveExplicitPageId(
+  queryPageId?: string,
+  req?: unknown,
+): string | undefined {
+  const cleanQuery = queryPageId?.trim();
+  if (cleanQuery) return cleanQuery;
+  const reqPageId = (req as { resolvedPageId?: unknown } | undefined)
+    ?.resolvedPageId;
+  if (typeof reqPageId === 'string' && reqPageId.trim()) {
+    return reqPageId.trim();
+  }
+  return undefined;
+}
+
 @ApiTags('Pages - Project Archive & Templates')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
@@ -114,13 +135,20 @@ export class ExportImportController {
     @ResolvedSpace() authorizedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ): Promise<void> {
-    const { spaceId, pageId } = resolvePageControllerCoordinates(
-      { spaceId: routeSpaceId },
-      authorizedSpace,
+    const explicitPageId = resolveExplicitPageId(
       queryPageId ?? query?.pageId,
       req,
     );
-    const effectiveQuery = pageId ? { ...query, pageId } : query;
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId },
+      authorizedSpace,
+      explicitPageId,
+      req,
+    );
+    const resolvedPageId = explicitPageId || (pageId && isUuid(pageId) ? pageId : undefined);
+    const effectiveQuery = resolvedPageId
+      ? { ...query, pageId: resolvedPageId }
+      : query;
     const result = await this.exportService.exportProjectZipStream(
       spaceId,
       effectiveQuery,
@@ -146,6 +174,37 @@ export class ExportImportController {
     return res.send(fullBuffer);
   }
 
+  @Get('spaces/:spaceId/export/:format')
+  @RequireRole(Role.REVIEWER)
+  @ApiOperation({
+    summary: 'Export manuscript document in the specified format (tex, md, html, docx)',
+  })
+  public async exportProjectByFormat(
+    @Param('spaceId') routeSpaceId: string,
+    @Param('format') format: string,
+    @Query('pageId') queryPageId?: string,
+    @Query('includeChildren') includeChildren?: string,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string },
+    @Req() req?: FastifyRequest,
+  ) {
+    const explicitPageId = resolveExplicitPageId(queryPageId, req);
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId },
+      authorizedSpace,
+      explicitPageId,
+      req,
+    );
+    const resolvedPageId =
+      explicitPageId || (pageId && isUuid(pageId) ? pageId : undefined);
+
+    return this.convertService.exportSpaceDocument({
+      spaceId,
+      pageId: resolvedPageId,
+      format,
+      includeChildren,
+    });
+  }
+
   @Post('spaces/:spaceId/import/zip')
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
@@ -161,13 +220,15 @@ export class ExportImportController {
     @Query('pageId') queryPageId?: string,
     @ResolvedSpace() authorizedSpace?: string | { id?: string },
   ): Promise<ImportSummaryResponseDto> {
-    const { spaceId, pageId } = resolvePageControllerCoordinates(
+    const explicitPageId = resolveExplicitPageId(queryPageId, req);
+    const { spaceId } = resolvePageControllerCoordinates(
       { spaceId: routeSpaceId },
       authorizedSpace,
-      queryPageId,
+      explicitPageId,
       req,
     );
-    const { buffer: zipBuffer } = await readUploadPayload(
+    const userId = resolveRequestUserId(req);
+    const { buffer: zipBuffer, filename } = await readUploadPayload(
       req,
       'archive.zip',
       'Expected ZIP archive binary payload or multipart form data.',
@@ -176,13 +237,17 @@ export class ExportImportController {
     return this.importService.importProjectZip(
       spaceId,
       zipBuffer,
-      undefined,
+      userId,
       preferredRootDoc,
-      pageId,
+      explicitPageId,
+      {
+        fileName: filename,
+        createNewPage: !explicitPageId,
+      },
     );
   }
 
-  @Post('spaces/:spaceId/import/convert')
+  @Post(['spaces/:spaceId/import/convert', 'spaces/:spaceId/convert'])
   @UseGuards(UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
   @UserRateLimit('import')
@@ -198,12 +263,14 @@ export class ExportImportController {
     @Query('pageId') queryPageId?: string,
     @ResolvedSpace() authorizedSpace?: string | { id?: string },
   ): Promise<ImportSummaryResponseDto> {
-    const { spaceId, pageId } = resolvePageControllerCoordinates(
+    const explicitPageId = resolveExplicitPageId(queryPageId, req);
+    const { spaceId } = resolvePageControllerCoordinates(
       { spaceId: routeSpaceId },
       authorizedSpace,
-      queryPageId,
+      explicitPageId,
       req,
     );
+    const userId = resolveRequestUserId(req);
     const { buffer: fileBuffer, filename: fileName } = await readUploadPayload(
       req,
       'document.docx',
@@ -215,7 +282,9 @@ export class ExportImportController {
       fileBuffer,
       fileName,
       format,
-      pageId,
+      userId,
+      pageId: explicitPageId,
+      createNewPage: !explicitPageId,
     });
   }
 
@@ -228,9 +297,12 @@ export class ExportImportController {
     @Query('format') queryFormat?: string,
     @Query('includeChildren') queryIncludeChildren?: string,
     @ResolvedSpace() project?: string | { id: string } | null,
+    @Req() req?: FastifyRequest,
   ) {
+    const effectivePageId =
+      pageId?.trim() || resolveExplicitPageId(undefined, req) || pageId;
     return this.convertService.exportSingleDocument({
-      pageId,
+      pageId: effectivePageId,
       format: body?.format || queryFormat,
       includeChildren: body?.includeChildren ?? queryIncludeChildren,
       project,

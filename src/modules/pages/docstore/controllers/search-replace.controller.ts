@@ -8,6 +8,7 @@ import {
   Controller,
   Post,
   Param,
+  Query,
   Body,
   Req,
   HttpStatus,
@@ -28,9 +29,10 @@ import {
   UserRateLimit,
   UserRateLimitGuard,
 } from '@/core';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
 import { SearchReplaceService } from '../services/search-replace.service';
 
-@ApiTags('Manuscripts - Pages Search & Presence')
+@ApiTags('Pages - Search & Presence')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -58,17 +60,18 @@ export class SearchReplaceController {
     },
     @Req() req?: AuthenticatedRequest,
     @ResolvedSpace() space?: string | { id: string } | null,
+    @Query('pageId') queryPageId?: string,
   ) {
-    const resolvedSpaceId = typeof space === 'string' ? space : space?.id;
-    const targetSpaceId =
-      resolvedSpaceId || routeSpaceId || routePageId || body?.spaceId || '';
+    const { spaceId: targetSpaceId, pageId: resolvedPageId } =
+      resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId || body?.spaceId, pageId: routePageId },
+        space,
+        queryPageId || body?.pageId,
+        req,
+      );
     if (!targetSpaceId) {
       throw new BadRequestException('Space context required');
     }
-    const resolvedPageId =
-      routePageId ||
-      (req as { resolvedPageId?: string } | undefined)?.resolvedPageId ||
-      body?.pageId;
     return this.searchReplaceService.searchDocuments(targetSpaceId, {
       ...body,
       ...(resolvedPageId ? { pageId: resolvedPageId } : {}),
@@ -96,17 +99,18 @@ export class SearchReplaceController {
     },
     @Req() req?: AuthenticatedRequest,
     @ResolvedSpace() space?: string | { id: string } | null,
+    @Query('pageId') queryPageId?: string,
   ) {
-    const resolvedSpaceId = typeof space === 'string' ? space : space?.id;
-    const targetSpaceId =
-      resolvedSpaceId || routeSpaceId || routePageId || body?.spaceId || '';
+    const { spaceId: targetSpaceId, pageId: resolvedPageId } =
+      resolvePageControllerCoordinates(
+        { spaceId: routeSpaceId || body?.spaceId, pageId: routePageId },
+        space,
+        queryPageId || body?.pageId,
+        req,
+      );
     if (!targetSpaceId) {
       throw new BadRequestException('Space context required');
     }
-    const resolvedPageId =
-      routePageId ||
-      (req as { resolvedPageId?: string } | undefined)?.resolvedPageId ||
-      body?.pageId;
     return this.searchReplaceService.replaceDocuments(targetSpaceId, {
       ...body,
       ...(resolvedPageId ? { pageId: resolvedPageId } : {}),

@@ -1,6 +1,6 @@
 /**
  * modules/pages/docstore/domain/text-doc.entity.ts
- * Rich Domain Entity representing a LaTeX/TeX text document in the Manuscripts subsystem.
+ * Rich Domain Entity representing a LaTeX/TeX text document in the Pages subsystem.
  */
 
 import { DocRanges, DocRangeVo } from './doc-range';

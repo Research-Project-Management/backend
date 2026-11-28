@@ -9,7 +9,19 @@ import {
 
 export class ImportSummaryResponseDto {
   @ApiProperty()
+  pageId!: string;
+
+  @ApiProperty()
   projectId!: string;
+
+  @ApiProperty()
+  rootDocId!: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  rootDocPath!: string | null;
+
+  @ApiProperty()
+  title!: string;
 
   @ApiProperty()
   totalEntries!: number;
@@ -23,11 +35,8 @@ export class ImportSummaryResponseDto {
   @ApiProperty()
   totalFolders!: number;
 
-  @ApiPropertyOptional({ nullable: true })
-  rootDocId!: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  rootDocPath!: string | null;
+  @ApiProperty({ type: [String] })
+  skippedFiles!: string[];
 }
 
 export class ImportUrlDto {

@@ -1,25 +1,21 @@
 /**
- * modules/pages/structure/repositories/subtree-mutation.helper.ts
+ * modules/pages/structure/repositories/subtree-mutation.ts
  * Subtree move, node rename, and subtree delete transaction helpers for StructureRepository.
  */
 
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
-import {
-  DuplicateNodePathError,
-  InvalidNodeNameError,
-  MAX_VIRTUAL_TREE_DEPTH,
-  NodePathVo,
-  PageNodeEntity,
-} from '../domain';
+import { DuplicateNodePathError, InvalidNodeNameError } from '@/modules/pages/structure/domain/structure.errors';
+import { MAX_VIRTUAL_TREE_DEPTH, NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
 import {
   type HydratedPageNodeRow,
   NODE_HYDRATION_INCLUDE,
   isPrismaUniqueError,
   mapHydratedRowToPageNodeEntity,
   syncBackingAssetPath,
-} from './folder-chain.helper';
+} from './folder-chain';
 
 export async function moveSubtreeHelper(
   prisma: PrismaService,
@@ -410,6 +406,25 @@ export async function deleteSubtreeHelper(
     );
 
     const ops: Promise<unknown>[] = [];
+    for (const t of targets) {
+      const relativePath = NodePathVo.toRelative(t.path);
+      if (t.docId && relativePath && db.pageDoc?.updateMany) {
+        ops.push(
+          db.pageDoc.updateMany({
+            where: { id: t.docId, spaceId: projectId },
+            data: { lastKnownPath: relativePath },
+          }),
+        );
+      }
+      if (t.fileId && relativePath && db.pageFile?.updateMany) {
+        ops.push(
+          db.pageFile.updateMany({
+            where: { id: t.fileId, spaceId: projectId },
+            data: { lastKnownPath: relativePath },
+          }),
+        );
+      }
+    }
     if (targetIds.length > 0) {
       ops.push(
         db.pageNode.deleteMany({

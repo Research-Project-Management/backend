@@ -1,16 +1,18 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
+import * as crypto from 'node:crypto';
 import * as path from 'node:path';
-import { mapWithConcurrency } from '@/core';
+import { PrismaService, isUuid, mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
 } from '@/modules/pages/core/ports/live-collaboration.port';
 import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { ArchiveEntryVo, ImportSummaryVo } from '../domain/archive.domain';
+import type { HydrateProjectOptions } from '../types/archive.types';
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import type { PageNodeEntity } from '@/modules/pages/structure/domain';
+import type { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
 
 const HYDRATE_CONCURRENCY = 6;
 const WRAPPER_ROOT_TEX_RE = /\.(tex|ltx|rtex|latex)$/i;
@@ -44,6 +46,18 @@ function countPathDepth(posixPath: string): number {
   return depth;
 }
 
+function extractLatexTitle(rawText: string): string | null {
+  const match = rawText.match(/\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/);
+  if (!match?.[1]) return null;
+  const clean = match[1]
+    .replace(/\\([_&%#$])/g, '$1')
+    .replace(/\\[a-zA-Z]+(?:\*|\b)?/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean || null;
+}
+
 interface PreparedFileTask {
   entry: ArchiveEntryVo;
   cleanRelPath: string;
@@ -54,6 +68,8 @@ interface PreparedFileTask {
 interface HydrationSession {
   projectId: string;
   pageId?: string;
+  isNewPage: boolean;
+  preferredRootNormalizedPath: string | null;
   prefetched: boolean;
   createdDirs: Set<string>;
   nodesByPath: Map<string, PageNodeEntity> | null;
@@ -74,6 +90,8 @@ export class PageArchiveHydratorAdapter {
     private readonly liveCollab?: LiveCollaborationPort,
     @Optional()
     private readonly domainEventBus?: PageDomainEventBus,
+    @Optional()
+    private readonly prisma?: PrismaService,
   ) {}
 
   /**
@@ -86,13 +104,31 @@ export class PageArchiveHydratorAdapter {
   public async hydrateProjectEntries(
     projectId: string,
     entries: ArchiveEntryVo[],
-    _userId?: string | null,
-    preferredRootDoc?: string,
+    userId?: string | null,
+    preferredRootDocOrOptions?: string | HydrateProjectOptions,
     pageId?: string,
   ): Promise<ImportSummaryVo> {
-    await this.liveCollab?.flushDocs(projectId, []).catch(() => []);
+    const options: HydrateProjectOptions =
+      typeof preferredRootDocOrOptions === 'string'
+        ? { preferredRootDoc: preferredRootDocOrOptions }
+        : (preferredRootDocOrOptions ?? {});
+    const preferredRootDoc = options.preferredRootDoc;
 
-    const session = await this.openHydrationSession(projectId, pageId);
+    const canonicalSpaceId =
+      (!projectId || projectId.trim().toLowerCase() === 'personal') &&
+      userId &&
+      isUuid(userId)
+        ? userId
+        : projectId;
+
+    const explicitPageId = pageId?.trim() || undefined;
+    const shouldCreateNewPage =
+      !explicitPageId && Boolean(options.createNewPage || this.prisma?.page);
+    const effectivePageId =
+      explicitPageId || (shouldCreateNewPage ? crypto.randomUUID() : undefined);
+
+    await this.liveCollab?.flushDocs(canonicalSpaceId, []).catch(() => []);
+
     const wrapperPrefix = this.detectSingleWrapperFolder(entries);
 
     const requiredDirs = new Set<string>();
@@ -127,7 +163,49 @@ export class PageArchiveHydratorAdapter {
       });
     }
 
+    const fileTasks = Array.from(uniqueTasksByPath.values());
+    const cleanPreferredRoot = preferredRootDoc
+      ? this.stripWrapperPrefix(preferredRootDoc, wrapperPrefix)
+      : null;
+    const candidateRootTask = this.selectCandidateRootTexTask(
+      fileTasks,
+      cleanPreferredRoot ? '/' + cleanPreferredRoot : null,
+    );
+    const preExtractedTitle = candidateRootTask
+      ? extractLatexTitle(candidateRootTask.entry.data.toString('utf8'))
+      : null;
+    const initialTitle =
+      preExtractedTitle || options.defaultTitle?.trim() || 'Untitled';
+
+    if (shouldCreateNewPage && effectivePageId) {
+      await this.provisionNewPageAggregate(
+        canonicalSpaceId,
+        effectivePageId,
+        initialTitle,
+        userId,
+      );
+    }
+
+    const session = await this.openHydrationSession(
+      canonicalSpaceId,
+      effectivePageId,
+      shouldCreateNewPage,
+      candidateRootTask?.normalizedPath ?? null,
+    );
     session.totalFolders = explicitDirs.size;
+
+    if (
+      options.overwrite &&
+      effectivePageId &&
+      session.prefetched &&
+      session.nodesByPath
+    ) {
+      await this.pruneOverwrittenPageNodes(
+        session,
+        uniqueTasksByPath,
+        requiredDirs,
+      );
+    }
 
     // Phase 1: Pruned Leaf-First Directory Creation (deepest dirs mark all ancestors in O(depth))
     const sortedDirs = Array.from(requiredDirs).sort(
@@ -138,7 +216,6 @@ export class PageArchiveHydratorAdapter {
     }
 
     // Phase 2: Bounded Parallel File & Document Hydration
-    const fileTasks = Array.from(uniqueTasksByPath.values());
     await mapWithConcurrency<PreparedFileTask, void>(
       fileTasks,
       HYDRATE_CONCURRENCY,
@@ -170,32 +247,277 @@ export class PageArchiveHydratorAdapter {
     );
 
     // Phase 3: Root Document Configuration
-    const { rootDocId, rootDocPath } = await this.resolveAndConfigureRootDoc(
-      session,
-      preferredRootDoc,
-      wrapperPrefix,
-    );
+    const { rootDocId, rootDocPath, extractedTitle } =
+      await this.resolveAndConfigureRootDoc(
+        session,
+        preferredRootDoc,
+        wrapperPrefix,
+      );
+
+    const firstHydratedDocId =
+      session.docContents.keys().next().value ?? null;
+    const resolvedRootDocId =
+      rootDocId || firstHydratedDocId || effectivePageId || canonicalSpaceId;
+
+    const finalTitle = await this.finalizePageAggregateMetadata({
+      spaceId: canonicalSpaceId,
+      pageId: effectivePageId,
+      isNewPage: shouldCreateNewPage,
+      rootDocId: rootDocId || firstHydratedDocId,
+      extractedTitle: extractedTitle || preExtractedTitle,
+      defaultTitle: options.defaultTitle,
+    });
 
     return new ImportSummaryVo({
-      projectId,
+      pageId: effectivePageId || resolvedRootDocId,
+      projectId: canonicalSpaceId,
       totalEntries: entries.length,
       totalDocs: session.totalDocs,
       totalFiles: session.totalFiles,
       totalFolders: session.totalFolders,
-      rootDocId,
+      rootDocId: resolvedRootDocId,
       rootDocPath,
+      title: finalTitle,
+      skippedFiles: options.skippedFiles ?? [],
     });
+  }
+
+  private selectCandidateRootTexTask(
+    tasks: PreparedFileTask[],
+    preferredNormalizedPath: string | null,
+  ): PreparedFileTask | null {
+    if (preferredNormalizedPath) {
+      const exact = tasks.find(
+        (t) =>
+          t.normalizedPath === preferredNormalizedPath &&
+          t.entry.getStorageType() === 'doc',
+      );
+      if (exact) return exact;
+    }
+
+    const mainTex = tasks.find(
+      (t) =>
+        t.normalizedPath.toLowerCase() === '/main.tex' &&
+        t.entry.getStorageType() === 'doc',
+    );
+    if (mainTex) return mainTex;
+
+    const texTasks = tasks.filter(
+      (t) =>
+        WRAPPER_ROOT_TEX_RE.test(t.baseName) &&
+        t.entry.getStorageType() === 'doc',
+    );
+    for (const candidate of texTasks) {
+      if (candidate.entry.data.toString('utf8').includes('\\documentclass')) {
+        return candidate;
+      }
+    }
+    return texTasks[0] ?? null;
+  }
+
+  private async provisionNewPageAggregate(
+    spaceId: string,
+    pageId: string,
+    title: string,
+    userId?: string | null,
+  ): Promise<void> {
+    if (!this.prisma) return;
+
+    const isPersonalSpace =
+      isUuid(spaceId) &&
+      Boolean(userId && spaceId.toLowerCase() === userId.toLowerCase());
+
+    if (isPersonalSpace && this.prisma.space?.upsert && userId) {
+      await Promise.resolve(
+        this.prisma.space.upsert({
+          where: { id: spaceId },
+          create: {
+            id: spaceId,
+            type: 'personal',
+            ownerUserId: userId,
+          },
+          update: {},
+        }),
+      ).catch(() => null);
+    } else if (
+      !userId &&
+      isUuid(spaceId) &&
+      this.prisma.space?.findUnique &&
+      this.prisma.space?.upsert &&
+      this.prisma.user?.findUnique
+    ) {
+      const existingSpace = await Promise.resolve(
+        this.prisma.space.findUnique({
+          where: { id: spaceId },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      if (!existingSpace) {
+        const ownerUser = await Promise.resolve(
+          this.prisma.user.findUnique({
+            where: { id: spaceId },
+            select: { id: true },
+          }),
+        ).catch(() => null);
+        if (ownerUser?.id) {
+          await Promise.resolve(
+            this.prisma.space.upsert({
+              where: { id: spaceId },
+              create: {
+                id: spaceId,
+                type: 'personal',
+                ownerUserId: ownerUser.id,
+              },
+              update: {},
+            }),
+          ).catch(() => null);
+        }
+      }
+    }
+
+    const pageData = {
+      id: pageId,
+      spaceId,
+      rootDocId: null,
+      title: title.slice(0, 500),
+      status: 'draft' as const,
+      compiler: 'pdflatex',
+      texlive: '2025',
+      spellLang: 'en_US',
+      createdById: userId && isUuid(userId) ? userId : null,
+    };
+
+    if (this.prisma.page?.create) {
+      await Promise.resolve(
+        this.prisma.page.create({
+          data: pageData,
+        }),
+      );
+    } else if (this.prisma.page?.upsert) {
+      await Promise.resolve(
+        this.prisma.page.upsert({
+          where: { id: pageId },
+          create: pageData,
+          update: { title: pageData.title },
+        }),
+      );
+    }
+  }
+
+  private async finalizePageAggregateMetadata(params: {
+    spaceId: string;
+    pageId?: string;
+    isNewPage: boolean;
+    rootDocId: string | null;
+    extractedTitle: string | null;
+    defaultTitle?: string;
+  }): Promise<string> {
+    const { spaceId, pageId, isNewPage, rootDocId, extractedTitle } = params;
+    const cleanDefault = params.defaultTitle?.trim() || undefined;
+
+    if (!pageId || !this.prisma?.page) {
+      return extractedTitle || cleanDefault || 'Untitled';
+    }
+
+    if (isNewPage) {
+      const finalTitle = (extractedTitle || cleanDefault || 'Untitled').slice(
+        0,
+        500,
+      );
+      const updateData: { rootDocId?: string; title: string } = {
+        title: finalTitle,
+      };
+      if (rootDocId && isUuid(rootDocId)) {
+        updateData.rootDocId = rootDocId;
+      }
+      if (this.prisma.page.update) {
+        await Promise.resolve(
+          this.prisma.page.update({
+            where: { id: pageId },
+            data: updateData,
+          }),
+        ).catch(() => null);
+      } else if (this.prisma.page.updateMany) {
+        await Promise.resolve(
+          this.prisma.page.updateMany({
+            where: { id: pageId, spaceId },
+            data: updateData,
+          }),
+        ).catch(() => null);
+      }
+      return finalTitle;
+    }
+
+    let existingTitle: string | undefined;
+    if (this.prisma.page.findUnique) {
+      const existingPage = await Promise.resolve(
+        this.prisma.page.findUnique({
+          where: { id: pageId },
+          select: { title: true },
+        }),
+      ).catch(() => null);
+      existingTitle = existingPage?.title?.trim() || undefined;
+    }
+
+    if (rootDocId && isUuid(rootDocId) && this.prisma.page.updateMany) {
+      await Promise.resolve(
+        this.prisma.page.updateMany({
+          where: { id: pageId, spaceId, deletedAt: null },
+          data: { rootDocId },
+        }),
+      ).catch(() => null);
+    }
+
+    return existingTitle || extractedTitle || cleanDefault || 'Untitled';
+  }
+
+  private async pruneOverwrittenPageNodes(
+    session: HydrationSession,
+    incomingTasks: Map<string, PreparedFileTask>,
+    requiredDirs: Set<string>,
+  ): Promise<void> {
+    if (!session.nodesByPath) return;
+
+    const existingEntries = Array.from(session.nodesByPath.entries());
+    for (const [nodePath, node] of existingEntries) {
+      if (node.type !== 'FOLDER' && !incomingTasks.has(nodePath)) {
+        await this.removeConflictingNode(session, node, nodePath);
+      }
+    }
+
+    const staleFolders = existingEntries
+      .filter(
+        ([dirPath, node]) =>
+          node.type === 'FOLDER' &&
+          dirPath !== '/' &&
+          !requiredDirs.has(dirPath) &&
+          !Array.from(requiredDirs).some((req) => req.startsWith(dirPath + '/')),
+      )
+      .sort((a, b) => countPathDepth(b[0]) - countPathDepth(a[0]));
+
+    for (const [dirPath, folderNode] of staleFolders) {
+      await this.structureService
+        .deleteNode(session.projectId, folderNode.id)
+        .catch(() => undefined);
+      session.nodesByPath.delete(dirPath);
+      session.createdDirs.delete(dirPath);
+    }
   }
 
   private async openHydrationSession(
     projectId: string,
     pageId?: string,
+    isNewPage = false,
+    preferredRootNormalizedPath: string | null = null,
   ): Promise<HydrationSession> {
     const createdDirs = new Set<string>(['/']);
     let nodesByPath: Map<string, PageNodeEntity> | null = null;
     let prefetched = false;
 
-    if (typeof this.structureService.getAllNodes === 'function') {
+    if (isNewPage) {
+      prefetched = true;
+      nodesByPath = new Map();
+    } else if (typeof this.structureService.getAllNodes === 'function') {
       try {
         const allNodes = pageId
           ? await this.structureService.getAllNodes(
@@ -224,6 +546,8 @@ export class PageArchiveHydratorAdapter {
     return {
       projectId,
       pageId,
+      isNewPage,
+      preferredRootNormalizedPath,
       prefetched,
       createdDirs,
       nodesByPath,
@@ -363,7 +687,13 @@ export class PageArchiveHydratorAdapter {
       await this.removeConflictingNode(session, existingNode, normalizedPath);
     }
 
+    const assignPageIdToRootDoc =
+      session.isNewPage &&
+      Boolean(session.pageId && isUuid(session.pageId)) &&
+      session.preferredRootNormalizedPath === normalizedPath;
+
     const doc = await this.docstoreService.createDoc(session.projectId, {
+      ...(assignPageIdToRootDoc ? { id: session.pageId } : {}),
       path: normalizedPath,
       lines,
       ...(session.pageId ? { pageId: session.pageId } : {}),
@@ -421,13 +751,14 @@ export class PageArchiveHydratorAdapter {
             uploadTargetName,
             entry.data,
             mimeType,
-            { pageId: session.pageId },
+            { pageId: session.pageId, syncStructureNode: false },
           )
         : await this.filestoreService.uploadFileFromBuffer(
             session.projectId,
             uploadTargetName,
             entry.data,
             mimeType,
+            { syncStructureNode: false },
           );
 
       const fileHash = file.hash?.getValue() ?? String(file.hash);
@@ -480,13 +811,14 @@ export class PageArchiveHydratorAdapter {
           uploadTargetName,
           entry.data,
           mimeType,
-          { pageId: session.pageId },
+          { pageId: session.pageId, syncStructureNode: false },
         )
       : await this.filestoreService.uploadFileFromBuffer(
           session.projectId,
           uploadTargetName,
           entry.data,
           mimeType,
+          { syncStructureNode: false },
         );
 
     // Only check for auto-created node when uploadFileFromBuffer may have written directly
@@ -544,9 +876,14 @@ export class PageArchiveHydratorAdapter {
     session: HydrationSession,
     preferredRootDoc?: string,
     wrapperPrefix?: string | null,
-  ): Promise<{ rootDocId: string | null; rootDocPath: string | null }> {
+  ): Promise<{
+    rootDocId: string | null;
+    rootDocPath: string | null;
+    extractedTitle: string | null;
+  }> {
     let rootDocId: string | null = null;
     let rootDocPath: string | null = null;
+    let extractedTitle: string | null = null;
 
     if (preferredRootDoc) {
       const cleanPreferred = this.stripWrapperPrefix(
@@ -591,43 +928,38 @@ export class PageArchiveHydratorAdapter {
 
     if (rootDocId) {
       const rootLines = session.docContents.get(rootDocId);
-      const titleMatch = rootLines
-        ?.join('\n')
-        .match(/\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/);
-      if (rootLines && titleMatch?.[1]) {
-        const cleanTitle = titleMatch[1]
-          .replace(/\\[a-zA-Z]+(?:\*|\b)?/g, '')
-          .replace(/[{}]/g, '')
-          .trim();
-        if (cleanTitle) {
-          const current = await this.docstoreService
-            .getDoc(session.projectId, rootDocId)
-            .catch(() => null);
-          if (current) {
-            const currentRanges =
-              current.ranges && typeof current.ranges === 'object'
-                ? (current.ranges as Record<string, unknown>)
-                : {};
-            const nextVersion = (current.version ?? 0) + 1;
-            await this.docstoreService
-              .updateDoc(session.projectId, rootDocId, {
-                lines: rootLines,
-                version: nextVersion,
-                ranges: { ...currentRanges, title: cleanTitle },
-              })
-              .catch(() => undefined);
-            await this.publishDocMutation(
-              session.projectId,
-              rootDocId,
-              rootLines,
-              nextVersion,
-            );
-          }
+      const cleanTitle = rootLines
+        ? extractLatexTitle(rootLines.join('\n'))
+        : null;
+      if (rootLines && cleanTitle) {
+        extractedTitle = cleanTitle;
+        const current = await this.docstoreService
+          .getDoc(session.projectId, rootDocId)
+          .catch(() => null);
+        if (current) {
+          const currentRanges =
+            current.ranges && typeof current.ranges === 'object'
+              ? (current.ranges as Record<string, unknown>)
+              : {};
+          const nextVersion = (current.version ?? 0) + 1;
+          await this.docstoreService
+            .updateDoc(session.projectId, rootDocId, {
+              lines: rootLines,
+              version: nextVersion,
+              ranges: { ...currentRanges, title: cleanTitle },
+            })
+            .catch(() => undefined);
+          await this.publishDocMutation(
+            session.projectId,
+            rootDocId,
+            rootLines,
+            nextVersion,
+          );
         }
       }
     }
 
-    return { rootDocId, rootDocPath };
+    return { rootDocId, rootDocPath, extractedTitle };
   }
 
   private detectSingleWrapperFolder(entries: ArchiveEntryVo[]): string | null {

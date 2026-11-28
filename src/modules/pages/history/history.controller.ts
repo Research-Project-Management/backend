@@ -325,7 +325,7 @@ export class HistoryController {
       `attachment; filename="${encodeURIComponent(result.filename)}"`,
     );
 
-    if ('raw' in res && Boolean((res as unknown as { raw?: unknown }).raw)) {
+    if ('raw' in res && Boolean(res.raw)) {
       return res.send(result.zipStream);
     }
 

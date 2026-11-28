@@ -11,11 +11,13 @@ import {
   Optional,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import { RedisCacheService } from '@/core';
 import { PagesDomainError } from '@/modules/pages/core/domain/errors';
 import { PAGES_CACHE_KEYS } from '@/modules/pages/core/config/cache-keys';
+import { WorkspaceCollectorService } from '@/modules/pages/core/services/workspace-collector.service';
 import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
 import { CompilePageDto, ClsiWordCountDto } from './dto/compile.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
@@ -72,11 +74,27 @@ export class ClsiService implements OnModuleDestroy {
     @Optional() private readonly cache?: RedisCacheService,
     @Optional() private readonly realtimeService?: RealtimeFacade,
     @Optional() private readonly snapshotService?: SnapshotService,
+    @Optional() private readonly workspaceCollector?: WorkspaceCollectorService,
   ) {}
 
   public onModuleDestroy(): void {
     this.lastAutoSnapshotTimes.clear();
     this.inFlightCompiles.clear();
+  }
+
+  @OnEvent('pages.page.deleted', { async: true })
+  public async handlePagePurged(payload?: {
+    pageId?: string;
+    spaceId?: string;
+    projectId?: string;
+  }): Promise<void> {
+    const targetId = payload?.pageId || payload?.spaceId || payload?.projectId;
+    if (!targetId) return;
+    await this.cleanScratch(targetId, payload?.pageId).catch((err) => {
+      this.logger.warn(
+        `Failed to clean CLSI scratch for purged page ${targetId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   }
 
   private hashSource(source: string): string {
@@ -121,15 +139,24 @@ export class ClsiService implements OnModuleDestroy {
       scratchWorkspaceId,
       userId,
       async (signal, onLogChunk) => {
-        if (
-          this.realtimeService &&
-          effectiveSpaceId &&
-          !effectiveSpaceId.startsWith('adhoc-')
-        ) {
+        if (effectiveSpaceId && !effectiveSpaceId.startsWith('adhoc-')) {
           try {
-            await this.realtimeService.flushProjectBeforeCompile(
+            const pageDocIds = await this.compileSource.getPageDocIds(
               effectiveSpaceId,
+              targetPageId || dto.pageId,
             );
+            if (this.workspaceCollector) {
+              if (pageDocIds.length > 0) {
+                await this.workspaceCollector.flushDocs(
+                  effectiveSpaceId,
+                  pageDocIds,
+                );
+              }
+            } else if (this.realtimeService && !targetPageId) {
+              await this.realtimeService.flushProjectBeforeCompile(
+                effectiveSpaceId,
+              );
+            }
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             this.logger.warn(
@@ -468,8 +495,53 @@ export class ClsiService implements OnModuleDestroy {
     }
   }
 
-  public cancelCompile(spaceId: string, userId?: string): boolean {
-    return this.compileLock.cancel(spaceId, userId);
+  private async resolveScratchCoordinates(
+    spaceId?: string,
+    pageId?: string,
+  ): Promise<{
+    effectiveSpaceId: string;
+    targetPageId?: string;
+    scratchId: string;
+  }> {
+    const authorizedSpaceId =
+      spaceId && spaceId !== 'default' && spaceId !== pageId
+        ? spaceId
+        : undefined;
+    const { spaceId: resolvedSpaceId, pageId: resolvedPageId } =
+      await this.compileSource.resolvePageCompileContext(
+        {
+          spaceId: authorizedSpaceId || spaceId,
+          pageId: pageId || spaceId,
+        },
+        authorizedSpaceId,
+      );
+    const effectiveSpaceId =
+      resolvedSpaceId && resolvedSpaceId !== 'default'
+        ? resolvedSpaceId
+        : spaceId || pageId || 'default';
+    const targetPageId =
+      resolvedPageId ||
+      (pageId && pageId !== effectiveSpaceId ? pageId : undefined);
+    const scratchId = targetPageId || pageId || effectiveSpaceId;
+    return { effectiveSpaceId, targetPageId, scratchId };
+  }
+
+  public async cancelCompile(
+    pageOrSpaceId: string,
+    userId?: string,
+    authorizedSpaceId?: string,
+  ): Promise<boolean> {
+    const { effectiveSpaceId, scratchId } =
+      await this.resolveScratchCoordinates(authorizedSpaceId, pageOrSpaceId);
+    const cancelledPrimary = this.compileLock.cancel(scratchId, userId);
+    if (cancelledPrimary) return true;
+    if (pageOrSpaceId && pageOrSpaceId !== scratchId) {
+      if (this.compileLock.cancel(pageOrSpaceId, userId)) return true;
+    }
+    if (effectiveSpaceId && effectiveSpaceId !== scratchId) {
+      return this.compileLock.cancel(effectiveSpaceId, userId);
+    }
+    return false;
   }
 
   public async forwardSync(dto: ForwardSyncDto, authorizedSpaceId?: string) {
@@ -492,7 +564,7 @@ export class ClsiService implements OnModuleDestroy {
   }
 
   public async listAuxFiles(spaceId: string, pageId?: string) {
-    const scratchId = pageId || spaceId;
+    const { scratchId } = await this.resolveScratchCoordinates(spaceId, pageId);
     const files = await this.runtime.listAuxFiles(scratchId);
     return { files };
   }
@@ -503,11 +575,13 @@ export class ClsiService implements OnModuleDestroy {
     res: FastifyReply,
     pageId?: string,
   ) {
+    const { effectiveSpaceId, scratchId } =
+      await this.resolveScratchCoordinates(spaceId, pageId);
     return await this.outputService.downloadAuxFile(
-      spaceId,
+      effectiveSpaceId,
       filename,
       res,
-      pageId,
+      scratchId,
     );
   }
 
@@ -556,7 +630,7 @@ export class ClsiService implements OnModuleDestroy {
     spaceId: string,
     pageId?: string,
   ): Promise<{ success: boolean; spaceId: string }> {
-    const scratchId = pageId || spaceId;
+    const { scratchId } = await this.resolveScratchCoordinates(spaceId, pageId);
     await this.runtime.cleanScratch(scratchId);
     return { success: true, spaceId: scratchId };
   }
@@ -566,10 +640,12 @@ export class ClsiService implements OnModuleDestroy {
     res: FastifyReply,
     pageId?: string,
   ): Promise<void> {
+    const { effectiveSpaceId, scratchId } =
+      await this.resolveScratchCoordinates(spaceId, pageId);
     return await this.outputService.downloadAllArtifactsZip(
-      spaceId,
+      effectiveSpaceId,
       res,
-      pageId,
+      scratchId,
     );
   }
 }

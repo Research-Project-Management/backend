@@ -21,6 +21,29 @@ export class PageRepository {
     return this.prisma.pageDoc.findUnique({ where: { id: docId } });
   }
 
+  public async findActivePageInSpace(
+    spaceId: string,
+    pageId: string,
+  ): Promise<{ id: string; spaceId: string; rootDocId: string | null } | null> {
+    if (!this.prisma.page?.findFirst) {
+      return null;
+    }
+    return await Promise.resolve(
+      this.prisma.page.findFirst({
+        where: {
+          id: pageId,
+          spaceId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          spaceId: true,
+          rootDocId: true,
+        },
+      }),
+    ).catch(() => null);
+  }
+
   public findNodeById(nodeId: string): Promise<PageNode | null> {
     return this.prisma.pageNode.findUnique({ where: { id: nodeId } });
   }

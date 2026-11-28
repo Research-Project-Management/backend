@@ -24,7 +24,7 @@ import {
   resolveActiveProjectId,
   type PageScopeDbClient,
 } from '../../core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/structure/domain';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { LineArray } from '@/modules/pages/docstore/domain/line-array';
@@ -37,14 +37,23 @@ import {
   assertExpectedVersionAndRev,
   executeDocstoreUpdateWithOcc,
   hydratePageDocLines,
-} from '@/modules/pages/docstore/services/doc-occ.helper';
+} from '@/modules/pages/core/utils/doc-occ.helper';
 
 import {
   type PageDocRanges,
   type PageLifecycleContext,
   type UpdatePageContentParams,
+  type UpdatePageMetadataParams,
 } from '../types/page.types';
-export type { PageDocRanges, PageLifecycleContext, UpdatePageContentParams };
+export type {
+  PageDocRanges,
+  PageLifecycleContext,
+  UpdatePageContentParams,
+  UpdatePageMetadataParams,
+};
+
+const KNOWN_DOC_FILE_EXT_RE =
+  /\.(tex|rtex|rnw|bib|bst|sty|cls|tikz|pgf|ltx|def|cfg|clo|txt|md)$/i;
 
 export async function applyPageMetadataAndTitleUpdates(
   prisma: PrismaService,
@@ -57,11 +66,7 @@ export async function applyPageMetadataAndTitleUpdates(
     path?: string;
     ranges: unknown;
   },
-  body: {
-    title?: string;
-    status?: 'draft' | 'published' | 'archived';
-    description?: string;
-  },
+  body: UpdatePageMetadataParams,
   eventEmitter?: EventEmitter2,
 ): Promise<{ cleanTitle: string | undefined; existingRanges: PageDocRanges }> {
   const recordProjectId = getRecordSpaceId(record);
@@ -87,10 +92,34 @@ export async function applyPageMetadataAndTitleUpdates(
     const existingParsed = NodePathVo.parse(currentDocPath, 'document.tex');
     const isExplicitPathChange =
       titleParsed.segments.length > 1 || hasExplicitRootPrefix;
+
+    let isPageRootDoc =
+      existingParsed.leafName.toLowerCase() === 'main.tex' ||
+      Boolean(record.pageId && record.pageId === pageId);
+    if (!isPageRootDoc && prisma.page?.findFirst) {
+      const owningRootPage = await Promise.resolve(
+        prisma.page.findFirst({
+          where: {
+            spaceId: recordProjectId,
+            deletedAt: null,
+            OR: [{ id: pageId }, { rootDocId: pageId }],
+          },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      if (owningRootPage) {
+        isPageRootDoc = true;
+      }
+    }
+
+    // Never rename a Page's root PageNode (e.g. main.tex) when updating Page.title,
+    // and never treat dotted display titles like "Draft v1.2" as file extensions!
     const isDisplayOnlyTitleUpdate =
-      !isExplicitPathChange &&
-      !/\.[a-z0-9]{1,10}$/i.test(titleParsed.leafName) &&
-      /\.(tex|rtex|rnw)$/i.test(existingParsed.leafName);
+      isPageRootDoc ||
+      (!isExplicitPathChange &&
+        !KNOWN_DOC_FILE_EXT_RE.test(titleParsed.leafName) &&
+        /\.(tex|rtex|rnw)$/i.test(existingParsed.leafName));
+
     const targetParsed = isExplicitPathChange
       ? titleParsed
       : existingParsed.parentPath && existingParsed.parentPath !== '/'
@@ -178,28 +207,245 @@ export async function applyPageMetadataAndTitleUpdates(
       .catch(() => null);
   }
 
-  if (
-    (cleanTitle || body.status || body.description !== undefined) &&
-    prisma.page?.updateMany
-  ) {
+  const pageDataToUpdate: Prisma.PageUncheckedUpdateManyInput = {
+    ...(cleanTitle ? { title: cleanTitle } : {}),
+    ...(body.status ? { status: body.status } : {}),
+    ...(body.description !== undefined
+      ? { description: body.description }
+      : {}),
+    ...(body.compiler ? { compiler: body.compiler } : {}),
+    ...(body.texlive ? { texlive: body.texlive } : {}),
+    ...(body.spellLang ? { spellLang: body.spellLang } : {}),
+    ...(body.rootDocId ? { rootDocId: body.rootDocId } : {}),
+  };
+
+  if (Object.keys(pageDataToUpdate).length > 0 && prisma.page?.updateMany) {
+    const targetCanonicalPageId = record.pageId || undefined;
     await Promise.resolve(
       prisma.page.updateMany({
         where: {
           spaceId: recordProjectId,
-          OR: [{ id: pageId }, { rootDocId: pageId }],
+          OR: [
+            { id: pageId },
+            { rootDocId: pageId },
+            ...(targetCanonicalPageId ? [{ id: targetCanonicalPageId }] : []),
+          ],
         },
-        data: {
-          ...(cleanTitle ? { title: cleanTitle } : {}),
-          ...(body.status ? { status: body.status } : {}),
-          ...(body.description !== undefined
-            ? { description: body.description }
-            : {}),
-        },
+        data: pageDataToUpdate,
       }),
     ).catch(() => null);
   }
 
   return { cleanTitle, existingRanges };
+}
+
+/**
+ * Pure Page aggregate metadata update (`title`, `description`, `status`, `compiler`, `texlive`,
+ * `spellLang`, `rootDocId`) — strictly decoupled from `PageDoc` content:
+ * - Never reads or unarchives `PageDoc.lines`
+ * - Never flushes Yjs sessions or increments `PageDoc.version` / `PageDoc.rev`
+ * - Never renames root `PageNode.name` (e.g. `main.tex`)
+ */
+export async function updatePageMetadataHelper(
+  ctx: PageLifecycleContext,
+  pageId: string,
+  body: UpdatePageMetadataParams,
+  authorizedProjectId?: string | { id: string } | null,
+) {
+  if (!isUuid(pageId)) {
+    throw new BadRequestException('A valid UUID is required for pageId');
+  }
+
+  const targetSpaceId = resolveActiveProjectId(authorizedProjectId);
+
+  let pageRow: {
+    id: string;
+    spaceId: string;
+    title: string;
+    description: string | null;
+    status: string;
+    compiler: string;
+    texlive: string;
+    spellLang: string;
+    rootDocId: string | null;
+    deletedAt?: Date | null;
+  } | null = null;
+
+  if (ctx.prisma.page?.findFirst) {
+    pageRow = await Promise.resolve(
+      ctx.prisma.page.findFirst({
+        where: {
+          ...(targetSpaceId ? { spaceId: targetSpaceId } : {}),
+          deletedAt: null,
+          OR: [{ id: pageId }, { rootDocId: pageId }],
+        },
+        select: {
+          id: true,
+          spaceId: true,
+          title: true,
+          description: true,
+          status: true,
+          compiler: true,
+          texlive: true,
+          spellLang: true,
+          rootDocId: true,
+          deletedAt: true,
+        },
+      }),
+    ).catch(() => null);
+  } else if (ctx.prisma.page?.findUnique) {
+    const found = await Promise.resolve(
+      ctx.prisma.page.findUnique({
+        where: { id: pageId },
+      }),
+    ).catch(() => null);
+    if (
+      found &&
+      !isRecordDeleted(found) &&
+      (!targetSpaceId || getRecordSpaceId(found) === targetSpaceId)
+    ) {
+      pageRow = {
+        id: found.id,
+        spaceId: getRecordSpaceId(found) || targetSpaceId || '',
+        title: (found as { title?: string }).title || 'Untitled',
+        description: (found as { description?: string | null }).description ?? null,
+        status: (found as { status?: string }).status || 'draft',
+        compiler: (found as { compiler?: string }).compiler || 'pdflatex',
+        texlive: (found as { texlive?: string }).texlive || '2025',
+        spellLang: (found as { spellLang?: string }).spellLang || 'en_US',
+        rootDocId: (found as { rootDocId?: string | null }).rootDocId ?? null,
+        deletedAt: (found as { deletedAt?: Date | null }).deletedAt ?? null,
+      };
+    }
+  }
+
+  let fallbackDoc: PageDoc | null = null;
+  if (!pageRow) {
+    fallbackDoc = targetSpaceId
+      ? await ctx.pageScopeRepo.findDocInProject(targetSpaceId, pageId)
+      : await ctx.prisma.pageDoc.findUnique({
+          where: { id: pageId },
+        });
+    if (!fallbackDoc || isRecordDeleted(fallbackDoc)) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Page ${pageId} not found`,
+      });
+    }
+    if (fallbackDoc.pageId && ctx.prisma.page?.findFirst) {
+      const owningPage = await Promise.resolve(
+        ctx.prisma.page.findFirst({
+          where: {
+            id: fallbackDoc.pageId,
+            spaceId: getRecordSpaceId(fallbackDoc) || targetSpaceId,
+            deletedAt: null,
+          },
+        }),
+      ).catch(() => null);
+      if (owningPage) {
+        pageRow = {
+          id: owningPage.id,
+          spaceId: owningPage.spaceId,
+          title: owningPage.title,
+          description: owningPage.description,
+          status: owningPage.status,
+          compiler: owningPage.compiler,
+          texlive: owningPage.texlive,
+          spellLang: owningPage.spellLang,
+          rootDocId: owningPage.rootDocId,
+          deletedAt: owningPage.deletedAt,
+        };
+      }
+    }
+  }
+
+  const resolvedSpaceId =
+    pageRow?.spaceId || getRecordSpaceId(fallbackDoc) || targetSpaceId || '';
+  const canonicalPageId = pageRow?.id || fallbackDoc?.pageId || pageId;
+
+  if (body.rootDocId !== undefined) {
+    if (!isUuid(body.rootDocId)) {
+      throw new BadRequestException('A valid UUID is required for rootDocId');
+    }
+    if (ctx.prisma.pageDoc?.findFirst) {
+      const candidateRootDoc = await Promise.resolve(
+        ctx.prisma.pageDoc.findFirst({
+          where: {
+            id: body.rootDocId,
+            spaceId: resolvedSpaceId,
+            pageId: canonicalPageId,
+            deletedAt: null,
+          },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      if (!candidateRootDoc) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Root document ${body.rootDocId} not found in page ${canonicalPageId}`,
+        });
+      }
+    }
+  }
+
+  const cleanTitle =
+    body.title !== undefined ? body.title.trim() || 'Untitled' : undefined;
+
+  const updateData: Prisma.PageUncheckedUpdateManyInput = {
+    ...(cleanTitle !== undefined ? { title: cleanTitle } : {}),
+    ...(body.description !== undefined
+      ? { description: body.description }
+      : {}),
+    ...(body.status !== undefined ? { status: body.status } : {}),
+    ...(body.compiler !== undefined ? { compiler: body.compiler } : {}),
+    ...(body.texlive !== undefined ? { texlive: body.texlive } : {}),
+    ...(body.spellLang !== undefined ? { spellLang: body.spellLang } : {}),
+    ...(body.rootDocId !== undefined ? { rootDocId: body.rootDocId } : {}),
+  };
+
+  if (Object.keys(updateData).length > 0) {
+    if (ctx.prisma.page?.updateMany) {
+      await ctx.prisma.page.updateMany({
+        where: {
+          id: canonicalPageId,
+          ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
+          deletedAt: null,
+        },
+        data: updateData,
+      });
+    } else if (ctx.prisma.page?.update) {
+      await ctx.prisma.page.update({
+        where: { id: canonicalPageId },
+        data: updateData,
+      });
+    }
+  }
+
+  const nextTitle = cleanTitle ?? pageRow?.title ?? 'Untitled';
+  const nextDescription = body.description ?? pageRow?.description ?? '';
+  const nextStatus = body.status ?? pageRow?.status ?? 'draft';
+  const nextCompiler = body.compiler ?? pageRow?.compiler ?? 'pdflatex';
+  const nextTexlive = body.texlive ?? pageRow?.texlive ?? '2025';
+  const nextSpellLang = body.spellLang ?? pageRow?.spellLang ?? 'en_US';
+  const nextRootDocId = body.rootDocId ?? pageRow?.rootDocId ?? null;
+
+  return {
+    page: {
+      id: canonicalPageId,
+      title: nextTitle,
+      description: nextDescription,
+      status: nextStatus,
+      compiler: nextCompiler,
+      texlive: nextTexlive,
+      spellLang: nextSpellLang,
+      rootDocId: nextRootDocId,
+      projectId: resolvedSpaceId,
+      spaceId: resolvedSpaceId,
+      updatedAt: new Date().toISOString(),
+    },
+  };
 }
 
 export async function updatePageContentHelper(
@@ -210,6 +456,28 @@ export async function updatePageContentHelper(
 ) {
   if (!isUuid(docId)) {
     throw new BadRequestException('A valid UUID is required for docId');
+  }
+
+  const hasNewContent =
+    body.lines !== undefined || typeof body.content === 'string';
+
+  // Metadata-only updates must NOT hydrate PageDoc.lines or bump PageDoc.version / PageDoc.rev
+  if (!hasNewContent) {
+    if (body.expectedRev !== undefined || body.expectedVersion !== undefined) {
+      const targetProjectId = resolveActiveProjectId(authorizedProjectId);
+      const record = targetProjectId
+        ? await ctx.pageScopeRepo.findDocInProject(targetProjectId, docId)
+        : await ctx.prisma.pageDoc.findUnique({ where: { id: docId } });
+      if (record && !isRecordDeleted(record)) {
+        await assertExpectedVersionAndRev(
+          ctx.docstoreService,
+          record,
+          body.expectedRev,
+          body.expectedVersion,
+        );
+      }
+    }
+    return await updatePageMetadataHelper(ctx, docId, body, authorizedProjectId);
   }
 
   const targetProjectId = resolveActiveProjectId(authorizedProjectId);
@@ -228,8 +496,6 @@ export async function updatePageContentHelper(
   }
 
   const initialSpaceId = getRecordSpaceId(record);
-  const hasNewContent =
-    body.lines !== undefined || typeof body.content === 'string';
   if (initialSpaceId && ctx.liveCollab) {
     const flushed = await ctx.liveCollab
       .flushDocs(initialSpaceId, [docId])
@@ -254,24 +520,20 @@ export async function updatePageContentHelper(
   );
 
   let lines: string[];
-  if (hasNewContent) {
-    try {
-      lines = body.lines
-        ? body.lines
-        : typeof body.content === 'string'
-          ? LineArray.textToLines(body.content)
-          : [];
-    } catch (err) {
-      if (
-        err instanceof NullByteDetectedError ||
-        err instanceof DocTooLargeError
-      ) {
-        throw new BadRequestException(err.message);
-      }
-      throw err;
+  try {
+    lines = body.lines
+      ? body.lines
+      : typeof body.content === 'string'
+        ? LineArray.textToLines(body.content)
+        : [];
+  } catch (err) {
+    if (
+      err instanceof NullByteDetectedError ||
+      err instanceof DocTooLargeError
+    ) {
+      throw new BadRequestException(err.message);
     }
-  } else {
-    lines = await hydratePageDocLines(ctx.docstoreService, record);
+    throw err;
   }
 
   const result = await executeDocstoreUpdateWithOcc(

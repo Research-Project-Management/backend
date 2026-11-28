@@ -33,7 +33,7 @@ import {
 
 export type { PageDocRanges };
 
-@ApiTags('Manuscripts - Pages Compatibility Bridge')
+@ApiTags('Pages - Documents')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -47,8 +47,8 @@ export class DocController {
   // ─── 1. CORE DOCUMENT CONTENT & METADATA ──────────────────────────────────────
 
   /**
-   * GET /api/v1/manuscripts/pages/:pageId
-   * GET /api/v1/manuscripts/docs/:pageId
+   * GET /api/v1/pages/pages/:pageId
+   * GET /api/v1/pages/docs/:pageId
    */
   @Get(['pages/:pageId', 'docs/:pageId'])
   @ApiOperation({ summary: 'Get document by pageId from database' })
@@ -60,10 +60,10 @@ export class DocController {
   }
 
   /**
-   * PUT /api/v1/manuscripts/pages/:pageId
-   * PUT /api/v1/manuscripts/docs/:pageId
-   * PUT /api/v1/manuscripts/projects/:projectId/docs/:pageId
-   * PUT /api/v1/manuscripts/projects/:projectId/docs/doc/:pageId
+   * PUT /api/v1/pages/pages/:pageId
+   * PUT /api/v1/pages/docs/:pageId
+   * PUT /api/v1/pages/spaces/:projectId/docs/:pageId
+   * PUT /api/v1/pages/spaces/:projectId/docs/doc/:pageId
    */
   @Put([
     'pages/:pageId',

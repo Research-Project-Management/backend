@@ -3,21 +3,17 @@
  * Domain errors for Page Virtual Tree & Structure.
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import {
+  StructureError,
+  InvalidNodeNameError,
+} from '@/modules/pages/core/domain/errors';
 
-export class StructureError extends PagesDomainError {
-  constructor(message: string, httpStatus = 400, code = 'STRUCTURE_ERROR') {
-    super(message, {
-      code,
-      statusCode: httpStatus,
-    });
-  }
-}
+export { StructureError, InvalidNodeNameError };
 
 export class NodeNotFoundError extends StructureError {
   constructor(identifier: string) {
     super(
-      `Manuscript node not found: ${identifier}`,
+      `Page node not found: ${identifier}`,
       404,
       'STRUCTURE_NODE_NOT_FOUND',
     );
@@ -40,16 +36,6 @@ export class CyclicMoveError extends StructureError {
       `Cannot move directory '${sourcePath}' into its own descendant '${destPath}'`,
       400,
       'STRUCTURE_CYCLIC_MOVE',
-    );
-  }
-}
-
-export class InvalidNodeNameError extends StructureError {
-  constructor(name: string, reason?: string) {
-    super(
-      `Invalid node name '${name}'${reason ? `: ${reason}` : ''}`,
-      400,
-      'STRUCTURE_INVALID_NODE_NAME',
     );
   }
 }

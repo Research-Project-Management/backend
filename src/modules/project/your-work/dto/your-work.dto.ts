@@ -6,7 +6,7 @@ import type {
   ProjectWorkloadBreakdown,
   UserProfileData,
 } from '../types/your-work.types';
-import type { RecentItemResponse } from '@/modules/activity/dto/activity.dto';
+import type { RecentItemResponse } from '@/modules/project/activity/dto/activity.dto';
 
 export class YourWorkSummaryDto {
   @ApiProperty({ required: false })

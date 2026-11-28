@@ -36,6 +36,13 @@ export class ZipAdapter {
   }
 
   public async extractZip(zipBuffer: Buffer): Promise<ArchiveEntryVo[]> {
+    const { entries } = await this.extractZipWithSkipped(zipBuffer);
+    return entries;
+  }
+
+  public async extractZipWithSkipped(
+    zipBuffer: Buffer,
+  ): Promise<{ entries: ArchiveEntryVo[]; skippedFiles: string[] }> {
     if (!zipBuffer || zipBuffer.length < 22) {
       throw new InvalidZipArchiveException(
         'Provided buffer is too small to be a valid ZIP archive.',
@@ -63,6 +70,7 @@ export class ZipAdapter {
     let offset = cdOffset;
     let totalUncompressedBytes = 0;
     const entries: ArchiveEntryVo[] = [];
+    const skippedFiles: string[] = [];
 
     for (let i = 0; i < cdTotalEntries; i++) {
       if (
@@ -96,6 +104,7 @@ export class ZipAdapter {
         localHeaderOffset + 30 > zipBuffer.length ||
         zipBuffer.readUInt32LE(localHeaderOffset) !== 0x04034b50
       ) {
+        skippedFiles.push(fileName);
         continue;
       }
 
@@ -133,7 +142,10 @@ export class ZipAdapter {
           maxEntryOutput,
           fileName,
         );
-        if (inflated === null) continue;
+        if (inflated === null) {
+          skippedFiles.push(fileName);
+          continue;
+        }
         uncompressedData = inflated;
       }
 
@@ -153,10 +165,12 @@ export class ZipAdapter {
 
       if (!entryVo.isIgnoredSystemArtifact()) {
         entries.push(entryVo);
+      } else if (!isDirectory) {
+        skippedFiles.push(entryVo.path);
       }
     }
 
-    return entries;
+    return { entries, skippedFiles };
   }
 
   private async decompressSlice(

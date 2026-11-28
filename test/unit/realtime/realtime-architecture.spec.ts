@@ -50,7 +50,7 @@ import {
   WorkItemsRealtimeConfigService,
   WORK_ITEMS_REALTIME_DEFAULTS,
 } from '@/modules/realtime/channels/work-items/config';
-import { CHAT_CACHE_DEFAULTS } from '@/modules/chat/services/chat-cache.service';
+import { CHAT_CACHE_DEFAULTS } from '@/modules/project/chat/services/chat-cache.service';
 import {
   WS_ACCESS_LEVEL_KEY,
   WsAccessGuard,

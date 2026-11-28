@@ -20,7 +20,7 @@ import {
 } from '../../core/utils/page-scope';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
-import { hydratePageDocLines } from '@/modules/pages/docstore/services/doc-occ.helper';
+import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
 import type { PageDocRanges, PageLifecycleContext } from './content.service';
 
 export async function getProjectPagesHelper(
@@ -35,10 +35,6 @@ export async function getProjectPagesHelper(
     return { pages: [], total: 0, isEmpty: true };
   }
   try {
-    if (ctx.liveCollab) {
-      await ctx.liveCollab.flushDocs(projectId, []).catch(() => []);
-    }
-
     const normalizedStatus =
       query?.status === 'draft' ||
       query?.status === 'published' ||
@@ -47,7 +43,7 @@ export async function getProjectPagesHelper(
         : undefined;
     const trimmedSearch = query?.search?.trim() || undefined;
 
-    // Canonical path: Single Source of Truth from the 3NF `Page` aggregate root table
+    // Fast metadata-only catalog query on `pages` + `page_labels` (0 Yjs flushes, 0 PageDoc.lines reads, 0 S3 unarchives)
     if (ctx.prisma.page?.findMany) {
       const pageRows = await ctx.prisma.page.findMany({
         where: {
@@ -64,13 +60,18 @@ export async function getProjectPagesHelper(
               label: { select: { id: true, name: true, color: true } },
             },
           },
+          rootDoc: {
+            select: {
+              id: true,
+              lastKnownPath: true,
+              version: true,
+              rev: true,
+            },
+          },
         },
         orderBy: { updatedAt: 'desc' },
       });
 
-      const rootDocIds = pageRows
-        .map((p) => p.rootDocId || p.id)
-        .filter((id): id is string => Boolean(id));
       const creatorIds = Array.from(
         new Set(
           pageRows
@@ -79,18 +80,9 @@ export async function getProjectPagesHelper(
         ),
       );
 
-      const [rootDocs, creators] = await Promise.all([
-        rootDocIds.length > 0
-          ? ctx.prisma.pageDoc.findMany({
-              where: {
-                id: { in: rootDocIds },
-                spaceId: projectId,
-                deletedAt: null,
-              },
-            })
-          : Promise.resolve([]),
+      const creators =
         creatorIds.length > 0 && ctx.prisma.user?.findMany
-          ? Promise.resolve(
+          ? await Promise.resolve(
               ctx.prisma.user.findMany({
                 where: { id: { in: creatorIds } },
                 select: {
@@ -100,67 +92,64 @@ export async function getProjectPagesHelper(
                 },
               }),
             ).catch(() => [])
-          : Promise.resolve([]),
-      ]);
-      const docById = new Map(rootDocs.map((d) => [d.id, d]));
+          : [];
       const creatorById = new Map(creators.map((u) => [u.id, u]));
 
-      const pages = await Promise.all(
-        pageRows.map(async (page) => {
-          const rootDocId = page.rootDocId || page.id;
-          const doc = docById.get(rootDocId) ?? null;
-          const docLines = doc
-            ? await hydratePageDocLines(ctx.docstoreService, {
-                id: doc.id,
-                spaceId: getRecordSpaceId(doc) || projectId,
-                lines: doc.lines,
-                inStorage: doc.inStorage,
-              })
-            : [];
-          const ranges = (
-            doc?.ranges && typeof doc.ranges === 'object' ? doc.ranges : {}
-          ) as PageDocRanges;
-          const normalizedLabels =
-            page.labels.length > 0
-              ? page.labels.map((a) => ({
-                  id: a.label.id,
-                  name: a.label.name,
-                  color: a.label.color || '#3b82f6',
-                }))
-              : Array.isArray(ranges.labels)
-                ? ranges.labels
-                : [];
-          const creator = page.createdById
-            ? creatorById.get(page.createdById)
-            : undefined;
-          const authorName =
-            creator?.profile?.name || creator?.email?.split('@')[0] || 'Author';
+      const pages = pageRows.map((page) => {
+        const rootDoc = (
+          page as typeof page & {
+            rootDoc?: {
+              id?: string;
+              lastKnownPath?: string | null;
+              version?: number;
+              rev?: number;
+            } | null;
+          }
+        ).rootDoc;
+        const rootDocId = page.rootDocId || rootDoc?.id || page.id;
+        const mainFileName =
+          rootDoc?.lastKnownPath?.replace(/^\/+/, '') || 'main.tex';
+        const normalizedLabels = Array.isArray(page.labels)
+          ? page.labels.map((a) => ({
+              id: a.label.id,
+              name: a.label.name,
+              color: a.label.color || '#3b82f6',
+            }))
+          : [];
+        const creator = page.createdById
+          ? creatorById.get(page.createdById)
+          : undefined;
+        const authorName =
+          creator?.profile?.name || creator?.email?.split('@')[0] || 'Author';
 
-          return {
-            id: page.id,
-            title: page.title || 'Untitled',
-            description: page.description ?? '',
-            content: docLines.join('\n'),
-            status: page.status,
-            thumbnail: page.thumbnail ?? undefined,
-            pdfThumbnail: page.thumbnail ?? undefined,
-            projectId,
-            spaceId: projectId,
-            author: {
-              id: creator?.id ?? page.createdById ?? undefined,
-              name: authorName,
-            },
-            labels: normalizedLabels,
-            mainFile: { id: rootDocId, title: page.title || 'main.tex' },
-            mainFileId: rootDocId,
-            rootPageId: page.id,
-            version: doc?.version ?? 1,
-            rev: doc?.rev ?? 1,
-            createdAt: page.createdAt.toISOString(),
-            updatedAt: page.updatedAt.toISOString(),
-          };
-        }),
-      );
+        return {
+          id: page.id,
+          title: page.title || 'Untitled',
+          description: page.description ?? '',
+          content: '',
+          status: page.status,
+          compiler: page.compiler || 'pdflatex',
+          texlive: page.texlive || '2025',
+          spellLang: page.spellLang || 'en_US',
+          rootDocId: page.rootDocId ?? null,
+          thumbnail: page.thumbnail ?? undefined,
+          pdfThumbnail: page.thumbnail ?? undefined,
+          projectId,
+          spaceId: projectId,
+          author: {
+            id: creator?.id ?? page.createdById ?? undefined,
+            name: authorName,
+          },
+          labels: normalizedLabels,
+          mainFile: { id: rootDocId, title: mainFileName },
+          mainFileId: rootDocId,
+          rootPageId: page.id,
+          version: rootDoc?.version ?? 1,
+          rev: rootDoc?.rev ?? 1,
+          createdAt: page.createdAt.toISOString(),
+          updatedAt: page.updatedAt.toISOString(),
+        };
+      });
 
       return {
         pages,
@@ -375,14 +364,15 @@ export async function resolvePageFilesList(
     (record as { pageId?: string | null } | null)?.pageId ||
     (rootDoc as { pageId?: string | null } | null)?.pageId ||
     (pageId !== projectId ? pageId : undefined);
+  const pageFilter = canonicalPageId ? { pageId: canonicalPageId } : {};
 
   const [rawNodes, rawAllDocs, rootDocIds] = await Promise.all([
     prisma.pageNode.findMany({
-      where: { spaceId: projectId },
+      where: { spaceId: projectId, ...pageFilter },
       orderBy: { sortOrder: 'asc' },
     }),
     prisma.pageDoc.findMany({
-      where: { spaceId: projectId, deletedAt: null },
+      where: { spaceId: projectId, ...pageFilter, deletedAt: null },
       select: {
         id: true,
         spaceId: true,

@@ -37,45 +37,8 @@ export interface PatchDocData {
   ranges?: DocRanges;
 }
 
-export abstract class IDocRepository {
-  abstract getDoc(projectId: string, docId: string): Promise<TextDoc | null>;
-  abstract getDocById(docId: string): Promise<TextDoc | null>;
-  abstract getDocByPath(
-    projectId: string,
-    path: string,
-  ): Promise<TextDoc | null>;
-  abstract getAllDocs(projectId: string, pageId?: string): Promise<TextDoc[]>;
-  abstract getAllDeletedDocs(
-    projectId: string,
-    pageId?: string,
-  ): Promise<TextDoc[]>;
-  abstract createDoc(data: CreateDocData): Promise<TextDoc>;
-  abstract updateDoc(
-    projectId: string,
-    docId: string,
-    data: UpdateDocData,
-  ): Promise<{ doc: TextDoc; modified: boolean }>;
-  abstract patchDoc(
-    projectId: string,
-    docId: string,
-    patch: PatchDocData,
-  ): Promise<TextDoc>;
-  abstract markAsArchived(
-    projectId: string,
-    docId: string,
-    storageKey: string,
-    rev: number,
-    clearLines?: boolean,
-  ): Promise<boolean>;
-  abstract unarchiveDoc(
-    projectId: string,
-    docId: string,
-    lines: string[],
-    ranges?: DocRanges,
-  ): Promise<TextDoc>;
-  abstract destroyDoc(projectId: string, docId: string): Promise<boolean>;
-  abstract destroyAllDocs(projectId: string): Promise<number>;
-}
+/** @deprecated Legacy DI compatibility token for external module wiring; inject DocstoreRepository directly. */
+export abstract class IDocRepository {}
 
 export abstract class IDocPersistor {
   abstract sendStream(

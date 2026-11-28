@@ -6,7 +6,9 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { RedisCacheService, RedisPubSubService } from '@/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { LineArray, DocNotFoundError } from '@/modules/pages/docstore/domain';
+import { LineArray } from '@/modules/pages/docstore/domain/line-array';
+
+import { DocNotFoundError } from '@/modules/pages/docstore/domain/doc.errors';
 import { PAGES_EVENTS, PAGES_REDIS_KEYS, PAGES_ROOMS } from '../config';
 import { YjsCursorDiffEngine, mergeThreeWayText } from './merge';
 import {

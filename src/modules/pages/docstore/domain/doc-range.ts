@@ -1,5 +1,5 @@
 /**
- * modules/manuscripts/docstore/domain/doc-range.ts
+ * modules/pages/docstore/domain/doc-range.ts
  * Value Object managing Track Changes and Inline Comments line coordinates.
  * Matches Overleaf RangeManager.js data structures.
  */

@@ -16,10 +16,10 @@ import {
   resolveActiveProjectId,
   type PageScopeDbClient,
 } from '../../core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/structure/domain';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { hydratePageDocLines } from '@/modules/pages/docstore/services/doc-occ.helper';
+import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
 import type { PageLifecycleContext } from './content.service';
 
 export interface DuplicatePageSourceInput {
@@ -340,125 +340,157 @@ export async function duplicateSourcePageAndNode(
   const rootFileName = NodePathVo.toRelative(rootFilePath) || 'main.tex';
   const nowIso = new Date().toISOString();
   const blobIncrements = new Map<string, number>();
-
-  await prisma.$transaction(async (tx) => {
-    blobIncrements.clear();
-    const canProbeStoredProc =
-      Boolean(sourcePageRow) &&
-      !hasAnyInStorageDoc &&
-      typeof tx.$queryRaw === 'function' &&
-      typeof tx.$executeRaw === 'function';
-
-    if (canProbeStoredProc) {
-      const procRows = await Promise.resolve(
-        tx.$queryRaw<
-          Array<{ exists?: boolean }>
-        >`SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'clone_page_virtual_tree') AS "exists"`,
-      ).catch(() => []);
-      if (Array.isArray(procRows) && Boolean(procRows[0]?.exists)) {
-        await tx.$executeRaw`
-          CALL clone_page_virtual_tree(
-            ${sourcePageId}::uuid,
-            ${newPageId}::uuid,
-            ${spaceId}::uuid,
-            ${newPageTitle}::varchar,
-            ${validActorId}::uuid
-          )
-        `;
-        return;
-      }
+  let totalClonedBytes = 0n;
+  for (const file of sourceFiles) {
+    const fileSize = Math.max(0, Number(file.sizeBytes ?? 0));
+    if (fileSize > 0) {
+      totalClonedBytes += BigInt(fileSize);
     }
+    if (file.blobId) {
+      blobIncrements.set(
+        file.blobId,
+        (blobIncrements.get(file.blobId) ?? 0) + 1,
+      );
+    }
+  }
 
-    // Prototype Batch Clone in-transaction (O(2 + depth) DB round-trips instead of O(D + F + N))
-    if (tx.page?.create || tx.page?.upsert) {
-      const pagePayload = {
-        id: newPageId,
+  let quotaReserved = false;
+  if (
+    totalClonedBytes > 0n &&
+    typeof filesPort?.reserveQuota === 'function'
+  ) {
+    await filesPort.reserveQuota(spaceId, totalClonedBytes);
+    quotaReserved = true;
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const canProbeStoredProc =
+        Boolean(sourcePageRow) &&
+        !hasAnyInStorageDoc &&
+        typeof tx.$queryRaw === 'function' &&
+        typeof tx.$executeRaw === 'function';
+
+      if (canProbeStoredProc) {
+        const procRows = await Promise.resolve(
+          tx.$queryRaw<
+            Array<{ exists?: boolean }>
+          >`SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'clone_page_virtual_tree') AS "exists"`,
+        ).catch(() => []);
+        if (Array.isArray(procRows) && Boolean(procRows[0]?.exists)) {
+          await tx.$executeRaw`
+            CALL clone_page_virtual_tree(
+              ${sourcePageId}::uuid,
+              ${newPageId}::uuid,
+              ${spaceId}::uuid,
+              ${newPageTitle}::varchar,
+              ${validActorId}::uuid
+            )
+          `;
+          return;
+        }
+      }
+
+      // Prototype Batch Clone in-transaction (O(2 + depth) DB round-trips instead of O(D + F + N))
+      if (tx.page?.create || tx.page?.upsert) {
+        const pagePayload = {
+          id: newPageId,
+          spaceId,
+          rootDocId: null,
+          title: newPageTitle,
+          description: sourcePageRow?.description ?? null,
+          status: 'draft' as const,
+          compiler: sourcePageRow?.compiler || 'pdflatex',
+          texlive: sourcePageRow?.texlive || '2025',
+          spellLang: sourcePageRow?.spellLang || 'en_US',
+          settings:
+            (sourcePageRow?.settings as Prisma.InputJsonValue | undefined) ??
+            {},
+          createdById: validActorId ?? sourcePageRow?.createdById ?? null,
+        };
+        if (tx.page.create) {
+          await tx.page.create({ data: pagePayload });
+        } else if (tx.page.upsert) {
+          await tx.page.upsert({
+            where: { id: newPageId },
+            create: pagePayload,
+            update: { title: newPageTitle },
+          });
+        }
+      }
+
+      const plan = buildClonePlan({
         spaceId,
-        rootDocId: null,
-        title: newPageTitle,
-        description: sourcePageRow?.description ?? null,
-        status: 'draft' as const,
-        compiler: sourcePageRow?.compiler || 'pdflatex',
-        texlive: sourcePageRow?.texlive || '2025',
-        spellLang: sourcePageRow?.spellLang || 'en_US',
-        settings:
-          (sourcePageRow?.settings as Prisma.InputJsonValue | undefined) ?? {},
-        createdById: validActorId ?? sourcePageRow?.createdById ?? null,
-      };
-      if (tx.page.create) {
-        await tx.page.create({ data: pagePayload });
-      } else if (tx.page.upsert) {
-        await tx.page.upsert({
-          where: { id: newPageId },
-          create: pagePayload,
-          update: { title: newPageTitle },
-        });
+        newPageId,
+        newPageTitle,
+        sourceDocs,
+        sourceRootDocId: sourceRootDoc?.id ?? null,
+        hydratedDocLinesById,
+        sourceFiles,
+        sourceNodes,
+      });
+      blobIncrements.clear();
+      for (const [blobId, count] of plan.blobIncrements.entries()) {
+        blobIncrements.set(blobId, count);
       }
-    }
 
-    const plan = buildClonePlan({
-      spaceId,
-      newPageId,
-      newPageTitle,
-      sourceDocs,
-      sourceRootDocId: sourceRootDoc?.id ?? null,
-      hydratedDocLinesById,
-      sourceFiles,
-      sourceNodes,
+      if (plan.docsToCreate.length > 0) {
+        if (tx.pageDoc.createMany) {
+          await tx.pageDoc.createMany({ data: plan.docsToCreate });
+        } else {
+          for (const docData of plan.docsToCreate) {
+            await tx.pageDoc.create({ data: docData });
+          }
+        }
+      }
+
+      if (plan.clonedRootDocId && (tx.page?.updateMany || tx.page?.update)) {
+        if (tx.page.updateMany) {
+          await tx.page.updateMany({
+            where: { id: newPageId, spaceId },
+            data: { rootDocId: plan.clonedRootDocId },
+          });
+        } else if (tx.page.update) {
+          await tx.page.update({
+            where: { id: newPageId },
+            data: { rootDocId: plan.clonedRootDocId },
+          });
+        }
+      }
+
+      if (plan.filesToCreate.length > 0) {
+        if (tx.pageFile?.createMany) {
+          await tx.pageFile.createMany({ data: plan.filesToCreate });
+        } else if (tx.pageFile?.create) {
+          for (const fileData of plan.filesToCreate) {
+            await tx.pageFile.create({ data: fileData });
+          }
+        }
+      }
+
+      const sortedDepths = Array.from(plan.nodeBatchesByDepth.keys()).sort(
+        (a, b) => a - b,
+      );
+      for (const depth of sortedDepths) {
+        const batch = plan.nodeBatchesByDepth.get(depth);
+        if (!batch || batch.length === 0) continue;
+        if (tx.pageNode?.createMany) {
+          await tx.pageNode.createMany({ data: batch });
+        } else if (tx.pageNode?.create) {
+          for (const nodeData of batch) {
+            await tx.pageNode.create({ data: nodeData });
+          }
+        }
+      }
     });
-    for (const [blobId, count] of plan.blobIncrements.entries()) {
-      blobIncrements.set(blobId, count);
+  } catch (err) {
+    if (quotaReserved && typeof filesPort?.releaseQuota === 'function') {
+      await Promise.resolve(
+        filesPort.releaseQuota(spaceId, totalClonedBytes),
+      ).catch(() => undefined);
     }
-
-    if (plan.docsToCreate.length > 0) {
-      if (tx.pageDoc.createMany) {
-        await tx.pageDoc.createMany({ data: plan.docsToCreate });
-      } else {
-        for (const docData of plan.docsToCreate) {
-          await tx.pageDoc.create({ data: docData });
-        }
-      }
-    }
-
-    if (plan.clonedRootDocId && (tx.page?.updateMany || tx.page?.update)) {
-      if (tx.page.updateMany) {
-        await tx.page.updateMany({
-          where: { id: newPageId, spaceId },
-          data: { rootDocId: plan.clonedRootDocId },
-        });
-      } else if (tx.page.update) {
-        await tx.page.update({
-          where: { id: newPageId },
-          data: { rootDocId: plan.clonedRootDocId },
-        });
-      }
-    }
-
-    if (plan.filesToCreate.length > 0) {
-      if (tx.pageFile?.createMany) {
-        await tx.pageFile.createMany({ data: plan.filesToCreate });
-      } else if (tx.pageFile?.create) {
-        for (const fileData of plan.filesToCreate) {
-          await tx.pageFile.create({ data: fileData });
-        }
-      }
-    }
-
-    const sortedDepths = Array.from(plan.nodeBatchesByDepth.keys()).sort(
-      (a, b) => a - b,
-    );
-    for (const depth of sortedDepths) {
-      const batch = plan.nodeBatchesByDepth.get(depth);
-      if (!batch || batch.length === 0) continue;
-      if (tx.pageNode?.createMany) {
-        await tx.pageNode.createMany({ data: batch });
-      } else if (tx.pageNode?.create) {
-        for (const nodeData of batch) {
-          await tx.pageNode.create({ data: nodeData });
-        }
-      }
-    }
-  });
+    throw err;
+  }
 
   if (filesPort && blobIncrements.size > 0) {
     const acquireCalls: Array<Promise<unknown>> = [];

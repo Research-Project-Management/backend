@@ -4,7 +4,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { YourWorkRepository } from './your-work.repository';
-import { ActivityService } from '@/modules/activity/activity.service';
+import { ActivityService } from '@/modules/project/activity/activity.service';
 import { YourWorkSummaryDto } from './dto/your-work.dto';
 import { ActivityFeedItem } from './types/your-work.types';
 import {

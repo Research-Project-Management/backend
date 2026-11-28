@@ -32,10 +32,7 @@ import { UserRateLimit, UserRateLimitGuard } from '@/core';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { Readable } from 'node:stream';
 import { PageBinaryAssetResponseDto } from './dto/file-response.dto';
-import {
-  FileNotFoundException,
-  InvalidByteRangeException,
-} from './filestore.types';
+import { FileNotFoundException, InvalidByteRangeException } from './domain/filestore.errors';
 import { FilestoreService } from './filestore.service';
 import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
 
@@ -176,12 +173,13 @@ export class FilestoreController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Param('pageId') paramPageId?: string,
     @Req() req?: FastifyRequest,
+    @Query('pageId') queryPageId?: string,
   ): Promise<void> {
     try {
       const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
-        undefined,
+        queryPageId,
         req,
       );
       const { file } = await this.filestoreService.getFileHead(
@@ -272,8 +270,9 @@ export class FilestoreController {
       userAgent,
       res,
       resolvedSpace,
-      paramPageId,
+      paramPageId || pageId,
       req,
+      queryPageId,
     );
   }
 
@@ -287,12 +286,13 @@ export class FilestoreController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Param('pageId') paramPageId?: string,
     @Req() req?: FastifyRequest,
+    @Query('pageId') queryPageId?: string,
   ): Promise<void> {
     try {
       const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
-        undefined,
+        queryPageId,
         req,
       );
       const result = await this.filestoreService.streamFile(
@@ -351,12 +351,13 @@ export class FilestoreController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Param('pageId') paramPageId?: string,
     @Req() req?: FastifyRequest,
+    @Query('pageId') queryPageId?: string,
   ): Promise<void> {
     try {
       const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
-        undefined,
+        queryPageId,
         req,
       );
       await this.filestoreService.deleteFile(spaceId, fileId, false, pageId);
@@ -376,12 +377,13 @@ export class FilestoreController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Param('pageId') paramPageId?: string,
     @Req() req?: FastifyRequest,
+    @Query('pageId') queryPageId?: string,
   ): Promise<{ signedUrl: string | null }> {
     try {
       const { spaceId, pageId } = this.resolveCoordinates(
         { spaceId: routeSpaceId, pageId: paramPageId },
         resolvedSpace,
-        undefined,
+        queryPageId,
         req,
       );
       const parsedTtl = expiresIn ? Number.parseInt(expiresIn, 10) : 3600;

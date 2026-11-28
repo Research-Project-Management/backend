@@ -30,14 +30,18 @@ export class ExportService {
   public async collectProjectEntries(
     projectId: string,
     includePdf = false,
-    cleanArxiv = false,
+    cleanArxivOrPageId: boolean | string = false,
     pageId?: string,
   ) {
+    const cleanArxiv =
+      typeof cleanArxivOrPageId === 'boolean' ? cleanArxivOrPageId : false;
+    const resolvedPageId =
+      typeof cleanArxivOrPageId === 'string' ? cleanArxivOrPageId : pageId;
     return this.aggregator.collectProjectEntries(
       projectId,
       includePdf,
       cleanArxiv,
-      pageId,
+      resolvedPageId,
     );
   }
 

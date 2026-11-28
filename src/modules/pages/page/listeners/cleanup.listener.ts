@@ -12,7 +12,7 @@ import { PrismaService, RedisCacheService } from '@/core';
 import { WorkspaceCollectorService } from '../../core/services/workspace-collector.service';
 import { FilestoreRepository } from '../../filestore/filestore.repository';
 import { FilestoreService } from '../../filestore/filestore.service';
-import { IDocPersistor } from '../../docstore/domain';
+import { IDocPersistor } from '@/modules/pages/docstore/domain/doc.ports';
 
 interface ProjectDeletedEvent {
   projectId?: string;
@@ -27,6 +27,11 @@ interface PageDeletedEvent {
     sizeBytes?: number;
     blobId?: string | null;
     hash?: string | null;
+  }>;
+  deletedDocs?: Array<{
+    id: string;
+    inStorage?: boolean;
+    storageKey?: string | null;
   }>;
 }
 
@@ -76,27 +81,44 @@ export class CleanupListener {
 
   @OnEvent('pages.page.deleted', { async: true })
   public async handlePageDeleted(event: PageDeletedEvent): Promise<void> {
-    if (!event?.projectId || !event?.deletedFiles?.length) return;
+    if (!event?.projectId) return;
     try {
-      const filestoreService = this.resolveFilestoreService();
-      if (filestoreService?.reclaimDeletedFilesQuotaAndBlobs) {
-        const fileIds = event.deletedFiles.map((f) => f.id);
-        const deletedNodes = event.deletedFiles.map((f) => ({
-          fileId: f.id,
-          blobId: f.blobId,
-          sizeBytes: f.sizeBytes,
-          hash: f.hash,
-        }));
-        await filestoreService.reclaimDeletedFilesQuotaAndBlobs(
-          event.projectId,
-          fileIds,
-          deletedNodes,
-        );
+      if (event.deletedFiles?.length) {
+        const filestoreService = this.resolveFilestoreService();
+        if (filestoreService?.reclaimDeletedFilesQuotaAndBlobs) {
+          const fileIds = event.deletedFiles.map((f) => f.id);
+          const deletedNodes = event.deletedFiles.map((f) => ({
+            fileId: f.id,
+            blobId: f.blobId,
+            sizeBytes: f.sizeBytes,
+            hash: f.hash,
+          }));
+          await filestoreService.reclaimDeletedFilesQuotaAndBlobs(
+            event.projectId,
+            fileIds,
+            deletedNodes,
+          );
+        }
+      }
+
+      if (event.deletedDocs?.length) {
+        const docPersistor = this.resolveDocPersistor();
+        if (docPersistor?.deleteObject) {
+          await Promise.all(
+            event.deletedDocs.map((d) =>
+              d.inStorage && d.storageKey
+                ? Promise.resolve(
+                    docPersistor.deleteObject(d.storageKey),
+                  ).catch(() => undefined)
+                : Promise.resolve(),
+            ),
+          );
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `Failed to reclaim blobs/quota for deleted page ${event.pageId}: ${msg}`,
+        `Failed to reclaim blobs/quota/cold-docs for deleted page ${event.pageId}: ${msg}`,
       );
     }
   }
@@ -112,6 +134,7 @@ export class CleanupListener {
       );
 
       const filestoreRepo = this.resolveFilestoreRepository();
+      const filestoreService = this.resolveFilestoreService();
       const docPersistor = this.resolveDocPersistor();
 
       let projectDocs: Array<{
@@ -121,6 +144,8 @@ export class CleanupListener {
       }> = [];
       let projectFiles: Array<{
         id: string;
+        sizeBytes?: number;
+        blobId?: string | null;
         hash: string;
         storageKey: string;
         bucketName: string;
@@ -135,12 +160,14 @@ export class CleanupListener {
               }),
             ).catch(() => [])
           : Promise.resolve([]),
-        filestoreRepo && this.prisma.pageFile?.findMany
+        (filestoreRepo || filestoreService) && this.prisma.pageFile?.findMany
           ? Promise.resolve(
               this.prisma.pageFile.findMany({
                 where: { spaceId: projectId },
                 select: {
                   id: true,
+                  sizeBytes: true,
+                  blobId: true,
                   hash: true,
                   storageKey: true,
                   bucketName: true,
@@ -201,6 +228,23 @@ export class CleanupListener {
               : Promise.resolve(),
           ),
         );
+      }
+
+      // Reclaim SpaceQuota and StorageBlob CAS ref-counts for all purged project files
+      if (
+        filestoreService?.reclaimDeletedFilesQuotaAndBlobs &&
+        projectFiles.length > 0
+      ) {
+        const fileIds = projectFiles.map((f) => f.id);
+        const deletedNodes = projectFiles.map((f) => ({
+          fileId: f.id,
+          blobId: f.blobId,
+          sizeBytes: f.sizeBytes,
+          hash: f.hash,
+        }));
+        await filestoreService
+          .reclaimDeletedFilesQuotaAndBlobs(projectId, fileIds, deletedNodes)
+          .catch(() => undefined);
       }
 
       // Garbage-collect unreferenced CAS binary blobs in parallel

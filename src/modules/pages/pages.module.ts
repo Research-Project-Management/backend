@@ -37,8 +37,6 @@ import { ExportImportModule } from './export-import/export-import.module';
 import { GitBridgeModule } from './git-bridge/git-bridge.module';
 import { EditorBootstrapModule } from './bootstrap/editor-bootstrap.module';
 
-import { PagesFacade } from './pages.facade';
-
 @Module({
   imports: [
     // Tier 0: Shared Kernel
@@ -67,9 +65,7 @@ import { PagesFacade } from './pages.facade';
     // Unified Editor Bootstrap BFF
     EditorBootstrapModule,
   ],
-  providers: [PagesFacade],
   exports: [
-    PagesFacade,
     PagesCoreModule,
     PageModule,
     EditorBootstrapModule,

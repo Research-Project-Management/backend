@@ -1,6 +1,6 @@
 /**
  * filestore/filestore.module.ts
- * NestJS Module for Manuscripts Filestore Subsystem.
+ * NestJS Module for Pages Filestore Subsystem.
  * Delegates physical binary storage to Flux's unified FilesModule (`FILES_PORT`)
  * via PlatformBinaryStorageAdapter.
  */
@@ -17,15 +17,13 @@ import {
   FilestoreRepository,
   PlatformBinaryStorageAdapter,
   LocalDiskBinaryStorageAdapter,
-  ContentHasherAdapter,
 } from './filestore.repository';
-import { IBinaryStoragePort } from './filestore.types';
+import { IBinaryStoragePort } from './domain/filestore.ports';
 
 @Module({
   imports: [ConfigModule, PrismaModule, FilesModule],
   controllers: [FilestoreController],
   providers: [
-    ContentHasherAdapter,
     PlatformBinaryStorageAdapter,
     {
       provide: IBinaryStoragePort,

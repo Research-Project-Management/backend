@@ -9,6 +9,7 @@ import {
   Get,
   Post,
   Param,
+  Query,
   Body,
   Req,
   HttpStatus,
@@ -24,9 +25,10 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
 import { PresenceService, HeartbeatBody } from '../services/presence.service';
 
-@ApiTags('Manuscripts - Pages Search & Presence')
+@ApiTags('Pages - Search & Presence')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -34,45 +36,78 @@ import { PresenceService, HeartbeatBody } from '../services/presence.service';
 export class PresenceController {
   constructor(private readonly presenceService: PresenceService) {}
 
-  private resolveSpaceId(
+  private resolveCoordinates(
+    params: { spaceId?: string; pageId?: string },
     space?: string | { id: string; spaceId?: string } | null,
-    routeSpaceId?: string,
-  ): string | undefined {
-    if (!space) return routeSpaceId || undefined;
-    if (typeof space === 'string') return space;
-    return space.spaceId ?? space.id ?? routeSpaceId ?? undefined;
+    queryPageId?: string,
+    req?: AuthenticatedRequest,
+  ): { spaceId?: string; targetId: string } {
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      params,
+      space,
+      queryPageId,
+      req,
+    );
+    return {
+      spaceId: spaceId || undefined,
+      targetId: pageId || params.pageId || spaceId,
+    };
   }
 
-  @Get(['docs/:pageId/collaboration/presence', 'docs/:pageId/presence'])
+  @Get([
+    'docs/:pageId/collaboration/presence',
+    'docs/:pageId/presence',
+    'spaces/:spaceId/collaboration/presence',
+    'spaces/:spaceId/presence',
+  ])
   async getPresence(
-    @Param('pageId') pageId: string,
+    @Param('pageId') pageId?: string,
+    @Param('spaceId') routeSpaceId?: string,
+    @Query('pageId') queryPageId?: string,
+    @Req() req?: AuthenticatedRequest,
     @ResolvedSpace()
     space?: string | { id: string; spaceId?: string } | null,
   ) {
-    const resolvedSpaceId = this.resolveSpaceId(space);
+    const { spaceId: resolvedSpaceId, targetId } = this.resolveCoordinates(
+      { spaceId: routeSpaceId, pageId },
+      space,
+      queryPageId,
+      req,
+    );
     const { users, realtimeAvailable } =
-      await this.presenceService.collectPresence(pageId, resolvedSpaceId);
+      await this.presenceService.collectPresence(targetId, resolvedSpaceId);
     return { activeUsers: users, presence: users, realtimeAvailable };
   }
 
   @Post([
     'docs/:pageId/collaboration/heartbeat',
     'docs/:pageId/presence/heartbeat',
+    'spaces/:spaceId/collaboration/heartbeat',
+    'spaces/:spaceId/presence/heartbeat',
   ])
   @HttpCode(HttpStatus.OK)
   async sendHeartbeat(
-    @Param('pageId') pageId: string,
     @Body() body: HeartbeatBody,
     @Req() req: AuthenticatedRequest,
+    @Param('pageId') pageId?: string,
+    @Param('spaceId') routeSpaceId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace()
     space?: string | { id: string; spaceId?: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub;
     const userName =
       req?.user?.name || req?.user?.email || body?.name || 'Collaborator';
-    const resolvedSpaceId = this.resolveSpaceId(space);
+    const bodyPageId =
+      typeof body?.pageId === 'string' ? body.pageId : undefined;
+    const { spaceId: resolvedSpaceId, targetId } = this.resolveCoordinates(
+      { spaceId: routeSpaceId, pageId },
+      space,
+      queryPageId || bodyPageId,
+      req,
+    );
     return this.presenceService.recordHeartbeat(
-      pageId,
+      targetId,
       userId,
       userName,
       body,
@@ -80,16 +115,28 @@ export class PresenceController {
     );
   }
 
-  @Post(['docs/:pageId/collaboration/leave', 'docs/:pageId/presence/leave'])
+  @Post([
+    'docs/:pageId/collaboration/leave',
+    'docs/:pageId/presence/leave',
+    'spaces/:spaceId/collaboration/leave',
+    'spaces/:spaceId/presence/leave',
+  ])
   @HttpCode(HttpStatus.OK)
   async leaveRoom(
-    @Param('pageId') pageId: string,
     @Req() req: AuthenticatedRequest,
+    @Param('pageId') pageId?: string,
+    @Param('spaceId') routeSpaceId?: string,
+    @Query('pageId') queryPageId?: string,
     @ResolvedSpace()
     space?: string | { id: string; spaceId?: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub;
-    const resolvedSpaceId = this.resolveSpaceId(space);
-    return this.presenceService.leaveRoom(pageId, userId, resolvedSpaceId);
+    const { spaceId: resolvedSpaceId, targetId } = this.resolveCoordinates(
+      { spaceId: routeSpaceId, pageId },
+      space,
+      queryPageId,
+      req,
+    );
+    return this.presenceService.leaveRoom(targetId, userId, resolvedSpaceId);
   }
 }

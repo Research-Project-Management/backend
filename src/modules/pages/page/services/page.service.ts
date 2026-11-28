@@ -38,14 +38,16 @@ import {
   hydratePageDocLines,
   findPageRecordWithNode,
   formatPageByIdResponse,
-} from '@/modules/pages/docstore/services/doc-occ.helper';
+} from '@/modules/pages/core/utils/doc-occ.helper';
 import { PageRepository } from '../page.repository';
 import { getProjectPagesHelper, resolvePageFilesList } from './query.service';
 import {
   type PageDocRanges,
   type PageLifecycleContext,
   type UpdatePageContentParams,
+  type UpdatePageMetadataParams,
   updatePageContentHelper,
+  updatePageMetadataHelper,
 } from './content.service';
 import {
   type CreatePageFileParams,
@@ -70,6 +72,7 @@ export type {
   ImportFromProjectParams,
   PageDocRanges,
   UpdatePageContentParams,
+  UpdatePageMetadataParams,
 };
 
 @Injectable()
@@ -250,21 +253,13 @@ export class PageService {
 
   public async updatePageMetadata(
     pageId: string,
-    body: {
-      title?: string;
-      description?: string;
-      status?: 'draft' | 'published' | 'archived';
-    },
+    body: UpdatePageMetadataParams,
     authorizedProjectId?: string | { id: string } | null,
   ) {
-    return await updatePageContentHelper(
+    return await updatePageMetadataHelper(
       this.getLifecycleContext(),
       pageId,
-      {
-        title: body.title,
-        description: body.description,
-        status: body.status,
-      },
+      body,
       authorizedProjectId,
     );
   }
@@ -281,14 +276,19 @@ export class PageService {
       try {
         const targetProjectId =
           this.resolveActiveProjectId(authorizedProjectId);
-        const record = targetProjectId
-          ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
-          : await this.prisma.pageDoc.findUnique({
-              where: { id: pageId },
-              select: { id: true, pageId: true, spaceId: true },
-            });
-
-        const canonicalPageId = record?.pageId || pageId;
+        const directPage = targetProjectId
+          ? await this.pageRepo.findActivePageInSpace(targetProjectId, pageId)
+          : null;
+        let canonicalPageId = directPage?.id;
+        if (!canonicalPageId) {
+          const record = targetProjectId
+            ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
+            : await this.prisma.pageDoc.findUnique({
+                where: { id: pageId },
+                select: { id: true, pageId: true, spaceId: true },
+              });
+          canonicalPageId = record?.pageId || pageId;
+        }
         await this.pageRepo
           .updatePageThumbnail(canonicalPageId, pdfThumbnail, targetProjectId)
           .catch(() => null);
@@ -443,14 +443,17 @@ export class PageService {
    */
   public async getPageLabels(projectId: string, pageId: string) {
     if (isUuid(pageId)) {
-      const doc = await this.pageScopeRepo.findDocInProject(projectId, pageId);
-      let canonicalPageId = doc?.pageId || null;
-      if (!canonicalPageId && this.prisma.page?.findFirst) {
-        const ownedPage = await this.prisma.page.findFirst({
-          where: { id: pageId, spaceId: projectId, deletedAt: null },
-          select: { id: true },
-        });
-        canonicalPageId = ownedPage?.id ?? null;
+      const ownedPage = await this.pageRepo.findActivePageInSpace(
+        projectId,
+        pageId,
+      );
+      let canonicalPageId = ownedPage?.id ?? null;
+      if (!canonicalPageId) {
+        const doc = await this.pageScopeRepo.findDocInProject(
+          projectId,
+          pageId,
+        );
+        canonicalPageId = doc?.pageId || null;
       }
       if (!canonicalPageId) {
         return { labels: [] };
@@ -484,16 +487,26 @@ export class PageService {
     labelId: string,
   ) {
     if (isUuid(pageId)) {
-      const doc = await this.pageScopeRepo.findDocInProject(projectId, pageId);
-      if (!doc) {
-        throw new NotFoundException({
-          statusCode: 404,
-          code: 'RESOURCE_NOT_FOUND',
-          message: `Document ${pageId} not found`,
-        });
+      const ownedPage = await this.pageRepo.findActivePageInSpace(
+        projectId,
+        pageId,
+      );
+      let canonicalPageId = ownedPage?.id ?? null;
+      if (!canonicalPageId) {
+        const doc = await this.pageScopeRepo.findDocInProject(
+          projectId,
+          pageId,
+        );
+        if (!doc) {
+          throw new NotFoundException({
+            statusCode: 404,
+            code: 'RESOURCE_NOT_FOUND',
+            message: `Page ${pageId} not found`,
+          });
+        }
+        canonicalPageId = doc.pageId || pageId;
       }
 
-      const canonicalPageId = doc.pageId || pageId;
       await this.pageRepo.removePageLabel(canonicalPageId, labelId);
       const labels = await this.pageRepo.findPageLabels(canonicalPageId);
       return { labels };

@@ -1,18 +1,15 @@
 /**
- * modules/pages/structure/services/project-symbols.helper.ts
+ * modules/pages/structure/services/symbols-extractor.ts
  * Project-wide LaTeX symbol extraction, outline generation, and compiler payload building helpers.
  */
 
 import { Logger } from '@nestjs/common';
-import {
-  FileTreeBuilder,
-  IStructureRepository,
-  LatexOutlineEntryDto,
-  LatexOutlineExtractor,
-  NodePathVo,
-  PageNodeEntity,
-  RootDocNotFoundError,
-} from '../domain';
+import { FileTreeBuilder } from '@/modules/pages/structure/domain/tree-builder';
+import type { StructureRepository } from '@/modules/pages/structure/structure.repository';
+import { LatexOutlineEntryDto, LatexOutlineExtractor } from '@/modules/pages/structure/domain/latex-outline.extractor';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
+import { RootDocNotFoundError } from '@/modules/pages/structure/domain/structure.errors';
 import {
   CompilationPayload,
   WorkspaceFile,
@@ -20,84 +17,26 @@ import {
 import { filterRecordsByPageScope } from '@/modules/pages/core/utils/page-scope';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { BibtexParser } from '@/modules/pages/citations/domain/bibtex.domain';
+import { parseBibtexEntries } from '@/modules/pages/core/utils/bibtex-parse';
+import type {
+  ProjectSymbolLabelDto,
+  ProjectSymbolCitationDto,
+  ProjectSymbolCommandDto,
+  ProjectSymbolEnvironmentDto,
+  ProjectSymbolPackageDto,
+  ProjectSymbolOutlineDto,
+  ProjectSymbolsResponseDto,
+} from '../dto/symbols.dto';
 
-export interface ProjectSymbolLabelDto {
-  key: string;
-  file: string;
-  line: number;
-  context?: string;
-}
-
-export interface ProjectSymbolCitationDto {
-  key: string;
-  type: string;
-  title?: string;
-  author?: string;
-  year?: string;
-  journal?: string;
-  booktitle?: string;
-  publisher?: string;
-  doi?: string;
-  url?: string;
-  abstract?: string;
-  volume?: string;
-  number?: string;
-  pages?: string;
-  file: string;
-  line: number;
-  raw?: string;
-}
-
-export interface ProjectSymbolCommandDto {
-  name: string;
-  argCount?: number;
-  hasDefault?: boolean;
-  defaultValue?: string;
-  expansion?: string;
-  file: string;
-  line: number;
-  signature: string;
-}
-
-export interface ProjectSymbolEnvironmentDto {
-  name: string;
-  argCount?: number;
-  file: string;
-  line: number;
-}
-
-export interface ProjectSymbolPackageDto {
-  name: string;
-  options?: string;
-  file: string;
-  line: number;
-}
-
-export interface ProjectSymbolOutlineDto {
-  title: string;
-  level: number;
-  levelName: string;
-  file: string;
-  line: number;
-  from: number;
-  children?: ProjectSymbolOutlineDto[];
-}
-
-export interface ProjectSymbolsResponseDto {
-  rootDocPath: string | null;
-  labels: ProjectSymbolLabelDto[];
-  citations: ProjectSymbolCitationDto[];
-  customCommands: ProjectSymbolCommandDto[];
-  customEnvironments: ProjectSymbolEnvironmentDto[];
-  packages: ProjectSymbolPackageDto[];
-  bibliographies: string[];
-  includedFiles: string[];
-  imageFiles: string[];
-  files: string[];
-  images: string[];
-  outline: ProjectSymbolOutlineDto[];
-}
+export type {
+  ProjectSymbolLabelDto,
+  ProjectSymbolCitationDto,
+  ProjectSymbolCommandDto,
+  ProjectSymbolEnvironmentDto,
+  ProjectSymbolPackageDto,
+  ProjectSymbolOutlineDto,
+  ProjectSymbolsResponseDto,
+};
 
 export interface CachedDocSymbols {
   readonly labels: ProjectSymbolLabelDto[];
@@ -111,7 +50,7 @@ export interface CachedDocSymbols {
 }
 
 export interface ProjectSymbolsContext {
-  readonly repository: IStructureRepository;
+  readonly repository: StructureRepository;
   readonly logger: Logger;
   readonly docstoreService?: DocstoreService;
   readonly filestoreService?: FilestoreService;
@@ -209,7 +148,6 @@ export async function buildCompilerPayloadHelper(
 export function extractSingleDocSymbols(
   filePath: string,
   lines: string[],
-  bibParser: BibtexParser,
 ): CachedDocSymbols {
   const lowerPath = filePath.toLowerCase();
   const docLabels: ProjectSymbolLabelDto[] = [];
@@ -234,27 +172,25 @@ export function extractSingleDocSymbols(
   if (lowerPath.endsWith('.bib')) {
     docBibliographies.push(filePath);
     const rawContent = lines.join('\n');
-    const parsedEntries = bibParser.parse(rawContent);
+    const parsedEntries = parseBibtexEntries(rawContent);
     for (const entry of parsedEntries) {
-      const json = entry.toJSON(filePath);
       docCitations.push({
-        key: json.key,
-        type: json.type,
-        title: json.title,
-        author: entry.authors.toDisplayString(),
-        year: json.year,
-        journal: json.journal,
-        booktitle: json.booktitle,
-        publisher: json.publisher,
-        doi: json.doi,
-        url: json.url,
-        abstract: json.abstract,
-        volume: json.volume,
-        number: json.number,
-        pages: json.pages,
+        key: entry.key,
+        type: entry.type,
+        title: entry.title,
+        author: entry.author,
+        year: entry.year,
+        journal: entry.journal,
+        booktitle: entry.booktitle,
+        publisher: entry.publisher,
+        doi: entry.doi,
+        url: entry.url,
+        abstract: entry.abstract,
+        volume: entry.volume,
+        number: entry.number,
+        pages: entry.pages,
         file: filePath,
         line: 1,
-        raw: entry.toBibtexString(),
       });
     }
     return {
@@ -483,10 +419,9 @@ export async function loadProjectDocsContextHelper(
       ? ctx.docstoreService.getAllDocs(projectId, pageId).catch(() => [])
       : Promise.resolve([]),
   ]);
-  const allDocs =
-    pageId && pageId !== projectId
-      ? filterRecordsByPageScope(rawDocs, pageId, projectId)
-      : rawDocs;
+  const allDocs = pageId
+    ? filterRecordsByPageScope(rawDocs, pageId, projectId)
+    : rawDocs;
 
   const docContentsMap = new Map<string, string[]>();
   const docHashByIdOrPath = new Map<string, string>();
@@ -588,7 +523,6 @@ export async function getProjectSymbolsHelper(
   const outline: ProjectSymbolOutlineDto[] = [];
 
   const IMAGE_EXT_RE = /\.(png|jpe?g|pdf|eps|svg|gif|bmp|webp|tikz)$/i;
-  const bibParser = new BibtexParser();
 
   // Collect all known file paths from structure tree
   for (const node of nodes) {
@@ -612,7 +546,7 @@ export async function getProjectSymbolsHelper(
     const cacheKey = `${docIdTag}:${docHash}`;
     let cached = docSymbolsCache.get(cacheKey);
     if (!cached) {
-      cached = extractSingleDocSymbols(filePath, lines, bibParser);
+      cached = extractSingleDocSymbols(filePath, lines);
       if (docSymbolsCache.size >= maxCacheEntries) {
         const oldestKey = docSymbolsCache.keys().next().value;
         if (oldestKey !== undefined) {

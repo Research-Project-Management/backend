@@ -7,7 +7,7 @@ import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import {
   assertExpectedVersionAndRev,
   executeDocstoreUpdateWithOcc,
-} from '@/modules/pages/docstore/services/doc-occ.helper';
+} from '@/modules/pages/core/utils/doc-occ.helper';
 import { PageScaffoldService } from '@/modules/pages/page/services/scaffold.service';
 import { PageService } from '@/modules/pages/page/services/page.service';
 
@@ -190,7 +190,13 @@ describe('Khối 2 / Tầng 1 — Docstore, OCC, Range Preservation & Deleted Sc
     it('fetches latest document on DocModifiedError race in executeDocstoreUpdateWithOcc', async () => {
       const updateDocMock = jest
         .fn()
-        .mockRejectedValue(new DocModifiedError(DOC_ID, 5));
+        .mockRejectedValue(
+          new DocModifiedError('Conflict', {
+            docId: DOC_ID,
+            rev: 5,
+            currentRev: 8,
+          }),
+        );
       const getDocMock = jest.fn().mockResolvedValue({
         id: DOC_ID,
         lines: ['latest line from concurrent save'],
@@ -373,6 +379,210 @@ describe('Khối 2 / Tầng 1 — Docstore, OCC, Range Preservation & Deleted Sc
         'remote authoritative line 1\nremote line 2',
       );
       expect(updateDocMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('5. Cold-Tier S3 Key Parity & Page Metadata/Catalog Decoupling', () => {
+    it('unifies archiveDoc and archiveAllDocs key format (${projectId}/${docId}-${rev}.json) and deletes orphan S3 objects on OCC race', async () => {
+      const candidateDoc = new TextDoc({
+        id: DOC_ID,
+        spaceId: SPACE_ID,
+        pageId: PAGE_ID,
+        path: 'main.tex',
+        lines: ['\\documentclass{article}'],
+        rev: 7,
+        version: 3,
+      });
+      const mockRepo = {
+        getAllDocs: jest.fn().mockResolvedValue([candidateDoc]),
+        markAsArchived: jest.fn().mockResolvedValue(false),
+      } as unknown as DocstoreRepository;
+      const sendStream = jest.fn().mockResolvedValue(undefined);
+      const deleteObject = jest.fn().mockResolvedValue(undefined);
+      const docstore = new DocstoreService(mockRepo, {
+        sendStream,
+        getObjectStream: jest.fn(),
+        getObjectMd5Hash: jest.fn(),
+        deleteObject,
+        isDurableStorageConfigured: () => true,
+      });
+
+      const archivedCount = await docstore.archiveAllDocs(SPACE_ID);
+      const expectedKey = `${SPACE_ID}/${DOC_ID}-7.json`;
+      expect(archivedCount).toBe(0);
+      expect(sendStream).toHaveBeenCalledWith(
+        expectedKey,
+        expect.anything(),
+        expect.objectContaining({ sourceMd5: expect.any(String) }),
+      );
+      expect(deleteObject).toHaveBeenCalledWith(expectedKey);
+    });
+
+    it('updates Page metadata (compiler, texlive, spellLang, rootDocId) without hydrating PageDoc.lines or bumping version/rev, and lists Pages as fast metadata-only catalog', async () => {
+      const now = new Date('2026-07-01T00:00:00Z');
+      const pageUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const pageDocFindMany = jest.fn();
+      const updateDocMock = jest.fn();
+      const getDocMock = jest.fn();
+      const flushDocsMock = jest.fn();
+
+      const mockPrisma = {
+        page: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: PAGE_ID,
+            spaceId: SPACE_ID,
+            title: 'Old Title',
+            description: 'Old Desc',
+            status: 'draft',
+            compiler: 'pdflatex',
+            texlive: '2025',
+            spellLang: 'en_US',
+            rootDocId: DOC_ID,
+            deletedAt: null,
+          }),
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: PAGE_ID,
+              spaceId: SPACE_ID,
+              title: 'Draft v1.2',
+              description: 'Updated',
+              status: 'published',
+              compiler: 'xelatex',
+              texlive: '2025',
+              spellLang: 'fr_FR',
+              rootDocId: DOC_ID,
+              thumbnail: null,
+              createdById: null,
+              labels: [
+                {
+                  label: { id: 'lbl-1', name: 'ICML', color: '#2563eb' },
+                },
+              ],
+              rootDoc: {
+                id: DOC_ID,
+                lastKnownPath: 'main.tex',
+                version: 4,
+                rev: 9,
+              },
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]),
+          updateMany: pageUpdateMany,
+        },
+        pageDoc: {
+          findFirst: jest.fn().mockResolvedValue({ id: DOC_ID }),
+          findMany: pageDocFindMany,
+        },
+        pageNode: {
+          updateMany: jest.fn(),
+        },
+        pageLabel: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+      } as unknown as PrismaService;
+
+      const service = new PageService(
+        mockPrisma,
+        {
+          updateDoc: updateDocMock,
+          getDoc: getDocMock,
+        } as unknown as DocstoreService,
+        {} as PageScaffoldService,
+        undefined,
+        {
+          applyExternalText: jest.fn(),
+          flushDocs: flushDocsMock,
+        } as never,
+      );
+
+      const metaRes = await service.updatePageMetadata(
+        PAGE_ID,
+        {
+          title: 'Draft v1.2',
+          compiler: 'xelatex',
+          texlive: '2025',
+          spellLang: 'fr_FR',
+          rootDocId: DOC_ID,
+        },
+        SPACE_ID,
+      );
+      expect(metaRes.page.compiler).toBe('xelatex');
+      expect(metaRes.page.spellLang).toBe('fr_FR');
+      expect(updateDocMock).not.toHaveBeenCalled();
+      expect(getDocMock).not.toHaveBeenCalled();
+      expect(flushDocsMock).not.toHaveBeenCalled();
+
+      const listRes = await service.getProjectPages(SPACE_ID);
+      expect(listRes.pages).toHaveLength(1);
+      expect(listRes.pages[0].title).toBe('Draft v1.2');
+      expect(listRes.pages[0].labels).toHaveLength(1);
+      expect(flushDocsMock).not.toHaveBeenCalled();
+      expect(pageDocFindMany).not.toHaveBeenCalled();
+      expect(getDocMock).not.toHaveBeenCalled();
+
+      // removePageLabel validates Page existence via prisma.page.findFirst even when rootDocId !== pageId
+      await expect(
+        service.removePageLabel(SPACE_ID, PAGE_ID, 'lbl-1'),
+      ).resolves.toEqual({ labels: [] });
+    });
+
+    it('wraps PageScaffoldService.createProjectPage in $transaction, persists pageLabel.createMany, and does not mutate project.settings.manuscript', async () => {
+      const LABEL_ID = '99999999-9999-4999-8999-999999999999';
+      const projectUpdate = jest.fn();
+      const pageLabelCreateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const pageCreate = jest.fn().mockResolvedValue({});
+      const pageUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const pageNodeCreate = jest.fn().mockResolvedValue({ id: 'node-1' });
+      const createDoc = jest.fn().mockImplementation(async (_spaceId, dto) => ({
+        _id: dto.id,
+        id: dto.id,
+        txUsed: Boolean(dto.tx),
+      }));
+
+      const txClient = {
+        page: { create: pageCreate, updateMany: pageUpdateMany },
+        pageNode: { create: pageNodeCreate },
+        pageLabel: { createMany: pageLabelCreateMany },
+      };
+      const mockPrisma = {
+        project: {
+          findUnique: jest.fn().mockResolvedValue({ name: 'Quantum Lab' }),
+          update: projectUpdate,
+        },
+        spaceLabel: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: LABEL_ID, name: 'NeurIPS', color: '#10b981' },
+          ]),
+        },
+        page: { create: pageCreate },
+        $transaction: jest.fn(async (cb: (tx: typeof txClient) => unknown) =>
+          cb(txClient),
+        ),
+      } as unknown as PrismaService;
+
+      const scaffold = new PageScaffoldService(
+        mockPrisma,
+        { createDoc } as unknown as DocstoreService,
+      );
+
+      const created = await scaffold.createProjectPage(
+        SPACE_ID,
+        { title: 'Paper', labelIds: [LABEL_ID] },
+        null,
+      );
+
+      expect(projectUpdate).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(createDoc).toHaveBeenCalledWith(
+        SPACE_ID,
+        expect.objectContaining({ tx: txClient }),
+      );
+      expect(pageLabelCreateMany).toHaveBeenCalledWith({
+        data: [{ pageId: created.page.id, labelId: LABEL_ID }],
+        skipDuplicates: true,
+      });
     });
   });
 });

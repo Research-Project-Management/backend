@@ -12,6 +12,8 @@ import { StickyModule } from './sticky/sticky.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { OverviewModule } from './overview/overview.module';
 import { YourWorkModule } from './your-work/your-work.module';
+import { ActivityModule } from './activity/activity.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { YourWorkModule } from './your-work/your-work.module';
     AnalyticsModule,
     OverviewModule,
     YourWorkModule,
+    ActivityModule,
+    ChatModule,
   ],
   exports: [
     AccessModule,
@@ -43,6 +47,8 @@ import { YourWorkModule } from './your-work/your-work.module';
     AnalyticsModule,
     OverviewModule,
     YourWorkModule,
+    ActivityModule,
+    ChatModule,
   ],
 })
 export class ProjectModule {}

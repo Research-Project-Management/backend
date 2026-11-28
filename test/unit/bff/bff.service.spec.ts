@@ -6,8 +6,8 @@ import { BffService } from '@/modules/bff/bff.service';
 import type { CoreService } from '@/modules/project/core/core.service';
 import type { OverviewService } from '@/modules/project/overview/overview.service';
 import type { YourWorkService } from '@/modules/project/your-work/your-work.service';
-import type { ChatService } from '@/modules/chat/services/chat.service';
-import type { ProjectChannelService } from '@/modules/chat/services/project-channel.service';
+import type { ChatService } from '@/modules/project/chat/services/chat.service';
+import type { ProjectChannelService } from '@/modules/project/chat/services/project-channel.service';
 import type { EditorBootstrapService } from '@/modules/pages/bootstrap/editor-bootstrap.service';
 
 describe('BffService', () => {

@@ -19,10 +19,10 @@ import {
   resolveSpaceRootDocIds,
   type PageScopeDbClient,
 } from '../../core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/structure/domain';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { hydratePageDocLines } from '@/modules/pages/docstore/services/doc-occ.helper';
+import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
 import type { PageLifecycleContext } from './content.service';
 import type { PageFilesTransferContext } from './file.service';
 
@@ -96,6 +96,54 @@ export async function deletePageHelper(
         const deletedFileIds = (activeFiles || []).map((f) => f.id);
 
         const deletedAt = new Date();
+        // Sync lastKnownPath from active PageNodes onto PageDoc/PageFile and preserve
+        // page_nodes rows (including empty FOLDERs) scoped under pageRow.id so restoring
+        // the Page from Trash restores its entire folder hierarchy without loss.
+        const pageNodes = ctx.prisma.pageNode?.findMany
+          ? await Promise.resolve(
+              ctx.prisma.pageNode.findMany({
+                where: {
+                  pageId: pageRow.id,
+                  ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
+                },
+                select: {
+                  id: true,
+                  path: true,
+                  docId: true,
+                  fileId: true,
+                },
+              }),
+            ).catch(() => [])
+          : [];
+
+        const pathSyncOps: Promise<unknown>[] = [];
+        for (const n of pageNodes || []) {
+          const relPath = NodePathVo.toRelative(n.path || '');
+          if (!relPath) continue;
+          if (n.docId && ctx.prisma.pageDoc?.updateMany) {
+            pathSyncOps.push(
+              Promise.resolve(
+                ctx.prisma.pageDoc.updateMany({
+                  where: { id: n.docId, spaceId: aggregateSpaceId },
+                  data: { lastKnownPath: relPath },
+                }),
+              ).catch(() => null),
+            );
+          } else if (n.fileId && ctx.prisma.pageFile?.updateMany) {
+            pathSyncOps.push(
+              Promise.resolve(
+                ctx.prisma.pageFile.updateMany({
+                  where: { id: n.fileId, spaceId: aggregateSpaceId },
+                  data: { lastKnownPath: relPath },
+                }),
+              ).catch(() => null),
+            );
+          }
+        }
+        if (pathSyncOps.length > 0) {
+          await Promise.all(pathSyncOps);
+        }
+
         await Promise.all([
           ctx.prisma.page.updateMany({
             where: {
@@ -104,14 +152,6 @@ export async function deletePageHelper(
             },
             data: { deletedAt },
           }),
-          ctx.prisma.pageNode
-            .deleteMany({
-              where: {
-                pageId: pageRow.id,
-                ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
-              },
-            })
-            .catch(() => null),
           ctx.prisma.pageDoc
             .updateMany({
               where: {
@@ -170,10 +210,26 @@ export async function deletePageHelper(
         );
         const deletedRootDoc = rootDocIds.has(doc.id);
 
+        const existingDocNode = ctx.prisma.pageNode?.findFirst
+          ? await Promise.resolve(
+              ctx.prisma.pageNode.findFirst({
+                where: {
+                  spaceId: docProjectId,
+                  OR: [{ docId: doc.id }, { id: pageId }],
+                },
+                select: { path: true },
+              }),
+            ).catch(() => null)
+          : null;
+        const preservedRelPath = existingDocNode?.path
+          ? NodePathVo.toRelative(existingDocNode.path)
+          : undefined;
+
         await Promise.all([
           ctx.docstoreService.patchDoc(docProjectId, doc.id, {
             deleted: true,
             deletedAt: new Date().toISOString(),
+            ...(preservedRelPath ? { path: preservedRelPath } : {}),
           }),
           ctx.prisma.pageNode
             .deleteMany({
@@ -618,26 +674,12 @@ export async function restoreDeletedDocOrFile(
   if (file) {
     const fileProjectId = getRecordSpaceId(file);
     const filePageId = file.pageId ?? null;
-    const wasDeleted = isRecordDeleted(file);
     await prisma.pageFile.update({
       where: { id: pageId },
       data: { deletedAt: null },
     });
-
-    if (wasDeleted && filesPort) {
-      const fileBlobId = (file as { blobId?: string | null }).blobId;
-      if (fileBlobId) {
-        await Promise.resolve(filesPort.acquireBlob(fileBlobId)).catch(
-          () => undefined,
-        );
-      }
-      const restoredSize = Number(file.sizeBytes ?? 0);
-      if (restoredSize > 0) {
-        await Promise.resolve(
-          filesPort.reserveQuota(fileProjectId, BigInt(restoredSize)),
-        ).catch(() => undefined);
-      }
-    }
+    // Note: Soft-delete keeps FileBlob CAS ref-counts and SpaceQuota intact while in Trash,
+    // so restoring a soft-deleted PageFile must NOT re-acquire blob or re-reserve quota.
 
     const rawFilePath =
       file.lastKnownPath || (file as { name?: string }).name || 'restored.bin';
@@ -765,7 +807,7 @@ export async function purgePagePermanentlyHelper(
     }),
     ctx.prisma.pageDoc.findMany({
       where: { pageId: pageRow.id, spaceId },
-      select: { id: true },
+      select: { id: true, inStorage: true, storageKey: true },
     }),
   ]);
 
@@ -789,11 +831,12 @@ export async function purgePagePermanentlyHelper(
     await tx.page.delete({ where: { id: pageRow.id } });
   });
 
-  // Reclaim CAS blob ref-counts and storage quota only on permanent purge
+  // Reclaim CAS blob ref-counts, cold-tier S3 doc objects, and storage quota only on permanent purge
   ctx.eventEmitter?.emit('pages.page.deleted', {
     projectId: spaceId,
     pageId: pageRow.id,
     deletedFiles: pageFiles,
+    deletedDocs: pageDocs,
   });
 
   return { success: true, purgedPageId: pageRow.id };

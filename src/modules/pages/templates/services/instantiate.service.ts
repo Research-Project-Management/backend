@@ -58,56 +58,79 @@ export class InstantiateService {
       customTitle: dto?.title,
     });
 
-    await this.prisma.$transaction(async (tx) => {
-      if (isPersonal && tx.space?.upsert) {
-        await tx.space.upsert({
-          where: { id: spaceId },
-          create: { id: spaceId, type: 'personal', ownerUserId: userId },
-          update: {},
-        });
-      }
+    const totalBinaryBytes = plan.filesToCreate.reduce(
+      (sum, f) => sum + BigInt(Math.max(0, Number(f.sizeBytes ?? 0))),
+      0n,
+    );
 
-      await tx.page.create({
-        data: {
-          id: plan.pageId,
-          spaceId,
-          rootDocId: null,
-          title: plan.title,
-          description: manifest.description,
-          status: 'draft',
-          compiler: plan.compiler,
-          texlive: plan.texlive,
-          spellLang: 'en_US',
-          createdById: isUuid(userId) ? userId : null,
-          settings: {
-            fromTemplateId: plan.templateId,
-          } as Prisma.InputJsonValue,
-        },
-      });
+    let quotaReserved = false;
+    if (
+      totalBinaryBytes > 0n &&
+      typeof this.filesPort?.reserveQuota === 'function'
+    ) {
+      await this.filesPort.reserveQuota(spaceId, totalBinaryBytes);
+      quotaReserved = true;
+    }
 
-      if (plan.docsToCreate.length > 0) {
-        await tx.pageDoc.createMany({ data: plan.docsToCreate });
-      }
-
-      await tx.page.update({
-        where: { id: plan.pageId },
-        data: { rootDocId: plan.rootDocId },
-      });
-
-      if (plan.filesToCreate.length > 0) {
-        await tx.pageFile.createMany({ data: plan.filesToCreate });
-      }
-
-      const sortedDepths = Array.from(plan.nodeBatchesByDepth.keys()).sort(
-        (a, b) => a - b,
-      );
-      for (const depth of sortedDepths) {
-        const batch = plan.nodeBatchesByDepth.get(depth);
-        if (batch && batch.length > 0) {
-          await tx.pageNode.createMany({ data: batch });
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (isPersonal && tx.space?.upsert) {
+          await tx.space.upsert({
+            where: { id: spaceId },
+            create: { id: spaceId, type: 'personal', ownerUserId: userId },
+            update: {},
+          });
         }
+
+        await tx.page.create({
+          data: {
+            id: plan.pageId,
+            spaceId,
+            rootDocId: null,
+            title: plan.title,
+            description: manifest.description,
+            status: 'draft',
+            compiler: plan.compiler,
+            texlive: plan.texlive,
+            spellLang: 'en_US',
+            createdById: isUuid(userId) ? userId : null,
+            settings: {
+              fromTemplateId: plan.templateId,
+            } as Prisma.InputJsonValue,
+          },
+        });
+
+        if (plan.docsToCreate.length > 0) {
+          await tx.pageDoc.createMany({ data: plan.docsToCreate });
+        }
+
+        await tx.page.update({
+          where: { id: plan.pageId },
+          data: { rootDocId: plan.rootDocId },
+        });
+
+        if (plan.filesToCreate.length > 0) {
+          await tx.pageFile.createMany({ data: plan.filesToCreate });
+        }
+
+        const sortedDepths = Array.from(plan.nodeBatchesByDepth.keys()).sort(
+          (a, b) => a - b,
+        );
+        for (const depth of sortedDepths) {
+          const batch = plan.nodeBatchesByDepth.get(depth);
+          if (batch && batch.length > 0) {
+            await tx.pageNode.createMany({ data: batch });
+          }
+        }
+      });
+    } catch (err) {
+      if (quotaReserved && typeof this.filesPort?.releaseQuota === 'function') {
+        await Promise.resolve(
+          this.filesPort.releaseQuota(spaceId, totalBinaryBytes),
+        ).catch(() => undefined);
       }
-    });
+      throw err;
+    }
 
     if (this.filesPort && plan.blobIncrements.size > 0) {
       const acquireTasks: Array<Promise<unknown>> = [];

@@ -8,6 +8,7 @@ import { ClsiWordCountDto } from '../dto/compile.dto';
 import { WordCountStats } from '../domain/ports';
 import { TexWordCounter } from '../domain/word-count.engine';
 import { RemoteClsiClientAdapter } from '../adapters/remote-clsi.adapter';
+import { TexcountCliAdapter } from '../adapters/texcount.adapter';
 import { CompileSourceService } from './compile-source.service';
 
 @Injectable()
@@ -17,6 +18,7 @@ export class WordCountService {
   constructor(
     private readonly compileSource: CompileSourceService,
     @Optional() private readonly remoteClient?: RemoteClsiClientAdapter,
+    @Optional() private readonly texcountCli?: TexcountCliAdapter,
   ) {}
 
   public async count(
@@ -111,10 +113,23 @@ export class WordCountService {
         }
       }
 
-      const stats = this.wordCounter.countProject(stringFiles, {
-        rootFile,
-        includeBib: dto.includeBib,
-      });
+      const cliStats =
+        this.texcountCli && Object.keys(stringFiles).length > 0
+          ? await this.texcountCli
+              .countFiles({
+                files: stringFiles,
+                rootFile,
+                includeBib: dto.includeBib,
+              })
+              .catch(() => null)
+          : null;
+
+      const stats =
+        cliStats ??
+        this.wordCounter.countProject(stringFiles, {
+          rootFile,
+          includeBib: dto.includeBib,
+        });
 
       if (dto.source && dto.source.trim().length > 0) {
         const singleStats = this.wordCounter.count(

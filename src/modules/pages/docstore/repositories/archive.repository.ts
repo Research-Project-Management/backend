@@ -10,14 +10,14 @@ import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { IBinaryStoragePort } from '../../filestore/filestore.types';
+import { IBinaryStoragePort } from '@/modules/pages/filestore/domain/filestore.ports';
+import { IDocPersistor } from '@/modules/pages/docstore/domain/doc.ports';
 import {
-  IDocPersistor,
   Md5MismatchError,
   ArchiveObjectNotFoundError,
   ArchiveWriteFailedError,
-  computeContentMd5,
-} from '../domain';
+} from '@/modules/pages/docstore/domain/doc.errors';
+import { computeContentMd5 } from '@/modules/pages/docstore/domain/doc-hasher';
 
 /**
  * Pure in-memory archive repository adapter for fast, deterministic unit tests.
@@ -75,7 +75,8 @@ export class InMemoryDocArchiveRepository implements IDocPersistor {
 }
 
 /**
- * Cold Tier document archive repository backed by disk/S3 object storage with in-memory hot cache.
+ * Cold Tier document archive repository delegating to IBinaryStoragePort (S3 or local disk)
+ * with stream-level MD5 validation and fallback to local disk + bounded in-memory LRU cache.
  */
 @Injectable()
 export class DocArchiveRepository implements IDocPersistor {
@@ -83,21 +84,31 @@ export class DocArchiveRepository implements IDocPersistor {
   private readonly logger = new Logger(DocArchiveRepository.name);
   private readonly bucket: string;
   private readonly storageDir: string;
-  private readonly durableConfigured: boolean;
+  private readonly diskDurableConfigured: boolean;
   private readonly inMemoryStore = new Map<
     string,
     { buffer: Buffer; md5: string }
   >();
 
-  constructor(@Optional() private readonly configService?: ConfigService) {
-    const configuredBucket = this.configService?.get<string>('S3_BUCKET_NAME');
+  constructor(
+    @Optional() private readonly configService?: ConfigService,
+    @Optional()
+    @Inject(IBinaryStoragePort)
+    private readonly binaryStorage?: IBinaryStoragePort,
+  ) {
+    const configuredBucket =
+      this.configService?.get<string>('S3_BUCKET_NAME') ||
+      this.configService?.get<string>('DOCSTORE_ARCHIVE_BUCKET') ||
+      this.configService?.get<string>('AWS_S3_BUCKET') ||
+      this.configService?.get<string>('S3_BUCKET') ||
+      this.configService?.get<string>('R2_BUCKET_NAME');
     const configuredDurable = this.configService?.get<string>(
       'DOCSTORE_ARCHIVE_DURABLE',
     );
     const configuredDir = this.configService?.get<string>(
       'DOCSTORE_ARCHIVE_DIR',
     );
-    this.durableConfigured = Boolean(
+    this.diskDurableConfigured = Boolean(
       configuredBucket || configuredDurable || configuredDir,
     );
     this.bucket = configuredBucket || 'flux-docstore-archive';
@@ -113,7 +124,13 @@ export class DocArchiveRepository implements IDocPersistor {
   }
 
   public isDurableStorageConfigured(): boolean {
-    return this.durableConfigured;
+    if (
+      this.binaryStorage &&
+      this.binaryStorage.constructor?.name !== 'LocalDiskBinaryStorageAdapter'
+    ) {
+      return true;
+    }
+    return this.diskDurableConfigured;
   }
 
   private setInMemoryItem(
@@ -146,22 +163,11 @@ export class DocArchiveRepository implements IDocPersistor {
     return Buffer.concat(chunks);
   }
 
-  public async sendStream(
+  private async persistToDiskFallback(
     key: string,
-    stream: Readable,
-    options?: { sourceMd5?: string },
+    buffer: Buffer,
+    actualMd5: string,
   ): Promise<void> {
-    const buffer = await this.streamToBuffer(stream);
-    const actualMd5 = computeContentMd5(buffer);
-
-    if (options?.sourceMd5 && options.sourceMd5 !== actualMd5) {
-      throw new Md5MismatchError('MD5 mismatch when storing doc archive', {
-        key,
-        sourceMd5: options.sourceMd5,
-        actualMd5,
-      });
-    }
-
     this.setInMemoryItem(key, { buffer, md5: actualMd5 });
     try {
       const filePath = this.resolveDiskPath(key);
@@ -170,18 +176,13 @@ export class DocArchiveRepository implements IDocPersistor {
     } catch (err) {
       this.logger.warn(`Could not persist archive key ${key} to disk: ${err}`);
     }
-
-    this.logger.debug(
-      `Stored cold-tier archive for key ${key} (${buffer.length} bytes, md5: ${actualMd5})`,
-    );
   }
 
-  private async loadOrGetItem(
+  private async loadFromDiskFallback(
     key: string,
   ): Promise<{ buffer: Buffer; md5: string }> {
     const cached = this.inMemoryStore.get(key);
     if (cached) {
-      // Refresh LRU order
       this.inMemoryStore.delete(key);
       this.inMemoryStore.set(key, cached);
       return cached;
@@ -197,69 +198,6 @@ export class DocArchiveRepository implements IDocPersistor {
     } catch {
       throw new ArchiveObjectNotFoundError(key);
     }
-  }
-
-  public async getObjectStream(key: string): Promise<Readable> {
-    const item = await this.loadOrGetItem(key);
-    return Readable.from(item.buffer);
-  }
-
-  public async getObjectMd5Hash(key: string): Promise<string> {
-    const item = await this.loadOrGetItem(key);
-    return item.md5;
-  }
-
-  public async deleteObject(key: string): Promise<void> {
-    this.inMemoryStore.delete(key);
-    const filePath = this.resolveDiskPath(key);
-    await fs.promises.unlink(filePath).catch(() => {});
-  }
-}
-
-/**
- * Cold Tier document archive adapter delegating to IBinaryStoragePort (S3 or local disk)
- * with stream-level MD5 validation and fallback to local disk DocArchiveRepository.
- */
-@Injectable()
-export class StoragePortDocArchiveAdapter implements IDocPersistor {
-  private readonly logger = new Logger(StoragePortDocArchiveAdapter.name);
-  private readonly bucket: string;
-  private readonly diskFallback: DocArchiveRepository;
-
-  constructor(
-    @Optional()
-    @Inject(IBinaryStoragePort)
-    private readonly binaryStorage?: IBinaryStoragePort,
-    @Optional() private readonly configService?: ConfigService,
-    @Optional() private readonly injectedDiskFallback?: DocArchiveRepository,
-  ) {
-    this.bucket =
-      this.configService?.get<string>('S3_BUCKET_NAME') ||
-      this.configService?.get<string>('DOCSTORE_ARCHIVE_BUCKET') ||
-      this.configService?.get<string>('AWS_S3_BUCKET') ||
-      this.configService?.get<string>('S3_BUCKET') ||
-      this.configService?.get<string>('R2_BUCKET_NAME') ||
-      'flux-docstore-archive';
-    this.diskFallback =
-      this.injectedDiskFallback ?? new DocArchiveRepository(this.configService);
-  }
-
-  public isDurableStorageConfigured(): boolean {
-    if (
-      this.binaryStorage &&
-      this.binaryStorage.constructor?.name !== 'LocalDiskBinaryStorageAdapter'
-    ) {
-      return true;
-    }
-    return this.diskFallback.isDurableStorageConfigured();
-  }
-
-  private async streamToBuffer(stream: Readable): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
   }
 
   public async sendStream(
@@ -295,10 +233,7 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
         return;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (
-          this.isDurableStorageConfigured() &&
-          !this.diskFallback.isDurableStorageConfigured()
-        ) {
+        if (this.isDurableStorageConfigured() && !this.diskDurableConfigured) {
           throw new ArchiveWriteFailedError(key, msg);
         }
         this.logger.warn(
@@ -307,9 +242,7 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
       }
     }
 
-    await this.diskFallback.sendStream(key, Readable.from(buffer), {
-      sourceMd5: actualMd5,
-    });
+    await this.persistToDiskFallback(key, buffer, actualMd5);
   }
 
   public async getObjectStream(key: string): Promise<Readable> {
@@ -330,7 +263,8 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
       }
     }
 
-    return await this.diskFallback.getObjectStream(key);
+    const item = await this.loadFromDiskFallback(key);
+    return Readable.from(item.buffer);
   }
 
   public async getObjectMd5Hash(key: string): Promise<string> {
@@ -363,7 +297,8 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
       }
     }
 
-    return await this.diskFallback.getObjectMd5Hash(key);
+    const item = await this.loadFromDiskFallback(key);
+    return item.md5;
   }
 
   public async deleteObject(key: string): Promise<void> {
@@ -378,8 +313,23 @@ export class StoragePortDocArchiveAdapter implements IDocPersistor {
       }
     }
 
-    await this.diskFallback.deleteObject(key);
+    this.inMemoryStore.delete(key);
+    const filePath = this.resolveDiskPath(key);
+    await fs.promises.unlink(filePath).catch(() => {});
   }
 }
 
-export { IDocPersistor } from '../domain';
+/** @deprecated Collapsed into DocArchiveRepository; retained for external DI compatibility. */
+@Injectable()
+export class StoragePortDocArchiveAdapter extends DocArchiveRepository {
+  constructor(
+    @Optional()
+    @Inject(IBinaryStoragePort)
+    binaryStorage?: IBinaryStoragePort,
+    @Optional() configService?: ConfigService,
+  ) {
+    super(configService, binaryStorage);
+  }
+}
+
+export { IDocPersistor } from '@/modules/pages/docstore/domain/doc.ports';

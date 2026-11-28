@@ -1,17 +1,9 @@
 /**
- * modules/manuscripts/docstore/domain/doc-hasher.ts
+ * modules/pages/docstore/domain/doc-hasher.ts
  * Pure in-process cryptographic hashing functions and contracts for document lines and buffers.
  */
 
 import * as crypto from 'crypto';
-
-/**
- * Contract for content hashing and fingerprinting across docstore and CLSI.
- */
-export abstract class IDocHasher {
-  abstract computeHash(lines: string[]): string;
-  abstract computeMd5(content: string | Buffer): string;
-}
 
 /**
  * Computes a SHA-256 hex digest over a document's lines array joined by LF (`\n`).
@@ -28,9 +20,13 @@ export function computeContentMd5(content: string | Buffer): string {
   return crypto.createHash('md5').update(content).digest('hex');
 }
 
-/**
- * Adapter delegating to pure domain functions in domain/doc-hasher.
- */
+/** @deprecated Call pure computeDocSha256 / computeContentMd5 functions directly. */
+export abstract class IDocHasher {
+  abstract computeHash(lines: string[]): string;
+  abstract computeMd5(content: string | Buffer): string;
+}
+
+/** @deprecated Call pure computeDocSha256 / computeContentMd5 functions directly. */
 export class DocHasherAdapter implements IDocHasher {
   public computeHash(lines: string[]): string {
     return computeDocSha256(lines);

@@ -10,6 +10,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
 } from 'class-validator';
 
@@ -130,4 +131,35 @@ export class UpdatePageMetadataDto {
   @IsOptional()
   @IsIn(['draft', 'published', 'archived'])
   status?: 'draft' | 'published' | 'archived';
+
+  @ApiPropertyOptional({
+    enum: ['pdflatex', 'xelatex', 'lualatex', 'latex'],
+    description: 'LaTeX compiler engine for this page',
+  })
+  @IsOptional()
+  @IsIn(['pdflatex', 'xelatex', 'lualatex', 'latex'])
+  compiler?: string;
+
+  @ApiPropertyOptional({
+    description: 'TeX Live distribution version (e.g. 2025)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  texlive?: string;
+
+  @ApiPropertyOptional({
+    description: 'Spell check language code (e.g. en_US)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  spellLang?: string;
+
+  @ApiPropertyOptional({
+    description: 'Root compilation document UUID (PageDoc.id)',
+  })
+  @IsOptional()
+  @IsUUID()
+  rootDocId?: string;
 }

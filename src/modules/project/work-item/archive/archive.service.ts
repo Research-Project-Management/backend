@@ -15,7 +15,7 @@ import {
   invalidateWorkItemCache,
 } from '@/modules/project/work-item/common/constants/redis.constant';
 import { normalizeStringIds } from '@/modules/project/work-item/common/types/shared.types';
-import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { DomainActivityEvent } from '@/modules/project/activity/events/activity.events';
 
 @Injectable()
 export class ArchiveService {

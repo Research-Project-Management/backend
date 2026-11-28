@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { ProjectChannelService } from '@/modules/chat/services/project-channel.service';
+import { ProjectChannelService } from '@/modules/project/chat/services/project-channel.service';
 import { ConversationType, ConversationMemberRole } from '@prisma/client';
 
 describe('ProjectChannelService Unit Tests', () => {

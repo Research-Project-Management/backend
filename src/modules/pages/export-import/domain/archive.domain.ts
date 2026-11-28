@@ -46,6 +46,7 @@ export class ArchiveManifest {
 }
 
 export interface ImportSummaryProps {
+  pageId?: string;
   projectId: string;
   totalEntries: number;
   totalDocs: number;
@@ -53,36 +54,60 @@ export interface ImportSummaryProps {
   totalFolders: number;
   rootDocId: string | null;
   rootDocPath: string | null;
+  title?: string;
+  skippedFiles?: string[];
+}
+
+export interface ImportSummaryJson {
+  pageId: string;
+  projectId: string;
+  rootDocId: string;
+  rootDocPath: string | null;
+  title: string;
+  totalEntries: number;
+  totalDocs: number;
+  totalFiles: number;
+  totalFolders: number;
+  skippedFiles: string[];
 }
 
 export class ImportSummaryVo {
+  public readonly pageId: string;
   public readonly projectId: string;
   public readonly totalEntries: number;
   public readonly totalDocs: number;
   public readonly totalFiles: number;
   public readonly totalFolders: number;
-  public readonly rootDocId: string | null;
+  public readonly rootDocId: string;
   public readonly rootDocPath: string | null;
+  public readonly title: string;
+  public readonly skippedFiles: string[];
 
   constructor(props: ImportSummaryProps) {
     this.projectId = props.projectId;
+    this.pageId = props.pageId || props.rootDocId || props.projectId;
     this.totalEntries = props.totalEntries;
     this.totalDocs = props.totalDocs;
     this.totalFiles = props.totalFiles;
     this.totalFolders = props.totalFolders;
-    this.rootDocId = props.rootDocId;
+    this.rootDocId = props.rootDocId ?? this.pageId;
     this.rootDocPath = props.rootDocPath;
+    this.title = props.title || 'Untitled';
+    this.skippedFiles = props.skippedFiles ? [...props.skippedFiles] : [];
   }
 
-  public toJSON(): ImportSummaryProps {
+  public toJSON(): ImportSummaryJson {
     return {
+      pageId: this.pageId,
       projectId: this.projectId,
+      rootDocId: this.rootDocId,
+      rootDocPath: this.rootDocPath,
+      title: this.title,
       totalEntries: this.totalEntries,
       totalDocs: this.totalDocs,
       totalFiles: this.totalFiles,
       totalFolders: this.totalFolders,
-      rootDocId: this.rootDocId,
-      rootDocPath: this.rootDocPath,
+      skippedFiles: [...this.skippedFiles],
     };
   }
 }

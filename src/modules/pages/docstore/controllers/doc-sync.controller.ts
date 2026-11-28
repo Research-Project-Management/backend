@@ -39,7 +39,7 @@ import { PageService } from '@/modules/pages/page/services/page.service';
 import { DocstoreService } from '../docstore.service';
 import { ScopeRepository } from '../repositories/scope.repository';
 
-@ApiTags('Manuscripts - Pages History & Export')
+@ApiTags('Pages - History & Export')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -54,14 +54,9 @@ export class DocSyncController {
     @Optional() private readonly eventEmitter?: EventEmitter2,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    liveCollabOrLegacyRef?: LiveCollaborationPort | unknown,
+    liveCollab?: LiveCollaborationPort,
   ) {
-    this.liveCollab =
-      liveCollabOrLegacyRef &&
-      typeof (liveCollabOrLegacyRef as LiveCollaborationPort)
-        .applyExternalText === 'function'
-        ? (liveCollabOrLegacyRef as LiveCollaborationPort)
-        : NOOP_LIVE_COLLABORATION;
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
   @Post([

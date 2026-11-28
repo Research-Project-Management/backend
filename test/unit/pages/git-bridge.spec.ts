@@ -478,6 +478,265 @@ describe('GitBridge BCNF Schema + GoF Deep Module Suite', () => {
         totalBytes: 19,
       });
     });
+
+    it('deletes files without NodeNotFoundError and updates binary files with syncStructureNode: false (no duplicate PageNode)', async () => {
+      const gitRepo = new RepoAdapter();
+      const v1Png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01]);
+      const v2Png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x02, 0x03]);
+
+      const { headOid: baseSha } = await gitRepo.commitTree(
+        REPO_ID,
+        [
+          {
+            path: RepoPathVo.fromRepo('main.tex'),
+            content: Buffer.from('\\documentclass{article}\n'),
+          },
+          {
+            path: RepoPathVo.fromRepo('obsolete.tex'),
+            content: Buffer.from('remove me\n'),
+          },
+          {
+            path: RepoPathVo.fromRepo('figs/fig.png'),
+            content: v1Png,
+          },
+        ],
+        'Initial tree',
+      );
+
+      const gitdir = gitRepo.bareDir(REPO_ID);
+      const mainOid = await isoGit.writeBlob({
+        fs,
+        gitdir,
+        blob: Buffer.from('\\documentclass{article}\n'),
+      });
+      const v2PngOid = await isoGit.writeBlob({
+        fs,
+        gitdir,
+        blob: v2Png,
+      });
+      const figsTreeOid = await isoGit.writeTree({
+        fs,
+        gitdir,
+        tree: [{ mode: '100644', path: 'fig.png', oid: v2PngOid, type: 'blob' }],
+      });
+      const nextRootOid = await isoGit.writeTree({
+        fs,
+        gitdir,
+        tree: [
+          { mode: '040000', path: 'figs', oid: figsTreeOid, type: 'tree' },
+          { mode: '100644', path: 'main.tex', oid: mainOid, type: 'blob' },
+        ],
+      });
+      const who = {
+        name: 'Alice',
+        email: 'alice@uni.edu',
+        timestamp: 1700000200,
+        timezoneOffset: 0,
+      };
+      const nextSha = await isoGit.writeCommit({
+        fs,
+        gitdir,
+        commit: {
+          message: 'Delete obsolete.tex and update figs/fig.png\n',
+          tree: nextRootOid,
+          parent: [baseSha],
+          author: who,
+          committer: who,
+        },
+      });
+      await gitRepo.setMainRef(REPO_ID, nextSha);
+
+      const nodesByPath = new Map<
+        string,
+        {
+          id: string;
+          name: string;
+          path: string;
+          parentId: string | null;
+          type: 'DOC' | 'FILE' | 'FOLDER';
+          docId?: string | null;
+          fileId?: string | null;
+          isRootDoc?: boolean;
+        }
+      >([
+        [
+          '/figs',
+          {
+            id: 'dir-figs',
+            name: 'figs',
+            path: '/figs',
+            parentId: null,
+            type: 'FOLDER',
+          },
+        ],
+        [
+          '/main.tex',
+          {
+            id: 'node-main',
+            name: 'main.tex',
+            path: '/main.tex',
+            parentId: null,
+            type: 'DOC',
+            docId: 'doc-main',
+            isRootDoc: true,
+          },
+        ],
+        [
+          '/obsolete.tex',
+          {
+            id: 'node-obsolete',
+            name: 'obsolete.tex',
+            path: '/obsolete.tex',
+            parentId: null,
+            type: 'DOC',
+            docId: 'doc-obsolete',
+          },
+        ],
+        [
+          '/figs/fig.png',
+          {
+            id: 'node-fig-v1',
+            name: 'fig.png',
+            path: '/figs/fig.png',
+            parentId: 'dir-figs',
+            type: 'FILE',
+            fileId: 'file-fig-v1',
+          },
+        ],
+      ]);
+
+      const repo = fromPartial<GitBridgeRepository>({
+        resolveTarget: jest.fn(async () => ({
+          repoId: REPO_ID,
+          spaceId: REPO_ID,
+          pageId: REPO_ID,
+        })),
+        recordPushTransition: jest.fn(async () => 1),
+        resetGcPushCount: jest.fn(async () => undefined),
+      });
+
+      const patchDoc = jest.fn(async () => {
+        throw new Error('patchDoc must not pre-delete PageNode before structure.deleteNode');
+      });
+      const deleteFile = jest.fn(async () => {
+        throw new Error('deleteFile must not pre-delete PageNode before structure.deleteNode');
+      });
+
+      const docstore = fromPartial<DocstoreService>({
+        getAllDocs: jest.fn(async () => [
+          fromPartial({
+            _id: 'doc-main',
+            lines: ['\\documentclass{article}', ''],
+            version: 1,
+            deleted: false,
+          }),
+          fromPartial({
+            _id: 'doc-obsolete',
+            lines: ['remove me', ''],
+            version: 1,
+            deleted: false,
+          }),
+        ]),
+        patchDoc,
+      });
+
+      const uploadFileFromBuffer = jest.fn(
+        async (
+          _sid: string,
+          _name: string,
+          _buf: Buffer,
+          _mime?: string,
+          opts?: { syncStructureNode?: boolean; pageId?: string | null },
+        ) => {
+          if (opts?.syncStructureNode !== false) {
+            nodesByPath.set('/figs/fig.png', {
+              id: 'auto-dup-node',
+              name: 'fig.png',
+              path: '/figs/fig.png',
+              parentId: 'dir-figs',
+              type: 'FILE',
+              fileId: 'file-fig-v2',
+            });
+          }
+          return fromPartial({ id: 'file-fig-v2' });
+        },
+      );
+
+      const filestore = fromPartial<FilestoreService>({
+        uploadFileFromBuffer,
+        deleteFile,
+      });
+
+      const deleteNode = jest.fn(async (_sid: string, nodeId: string) => {
+        const entry = Array.from(nodesByPath.entries()).find(
+          ([, n]) => n.id === nodeId,
+        );
+        if (!entry) {
+          const notFound = new Error(`Node ${nodeId} not found`);
+          notFound.name = 'NodeNotFoundError';
+          throw notFound;
+        }
+        nodesByPath.delete(entry[0]);
+        return [fromPartial(entry[1])];
+      });
+
+      const createNode = jest.fn(async (_sid: string, dto) => {
+        const fullPath =
+          dto.parentId === 'dir-figs' ? `/figs/${dto.name}` : `/${dto.name}`;
+        if (nodesByPath.has(fullPath)) {
+          throw new Error(`Duplicate node at ${fullPath}`);
+        }
+        const created = {
+          id: 'node-fig-v2',
+          name: dto.name,
+          path: fullPath,
+          parentId: dto.parentId ?? null,
+          type: dto.type,
+          fileId: dto.fileId ?? null,
+        };
+        nodesByPath.set(fullPath, created);
+        return fromPartial(created);
+      });
+
+      const structure = fromPartial<StructureService>({
+        getAllNodes: jest.fn(async () =>
+          Array.from(nodesByPath.values()).map((n) => fromPartial(n)),
+        ),
+        getNodeByPath: jest.fn(async (_sid: string, p: string) => {
+          const found = nodesByPath.get(p);
+          return found ? fromPartial(found) : null;
+        }),
+        deleteNode,
+        createNode,
+      });
+
+      const sync = new SyncService(
+        repo,
+        gitRepo,
+        new PackAdapter(gitRepo),
+        docstore,
+        filestore,
+        structure,
+      );
+
+      const summary = await sync.applyPush(REPO_ID, baseSha, nextSha, USER_ID);
+
+      expect(summary.deleted).toEqual(['/obsolete.tex']);
+      expect(summary.updated).toEqual(['/figs/fig.png']);
+      expect(summary.created).toEqual([]);
+      expect(patchDoc).not.toHaveBeenCalled();
+      expect(deleteFile).not.toHaveBeenCalled();
+      expect(uploadFileFromBuffer).toHaveBeenCalledWith(
+        REPO_ID,
+        'figs/fig.png',
+        v2Png,
+        undefined,
+        { syncStructureNode: false, pageId: REPO_ID },
+      );
+      expect(createNode).toHaveBeenCalledTimes(1);
+      expect(nodesByPath.has('/obsolete.tex')).toBe(false);
+      expect(nodesByPath.get('/figs/fig.png')?.fileId).toBe('file-fig-v2');
+    });
   });
 
   describe('5. MaintenanceService (BCNF Eviction Index + Disk Sweep)', () => {

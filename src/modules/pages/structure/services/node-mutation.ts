@@ -1,19 +1,19 @@
 /**
- * modules/pages/structure/services/node-mutation.helper.ts
+ * modules/pages/structure/services/node-mutation.ts
  * Virtual tree node creation, folder materialization, move, rename, and delete helpers.
  */
 
 import { Logger, NotFoundException } from '@nestjs/common';
 import {
   DuplicateNodePathError,
-  FileTreeBuilder,
   InvalidNodeNameError,
-  IStructureRepository,
   NodeNotFoundError,
-  NodePathVo,
-  PageNodeEntity,
   StructureError,
-} from '../domain';
+} from '@/modules/pages/structure/domain/structure.errors';
+import { FileTreeBuilder } from '@/modules/pages/structure/domain/tree-builder';
+import type { StructureRepository } from '@/modules/pages/structure/structure.repository';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
 import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from '../dto/node.dto';
 import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
@@ -21,7 +21,7 @@ import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 
 export interface NodeMutationContext {
-  readonly repository: IStructureRepository;
+  readonly repository: StructureRepository;
   readonly logger: Logger;
   readonly domainEventBus: PageDomainEventBus;
   readonly realtimeService?: RealtimeFacade;
@@ -30,7 +30,7 @@ export interface NodeMutationContext {
 }
 
 export async function mkdirpInternalHelper(
-  repository: IStructureRepository,
+  repository: StructureRepository,
   projectId: string,
   dirPath: string,
   pageId?: string,
@@ -97,7 +97,7 @@ export async function mkdirpInternalHelper(
 }
 
 export async function resolveOrMaterializeParentFolder(
-  repository: IStructureRepository,
+  repository: StructureRepository,
   projectId: string,
   options: {
     parentId?: string | null;
@@ -586,19 +586,8 @@ export async function deleteNodeHelper(
   );
   const hadRootDoc = deletedNodes.some((n) => n.isRootDoc);
 
-  // Reclaim Space StorageQuota and release StorageBlob CAS references for deleted binary files
-  if (
-    fileIds.length > 0 &&
-    ctx.filestoreService?.reclaimDeletedFilesQuotaAndBlobs
-  ) {
-    await ctx.filestoreService
-      .reclaimDeletedFilesQuotaAndBlobs(projectId, fileIds, deletedNodes)
-      .catch((err: unknown) => {
-        ctx.logger.warn(
-          `Failed to reclaim storage quota/blobs for deleted subtree in ${projectId}: ${(err as Error)?.message}`,
-        );
-      });
-  }
+  // NOTE: Soft-deleting nodes/subtrees preserves FileBlob ref-counts and SpaceQuota
+  // while files remain restorable in Trash; reclamation happens strictly on permanent purge.
 
   await ctx.domainEventBus.publish({
     type: 'manuscript.nodes.deleted',

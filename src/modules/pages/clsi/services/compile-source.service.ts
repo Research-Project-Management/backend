@@ -145,7 +145,52 @@ export class CompileSourceService {
       resolvedSpaceId ||
       (dto.spaceId && dto.spaceId !== 'default' ? dto.spaceId : 'default');
 
+    if (
+      !resolvedPageId &&
+      this.prisma?.page?.findFirst &&
+      spaceId !== 'default' &&
+      isUuid(spaceId)
+    ) {
+      const defaultPage = await Promise.resolve(
+        this.prisma.page.findFirst({
+          where: { spaceId, deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      if (defaultPage?.id) {
+        resolvedPageId = defaultPage.id;
+      }
+    }
+
     return { spaceId, pageId: resolvedPageId };
+  }
+
+  /**
+   * Resolves only the active `PageDoc` IDs belonging to `(spaceId, pageId)` so
+   * pre-compile Yjs flush barriers flush strictly the target Page instead of the entire Space.
+   */
+  public async getPageDocIds(
+    spaceId: string,
+    pageId?: string,
+  ): Promise<string[]> {
+    if (!this.prisma?.pageDoc?.findMany || !spaceId || spaceId === 'default') {
+      return [];
+    }
+    const hasValidPageScope = Boolean(
+      pageId && pageId !== 'default' && isUuid(pageId),
+    );
+    const rows = await Promise.resolve(
+      this.prisma.pageDoc.findMany({
+        where: {
+          spaceId,
+          ...(hasValidPageScope ? { pageId } : {}),
+          deletedAt: null,
+        },
+        select: { id: true },
+      }),
+    ).catch(() => []);
+    return Array.isArray(rows) ? rows.map((r) => r.id).filter(Boolean) : [];
   }
 
   /**
@@ -161,13 +206,19 @@ export class CompileSourceService {
     const mainFile = dto.mainFile || undefined;
     const source = dto.source || '';
     const effectiveScopePageId = targetPageId || dto.pageId;
+    const pageScopeFilter =
+      effectiveScopePageId &&
+      effectiveScopePageId !== 'default' &&
+      isUuid(effectiveScopePageId)
+        ? { pageId: effectiveScopePageId }
+        : {};
 
     if (this.prisma && spaceId !== 'default') {
       try {
         const [rawNodes, rawDocs, rawBinaryFiles, rootDocIds] =
           await Promise.all([
             this.prisma.pageNode.findMany({
-              where: { spaceId: spaceId },
+              where: { spaceId: spaceId, ...pageScopeFilter },
               orderBy: { sortOrder: 'asc' },
               select: {
                 id: true,
@@ -181,7 +232,11 @@ export class CompileSourceService {
               },
             }),
             this.prisma.pageDoc.findMany({
-              where: { spaceId: spaceId, deletedAt: null },
+              where: {
+                spaceId: spaceId,
+                ...pageScopeFilter,
+                deletedAt: null,
+              },
               select: {
                 id: true,
                 pageId: true,
@@ -195,7 +250,11 @@ export class CompileSourceService {
             this.prisma.pageFile?.findMany
               ? this.prisma.pageFile
                   .findMany({
-                    where: { spaceId: spaceId, deletedAt: null },
+                    where: {
+                      spaceId: spaceId,
+                      ...pageScopeFilter,
+                      deletedAt: null,
+                    },
                     select: {
                       id: true,
                       pageId: true,
@@ -208,7 +267,7 @@ export class CompileSourceService {
                   .catch(() => [])
               : Promise.resolve([]),
             resolveSpaceRootDocIds(
-              this.prisma as unknown as PageScopeDbClient,
+              this.prisma,
               spaceId,
               effectiveScopePageId,
             ),
@@ -398,9 +457,17 @@ export class CompileSourceService {
           binaryFiles = plan.binaryFiles;
           fileNodes = plan.nodes.filter((n) => n.type === 'FILE');
         } else {
+          const fallbackPageWhere =
+            scratchWorkspaceId !== spaceId && isUuid(scratchWorkspaceId)
+              ? { pageId: scratchWorkspaceId }
+              : {};
           const [rawBinaryFilesFromDb, rawFileNodes] = await Promise.all([
             this.prisma.pageFile.findMany({
-              where: { spaceId: spaceId, deletedAt: null },
+              where: {
+                spaceId: spaceId,
+                ...fallbackPageWhere,
+                deletedAt: null,
+              },
               select: {
                 id: true,
                 pageId: true,
@@ -410,7 +477,11 @@ export class CompileSourceService {
               },
             }),
             this.prisma.pageNode.findMany({
-              where: { spaceId: spaceId, type: 'FILE' },
+              where: {
+                spaceId: spaceId,
+                ...fallbackPageWhere,
+                type: 'FILE',
+              },
               select: {
                 id: true,
                 pageId: true,

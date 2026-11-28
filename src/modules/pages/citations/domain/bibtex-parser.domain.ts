@@ -5,7 +5,6 @@
 
 import { plugins } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
-import { IBibtexParserPort } from './citations.ports';
 import { BibEntry } from './bib-entry.domain';
 import { CitationKeyVo } from './value-objects.domain';
 
@@ -17,7 +16,7 @@ interface CitationJsRawBibtexEntry {
   properties?: Record<string, unknown>;
 }
 
-export class BibtexParser implements IBibtexParserPort {
+export class BibtexParser {
   /**
    * Parse a raw BibTeX string into an array of BibEntry entities using `@citation-js/plugin-bibtex`.
    */

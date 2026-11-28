@@ -28,6 +28,7 @@ import { PageArchiveHydratorAdapter } from '@/modules/pages/export-import/adapte
 import { ExportService } from '@/modules/pages/export-import/services/export.service';
 import { ImportService } from '@/modules/pages/export-import/services/import.service';
 import { ConvertService } from '@/modules/pages/export-import/services/convert.service';
+import { ExportImportController } from '@/modules/pages/export-import/export-import.controller';
 
 describe('Export-Import Deep Module Suite', () => {
   describe('1. Domain Value Objects & Policies', () => {
@@ -227,7 +228,7 @@ describe('Export-Import Deep Module Suite', () => {
 
       const loaded = await lazyEntries[0].getData!();
       expect(getDoc).toHaveBeenCalledWith('space-1', 'd1');
-      expect(loaded.toString('utf8')).toBe('\\documentclass{article}');
+      expect(loaded!.toString('utf8')).toBe('\\documentclass{article}');
     });
   });
 
@@ -425,6 +426,206 @@ describe('Export-Import Deep Module Suite', () => {
       ).rejects.toThrow('Private or loopback URLs are not permitted.');
 
       fetchSpy.mockRestore();
+    });
+
+    it('creates a brand-new Page aggregate when pageId is omitted on ZIP/convert import instead of overwriting oldest page', async () => {
+      const USER_ID = '0195f000-0000-7000-8000-000000000010';
+      const OLD_PAGE_ID = '0195f000-0000-7000-8000-000000000001';
+      const spaceUpsert = jest.fn().mockResolvedValue({ id: USER_ID });
+      const pageCreate = jest.fn().mockImplementation(async ({ data }) => data);
+      const pageUpdate = jest.fn().mockImplementation(async ({ data }) => data);
+
+      const createDoc = jest
+        .fn()
+        .mockImplementation(async (_spaceId: string, dto: { id?: string; path: string }) => ({
+          _id: dto.id || `doc-${dto.path}`,
+          version: 1,
+        }));
+      const createNode = jest.fn().mockImplementation(async (_sid: string, dto: { docId?: string; fileId?: string; path: string }) => ({
+        id: `node-${dto.path}`,
+        docId: dto.docId,
+        fileId: dto.fileId,
+        path: dto.path,
+        type: dto.docId ? 'DOC' : 'FILE',
+      }));
+      const autoDetectRootDoc = jest
+        .fn()
+        .mockImplementation(async (_sid: string, docContents: Map<string, string[]>) => {
+          const firstDocId = docContents.keys().next().value;
+          return firstDocId
+            ? { id: 'node-root', docId: firstDocId, path: '/main.tex' }
+            : null;
+        });
+
+      const hydrator = new PageArchiveHydratorAdapter(
+        {
+          getAllNodes: jest.fn().mockResolvedValue([]),
+          mkdirp: jest.fn().mockResolvedValue(undefined),
+          createNode,
+          autoDetectRootDoc,
+          setRootDoc: jest
+            .fn()
+            .mockImplementation(async (_sid: string, nodeId: string) => ({
+              id: nodeId,
+              docId: nodeId,
+              path: '/main.tex',
+            })),
+        } as never,
+        {
+          createDoc,
+          getDoc: jest.fn().mockResolvedValue({ version: 1, ranges: {} }),
+          updateDoc: jest.fn().mockResolvedValue({}),
+        } as never,
+        {
+          uploadFileFromBuffer: jest.fn().mockResolvedValue({
+            id: 'file-fig-1',
+            hash: { getValue: () => 'a'.repeat(40) },
+          }),
+        } as never,
+        undefined,
+        undefined,
+        {
+          space: { upsert: spaceUpsert },
+          page: {
+            create: pageCreate,
+            update: pageUpdate,
+            findFirst: jest.fn().mockResolvedValue({ id: OLD_PAGE_ID }),
+          },
+        } as never,
+      );
+
+      const zip = new ZipAdapter();
+      const importSvc = new ImportService(hydrator, zip);
+      const convertSvc = new ConvertService(
+        hydrator,
+        zip,
+        undefined,
+        undefined,
+        new PandocAdapter('__nonexistent_pandoc_binary__'),
+      );
+
+      const archiveBuf = zip.buildZip([
+        {
+          path: '__MACOSX/._main.tex',
+          data: Buffer.from('junk'),
+        },
+        {
+          path: 'main.tex',
+          data: Buffer.from(
+            '\\documentclass{article}\n\\title{Quantum Spin Networks}\n\\begin{document}\nHi\n\\end{document}',
+            'utf8',
+          ),
+        },
+        {
+          path: 'fig.png',
+          data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]),
+        },
+      ]);
+
+      const zipResult = await importSvc.importProjectZip(
+        USER_ID,
+        archiveBuf,
+        USER_ID,
+        undefined,
+        undefined,
+        { fileName: 'quantum_upload.zip', createNewPage: true },
+      );
+
+      expect(spaceUpsert).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        create: { id: USER_ID, type: 'personal', ownerUserId: USER_ID },
+        update: {},
+      });
+      expect(pageCreate).toHaveBeenCalledTimes(1);
+      expect(zipResult.pageId).not.toBe(OLD_PAGE_ID);
+      expect(zipResult.rootDocId).toBe(zipResult.pageId);
+      expect(zipResult.title).toBe('Quantum Spin Networks');
+      expect(zipResult.totalDocs).toBe(1);
+      expect(zipResult.totalFiles).toBe(1);
+      expect(zipResult.skippedFiles).toEqual(['__MACOSX/._main.tex']);
+
+      const convertResult = await convertSvc.convertDocument({
+        projectId: USER_ID,
+        fileBuffer: Buffer.from('# Converted Notes\nSome text.', 'utf8'),
+        fileName: 'lecture_notes.md',
+        userId: USER_ID,
+      });
+
+      expect(pageCreate).toHaveBeenCalledTimes(2);
+      expect(convertResult.pageId).not.toBe(zipResult.pageId);
+      expect(convertResult.pageId).not.toBe(OLD_PAGE_ID);
+      expect(convertResult.title).toBe('lecture_notes');
+      expect(convertResult.totalDocs).toBe(1);
+      expect(convertResult.skippedFiles).toEqual([]);
+    });
+
+    it('reads req.resolvedPageId on export routes when query pageId is omitted and supports 3-arg collectProjectEntries', async () => {
+      const RESOLVED_PAGE_ID = '0195f000-0000-7000-8000-000000000055';
+      const SPACE_ID = '0195f000-0000-7000-8000-000000000010';
+
+      const aggregator = {
+        collectProjectEntries: jest.fn().mockResolvedValue([]),
+        collectLazyProjectEntries: jest.fn().mockResolvedValue([]),
+      } as unknown as PageArchiveAggregatorAdapter;
+      const exportSvc = new ExportService(aggregator, new ZipAdapter());
+
+      await exportSvc.collectProjectEntries(SPACE_ID, false, RESOLVED_PAGE_ID);
+      expect(aggregator.collectProjectEntries).toHaveBeenCalledWith(
+        SPACE_ID,
+        false,
+        false,
+        RESOLVED_PAGE_ID,
+      );
+
+      const exportZipStreamSpy = jest.spyOn(exportSvc, 'exportProjectZipStream');
+      const exportSpaceDoc = jest.fn().mockResolvedValue({
+        filename: 'main.md',
+        mimeType: 'text/markdown',
+        content: '# Hi',
+        isBase64: false,
+        sizeBytes: 4,
+      });
+
+      const controller = new ExportImportController(
+        exportSvc,
+        {} as never,
+        { exportSpaceDocument: exportSpaceDoc } as never,
+      );
+
+      const headers = new Map<string, string>();
+      const reply = {
+        header: (k: string, v: string) => headers.set(k, v),
+        send: jest.fn().mockResolvedValue(undefined),
+      };
+
+      await controller.exportProjectZip(
+        SPACE_ID,
+        {},
+        reply as never,
+        undefined,
+        SPACE_ID,
+        { resolvedPageId: RESOLVED_PAGE_ID } as never,
+      );
+
+      expect(exportZipStreamSpy).toHaveBeenCalledWith(SPACE_ID, {
+        pageId: RESOLVED_PAGE_ID,
+      });
+
+      await controller.exportProjectByFormat(
+        SPACE_ID,
+        'md',
+        undefined,
+        undefined,
+        SPACE_ID,
+        { resolvedPageId: RESOLVED_PAGE_ID } as never,
+      );
+
+      expect(exportSpaceDoc).toHaveBeenCalledWith({
+        spaceId: SPACE_ID,
+        pageId: RESOLVED_PAGE_ID,
+        format: 'md',
+        includeChildren: undefined,
+      });
     });
   });
 });

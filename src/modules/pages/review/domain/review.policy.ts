@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import type { ReviewRoundInfo } from '@/modules/pages/docstore/domain';
+import type { ReviewRoundInfo } from '@/modules/pages/docstore/domain/doc-range';
 import { Role } from '@/modules/project/access';
 
 export const REVIEW_STATUSES = [

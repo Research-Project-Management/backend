@@ -4,10 +4,17 @@
  * (HistoryBlob, PageSnapshot, PageSnapshotFile, PageSnapshotLabel).
  */
 
-import { Injectable, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Optional,
+  ConflictException,
+} from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import { ensureCanonicalPageId } from '@/modules/pages/core/utils/page-scope';
 import {
   HistoryBlob as PrismaBlob,
@@ -15,7 +22,6 @@ import {
   PageSnapshotFile as PrismaSnapshotFile,
   PageSnapshotLabel as PrismaLabel,
 } from '@prisma/client';
-import { IHistoryRepositoryPort } from './domain/ports';
 import { Snapshot } from './domain/snapshot';
 import { VersionLabel } from './domain/label';
 import { FileSnapshotVo } from './domain/snapshot';
@@ -83,14 +89,16 @@ export class HistoryMapper {
         const pathname = row.pathname.startsWith('/')
           ? row.pathname
           : `/${row.pathname}`;
+        const trimmedHash = (row.contentHash || '').trim();
         if (row.kind === 'file') {
           map.set(
             pathname,
             FileSnapshotVo.createFile(
               pathname,
               row.entityId ?? '',
-              row.contentHash,
+              trimmedHash,
               row.blob?.sizeBytes ?? 0,
+              row.blob?.storageKey ?? null,
             ),
           );
         } else {
@@ -101,7 +109,7 @@ export class HistoryMapper {
               pathname,
               row.entityId ?? '',
               text.split('\n'),
-              row.contentHash,
+              trimmedHash,
               row.isRoot,
             ),
           );
@@ -183,9 +191,54 @@ export class HistoryMapper {
 }
 
 @Injectable()
-export class HistoryRepository extends IHistoryRepositoryPort {
-  constructor(private readonly prisma: PrismaService) {
-    super();
+export class HistoryRepository {
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
+  ) {}
+
+  private async resolveFileBlobId(params: {
+    blobId?: string | null;
+    storageKey?: string | null;
+    contentHash?: string | null;
+  }): Promise<string | null> {
+    if (params.blobId && isUUID(params.blobId)) {
+      return params.blobId;
+    }
+
+    const cleanKey = params.storageKey?.trim() || null;
+    if (cleanKey && this.prisma.fileBlob?.findFirst) {
+      const byKey = await Promise.resolve(
+        this.prisma.fileBlob.findFirst({
+          where: { storageKey: cleanKey },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      if (byKey?.id) return byKey.id;
+    }
+
+    const cleanHash = params.contentHash?.trim().toLowerCase() || '';
+    if (/^[0-9a-f]{64}$/.test(cleanHash)) {
+      if (typeof this.filesPort?.findBlobByHash === 'function') {
+        const byPort = await this.filesPort
+          .findBlobByHash(cleanHash)
+          .catch(() => null);
+        if (byPort?.id) return byPort.id;
+      }
+      if (this.prisma.fileBlob?.findFirst) {
+        const byHash = await Promise.resolve(
+          this.prisma.fileBlob.findFirst({
+            where: { contentHash: Buffer.from(cleanHash, 'hex') },
+            select: { id: true },
+          }),
+        ).catch(() => null);
+        if (byHash?.id) return byHash.id;
+      }
+    }
+
+    return null;
   }
 
   public toDomain(record: PrismaSnapshotWithRelations): Snapshot {
@@ -228,6 +281,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
         sizeBytes: number;
         inStorage: boolean;
         storageKey: string | null;
+        blobId: string | null;
       }
     >();
     const fileRows: Array<{
@@ -242,28 +296,69 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     for (const [pathname, vo] of snapshot.files.entries()) {
       const isDoc = vo.type === 'doc';
       const content = isDoc ? (vo.lines ?? []).join('\n') : null;
+
+      let resolvedStorageKey = !isDoc ? (vo.storageKey ?? null) : null;
+      let resolvedBlobId = !isDoc ? (vo.blobId ?? null) : null;
+      let fallbackFileHash = '';
+      let fallbackSizeBytes: number | undefined;
+
+      if (
+        !isDoc &&
+        (!resolvedStorageKey || !vo.hash || !resolvedBlobId) &&
+        vo.fileId &&
+        isUUID(vo.fileId) &&
+        this.prisma.pageFile?.findUnique
+      ) {
+        const pageFile = await Promise.resolve(
+          this.prisma.pageFile.findUnique({
+            where: { id: vo.fileId },
+            select: {
+              storageKey: true,
+              hash: true,
+              blobId: true,
+              sizeBytes: true,
+            },
+          }),
+        ).catch(() => null);
+        if (pageFile) {
+          resolvedStorageKey = resolvedStorageKey ?? pageFile.storageKey ?? null;
+          resolvedBlobId = resolvedBlobId ?? pageFile.blobId ?? null;
+          fallbackFileHash = pageFile.hash ?? '';
+          fallbackSizeBytes = pageFile.sizeBytes;
+        }
+      }
+
       const sizeBytes = isDoc
         ? Buffer.byteLength(content ?? '', 'utf8')
-        : (vo.sizeBytes ?? 0);
+        : (vo.sizeBytes || fallbackSizeBytes || 0);
       totalBytes += sizeBytes;
 
-      const rawHash =
-        vo.hash && vo.hash.length === 64
-          ? vo.hash
+      const candidateHash = (vo.hash || fallbackFileHash || '')
+        .trim()
+        .toLowerCase();
+      const rawHash = isDoc
+        ? /^[0-9a-f]{64}$/.test(candidateHash)
+          ? candidateHash
+          : computeContentHash(content ?? '')
+        : /^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(candidateHash)
+          ? candidateHash
           : computeContentHash(
-              isDoc
-                ? (content ?? '')
-                : `${pathname}:${vo.fileId ?? ''}:${sizeBytes}`,
+              `${pathname}:${vo.fileId ?? ''}:${resolvedStorageKey ?? ''}:${sizeBytes}`,
             );
 
-      if (!blobMap.has(rawHash)) {
+      const existingEntry = blobMap.get(rawHash);
+      if (!existingEntry) {
         blobMap.set(rawHash, {
           contentHash: rawHash,
           content,
           sizeBytes,
           inStorage: !isDoc,
-          storageKey: null,
+          storageKey: resolvedStorageKey,
+          blobId: resolvedBlobId,
         });
+      } else if (!isDoc && !existingEntry.storageKey && resolvedStorageKey) {
+        existingEntry.storageKey = resolvedStorageKey;
+        existingEntry.blobId = existingEntry.blobId ?? resolvedBlobId;
       }
 
       const rawEntityId = isDoc ? vo.docId : vo.fileId;
@@ -276,11 +371,131 @@ export class HistoryRepository extends IHistoryRepositoryPort {
       });
     }
 
-    if (blobMap.size > 0 && this.prisma.historyBlob?.createMany) {
+    const docBlobs: Array<{
+      contentHash: string;
+      content: string | null;
+      sizeBytes: number;
+      inStorage: boolean;
+      storageKey: string | null;
+    }> = [];
+    const binaryBlobs: Array<{
+      contentHash: string;
+      content: string | null;
+      sizeBytes: number;
+      inStorage: boolean;
+      storageKey: string | null;
+      blobId: string | null;
+    }> = [];
+
+    for (const b of blobMap.values()) {
+      if (b.inStorage) {
+        binaryBlobs.push(b);
+      } else {
+        docBlobs.push({
+          contentHash: b.contentHash,
+          content: b.content,
+          sizeBytes: b.sizeBytes,
+          inStorage: false,
+          storageKey: null,
+        });
+      }
+    }
+
+    if (docBlobs.length > 0 && this.prisma.historyBlob?.createMany) {
       await this.prisma.historyBlob.createMany({
-        data: Array.from(blobMap.values()),
+        data: docBlobs,
         skipDuplicates: true,
       });
+    }
+
+    if (binaryBlobs.length > 0 && this.prisma.historyBlob) {
+      const binaryHashes = binaryBlobs.map((b) => b.contentHash);
+      const existingRows = this.prisma.historyBlob.findMany
+        ? await Promise.resolve(
+            this.prisma.historyBlob.findMany({
+              where: { contentHash: { in: binaryHashes } },
+              select: { contentHash: true, storageKey: true },
+            }),
+          ).catch(() => [])
+        : [];
+      const existingMap = new Map<string, string | null>();
+      for (const r of existingRows || []) {
+        existingMap.set((r.contentHash || '').trim(), r.storageKey ?? null);
+      }
+
+      for (const b of binaryBlobs) {
+        const hasExisting = existingMap.has(b.contentHash);
+        const prevStorageKey = existingMap.get(b.contentHash) ?? null;
+
+        if (hasExisting) {
+          if (
+            !prevStorageKey &&
+            b.storageKey &&
+            this.prisma.historyBlob.updateMany
+          ) {
+            const updated = await Promise.resolve(
+              this.prisma.historyBlob.updateMany({
+                where: { contentHash: b.contentHash, storageKey: null },
+                data: { storageKey: b.storageKey, inStorage: true },
+              }),
+            ).catch(() => ({ count: 0 }));
+            if (
+              updated.count > 0 &&
+              typeof this.filesPort?.acquireBlob === 'function'
+            ) {
+              const targetBlobId = await this.resolveFileBlobId({
+                blobId: b.blobId,
+                storageKey: b.storageKey,
+                contentHash: b.contentHash,
+              });
+              if (targetBlobId) {
+                await this.filesPort.acquireBlob(targetBlobId).catch(() => null);
+              }
+            }
+          }
+          continue;
+        }
+
+        const createPayload = {
+          contentHash: b.contentHash,
+          content: null,
+          sizeBytes: b.sizeBytes,
+          inStorage: true,
+          storageKey: b.storageKey,
+        };
+
+        let insertedNew = false;
+        if (typeof this.prisma.historyBlob.create === 'function') {
+          try {
+            await this.prisma.historyBlob.create({ data: createPayload });
+            insertedNew = true;
+          } catch (err: unknown) {
+            const code = (err as { code?: string })?.code;
+            if (code !== 'P2002') throw err;
+          }
+        } else if (typeof this.prisma.historyBlob.createMany === 'function') {
+          const res = await this.prisma.historyBlob.createMany({
+            data: [createPayload],
+            skipDuplicates: true,
+          });
+          insertedNew = (res?.count ?? 1) > 0;
+        }
+
+        if (
+          insertedNew &&
+          b.storageKey &&
+          typeof this.filesPort?.acquireBlob === 'function'
+        ) {
+          const targetBlobId = await this.resolveFileBlobId({
+            blobId: b.blobId,
+            storageKey: b.storageKey,
+            contentHash: b.contentHash,
+          });
+          if (targetBlobId) {
+            await this.filesPort.acquireBlob(targetBlobId).catch(() => null);
+          }
+        }
+      }
     }
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -515,7 +730,7 @@ export class HistoryRepository extends IHistoryRepositoryPort {
     });
     if (!match?.blob) return null;
     return {
-      contentHash: match.blob.contentHash,
+      contentHash: (match.blob.contentHash || '').trim(),
       content: match.blob.content,
       sizeBytes: match.blob.sizeBytes,
       inStorage: match.blob.inStorage,
@@ -559,15 +774,60 @@ export class HistoryRepository extends IHistoryRepositoryPort {
   }
 
   /**
-   * Garbage-collects unreferenced HistoryBlob records (0 PageSnapshotFile references).
+   * Garbage-collects unreferenced HistoryBlob records (0 PageSnapshotFile references)
+   * and decrements CAS FileBlob refCounts for unreferenced binary blobs.
    */
   public async gcOrphanBlobs(): Promise<number> {
+    let deletedBinaryCount = 0;
+
+    if (this.prisma.historyBlob?.findMany) {
+      const orphanBinaryBlobs = await Promise.resolve(
+        this.prisma.historyBlob.findMany({
+          where: {
+            snapshotFiles: { none: {} },
+            inStorage: true,
+            storageKey: { not: null },
+          },
+          select: {
+            contentHash: true,
+            storageKey: true,
+          },
+        }),
+      ).catch(() => []);
+
+      for (const orphan of orphanBinaryBlobs || []) {
+        const delRes = await this.prisma.historyBlob.deleteMany({
+          where: {
+            contentHash: orphan.contentHash,
+            snapshotFiles: { none: {} },
+          },
+        });
+        if (delRes.count > 0) {
+          deletedBinaryCount += delRes.count;
+          if (
+            orphan.storageKey &&
+            typeof this.filesPort?.releaseBlob === 'function'
+          ) {
+            const targetBlobId = await this.resolveFileBlobId({
+              storageKey: orphan.storageKey,
+              contentHash: orphan.contentHash,
+            });
+            if (targetBlobId) {
+              await this.filesPort
+                .releaseBlob(targetBlobId)
+                .catch(() => undefined);
+            }
+          }
+        }
+      }
+    }
+
     const result = await this.prisma.historyBlob.deleteMany({
       where: {
         snapshotFiles: { none: {} },
       },
     });
-    return result.count;
+    return deletedBinaryCount + result.count;
   }
 
   /**

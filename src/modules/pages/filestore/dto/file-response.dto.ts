@@ -2,7 +2,7 @@
  * modules/pages/filestore/dto/file-response.dto.ts
  */
 
-import { PageBinaryAsset } from '../filestore.types';
+import { PageBinaryAsset } from '../domain/file.entity';
 
 export class PageBinaryAssetResponseDto {
   id!: string;

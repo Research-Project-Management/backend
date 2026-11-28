@@ -6,6 +6,8 @@
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { mapWithConcurrency } from '@/core';
+import { FILES_PORT } from '@/modules/files/files.constant';
+import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
   LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
@@ -18,15 +20,23 @@ import {
 import { StructureService } from '@/modules/pages/structure/structure.service';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
 import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import type { PageNodeEntity } from '@/modules/pages/structure/domain';
-import { ISnapshotCollectorPort } from '../domain/ports';
-import { Snapshot } from '../domain/snapshot';
-import { FileSnapshotVo } from '../domain/snapshot';
+import { IBinaryStoragePort } from '@/modules/pages/filestore/domain/filestore.ports';
+import type { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
+import { Snapshot, FileSnapshotVo } from '../domain/snapshot';
 
 const COLLECT_CONCURRENCY = 6;
+const DEFAULT_MANUSCRIPT_BUCKET = 'manuscript-files';
+
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
 
 @Injectable()
-export class SnapshotCollectorAdapter extends ISnapshotCollectorPort {
+export class SnapshotCollectorAdapter {
   private readonly logger = new Logger(SnapshotCollectorAdapter.name);
   private readonly liveCollab: LiveCollaborationPort;
 
@@ -37,8 +47,13 @@ export class SnapshotCollectorAdapter extends ISnapshotCollectorPort {
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
     liveCollab?: LiveCollaborationPort,
+    @Optional()
+    @Inject(IBinaryStoragePort)
+    private readonly binaryStorage?: IBinaryStoragePort,
+    @Optional()
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {
-    super();
     this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
@@ -95,13 +110,22 @@ export class SnapshotCollectorAdapter extends ISnapshotCollectorPort {
               node.fileId,
             );
             const hashString = fileMeta.hash
-              ? fileMeta.hash.getValue()
+              ? typeof fileMeta.hash.getValue === 'function'
+                ? fileMeta.hash.getValue()
+                : String(fileMeta.hash)
               : node.hash || '';
+            const storageKey = fileMeta.storageKey
+              ? typeof fileMeta.storageKey.getValue === 'function'
+                ? fileMeta.storageKey.getValue()
+                : String(fileMeta.storageKey)
+              : null;
             return FileSnapshotVo.createFile(
               node.path,
               node.fileId,
               hashString,
               fileMeta.sizeBytes || node.sizeBytes || 0,
+              storageKey,
+              fileMeta.blobId ?? null,
             );
           } catch (error) {
             this.logger.error(
@@ -137,27 +161,44 @@ export class SnapshotCollectorAdapter extends ISnapshotCollectorPort {
           data: Buffer.from(textContent, 'utf8'),
           date: snapshot.createdAt,
         });
-      } else if (fileVo.type === 'file' && fileVo.fileId) {
-        const fileId = fileVo.fileId;
+      } else if (
+        fileVo.type === 'file' &&
+        (fileVo.storageKey || fileVo.fileId)
+      ) {
+        const pinnedStorageKey = fileVo.storageKey?.trim() || null;
+        const fileId = fileVo.fileId ?? null;
         entries.push({
           path: relPath,
           date: snapshot.createdAt,
           getData: async () => {
             try {
-              const streamResult = await this.filestoreService.openReadStream(
-                projectId,
-                fileId,
-              );
-              const chunks: Buffer[] = [];
-              for await (const chunk of streamResult.stream) {
-                chunks.push(
-                  Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
-                );
+              if (pinnedStorageKey) {
+                if (this.binaryStorage) {
+                  const stream = await this.binaryStorage.getObjectStream(
+                    DEFAULT_MANUSCRIPT_BUCKET,
+                    pinnedStorageKey,
+                  );
+                  return await streamToBuffer(stream);
+                }
+                if (typeof this.filesPort?.getObjectStream === 'function') {
+                  const obj = await this.filesPort.getObjectStream(
+                    pinnedStorageKey,
+                  );
+                  return await streamToBuffer(obj.stream);
+                }
               }
-              return Buffer.concat(chunks);
+
+              if (fileId) {
+                const streamResult = await this.filestoreService.openReadStream(
+                  projectId,
+                  fileId,
+                );
+                return await streamToBuffer(streamResult.stream);
+              }
+              return null;
             } catch (err) {
               this.logger.warn(
-                `Failed to read historical file ${fileId} (${relPath}) for snapshot ZIP: ${err}`,
+                `Failed to read historical file ${pinnedStorageKey ?? fileId ?? ''} (${relPath}) for snapshot ZIP: ${err}`,
               );
               return null;
             }

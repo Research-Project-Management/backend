@@ -573,7 +573,10 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
         ]),
         true,
       );
-      expect(res.resolvedIds).toEqual([DEL_ID, INS_ID]);
+      expect((res as { resolvedIds?: string[] }).resolvedIds).toEqual([
+        DEL_ID,
+        INS_ID,
+      ]);
     });
 
     it('enforces author-only ownership on updateReply for non-author collaborators', async () => {

@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/docstore/docstore.module.ts
- * NestJS Module bundling Manuscripts Docstore controllers, services, repositories, and adapters.
+ * modules/pages/docstore/docstore.module.ts
+ * NestJS Module bundling Pages Docstore controllers, services, repositories, and adapters.
  */
 
 import { forwardRef, Module } from '@nestjs/common';
@@ -20,16 +20,8 @@ import { SearchReplaceService } from './services/search-replace.service';
 
 // Repositories & Adapters
 import { DocstoreRepository } from './repositories/docstore.repository';
-import {
-  DocArchiveRepository,
-  StoragePortDocArchiveAdapter,
-} from './repositories/archive.repository';
-import {
-  DocHasherAdapter,
-  IDocRepository,
-  IDocPersistor,
-  IDocHasher,
-} from './domain';
+import { DocArchiveRepository } from './repositories/archive.repository';
+import { IDocPersistor } from './domain/doc.ports';
 import { ScopeRepository } from './repositories/scope.repository';
 
 @Module({
@@ -53,14 +45,10 @@ import { ScopeRepository } from './repositories/scope.repository';
     PresenceService,
     SearchReplaceService,
 
-    // Repositories & Adapters
+    // Repositories & Cold-Tier Persistor Seam
     DocstoreRepository,
-    { provide: IDocRepository, useExisting: DocstoreRepository },
     DocArchiveRepository,
-    StoragePortDocArchiveAdapter,
-    { provide: IDocPersistor, useExisting: StoragePortDocArchiveAdapter },
-    DocHasherAdapter,
-    { provide: IDocHasher, useExisting: DocHasherAdapter },
+    { provide: IDocPersistor, useExisting: DocArchiveRepository },
     ScopeRepository,
   ],
   exports: [
@@ -69,12 +57,8 @@ import { ScopeRepository } from './repositories/scope.repository';
     PresenceService,
     SearchReplaceService,
     DocstoreRepository,
-    IDocRepository,
     DocArchiveRepository,
-    StoragePortDocArchiveAdapter,
     IDocPersistor,
-    DocHasherAdapter,
-    IDocHasher,
     ScopeRepository,
   ],
 })

@@ -14,7 +14,7 @@ import {
 } from './dto/project-state.dto';
 import { RedisCacheService } from '@/core';
 import { CACHE_KEYS } from '@/modules/project/core/constants/cache.constant';
-import { DomainActivityEvent } from '@/modules/activity/events/activity.events';
+import { DomainActivityEvent } from '@/modules/project/activity/events/activity.events';
 
 @Injectable()
 export class StateService {

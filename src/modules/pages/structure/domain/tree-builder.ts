@@ -5,7 +5,7 @@
  */
 
 import { PageNodeEntity, SerializedTreeNode } from './node.entity';
-import { NodePathVo } from './node-path';
+import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import { MaxProjectFilesExceededError } from './structure.errors';
 
 export type TreeNode = SerializedTreeNode;

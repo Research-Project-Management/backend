@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PrismaModule } from '@/core';
 import { PagesCoreModule } from '@/modules/pages/core/core.module';
 import { StructureModule } from '@/modules/pages/structure/structure.module';
 import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
@@ -18,6 +19,7 @@ import { ExportImportController } from './export-import.controller';
 
 @Module({
   imports: [
+    PrismaModule,
     PagesCoreModule,
     StructureModule,
     DocstoreModule,

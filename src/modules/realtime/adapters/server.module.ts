@@ -1,17 +1,14 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { RedisModule, PrismaModule } from '@/core';
-import { ChatCacheService } from '@/modules/chat/services/chat-cache.service';
-import { ChatService } from '@/modules/chat/services/chat.service';
+import { ChatCacheService } from '@/modules/project/chat/services/chat-cache.service';
+import { ChatService } from '@/modules/project/chat/services/chat.service';
 import { IdentityFacade } from '@/modules/identity/identity.facade';
 import { UserRepository } from '@/modules/identity/user/user.repository';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import {
-  DocHasherAdapter,
-  IDocHasher,
-  IDocPersistor,
-  IDocRepository,
-} from '@/modules/pages/docstore/domain';
+import { DocHasherAdapter, IDocHasher } from '@/modules/pages/docstore/domain/doc-hasher';
+
+import { IDocPersistor, IDocRepository } from '@/modules/pages/docstore/domain/doc.ports';
 import {
   DocArchiveRepository,
   StoragePortDocArchiveAdapter,

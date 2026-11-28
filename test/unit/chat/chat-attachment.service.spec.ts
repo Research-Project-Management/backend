@@ -4,11 +4,11 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ChatAttachmentService } from '@/modules/chat/services/chat-attachment.service';
+import { ChatAttachmentService } from '@/modules/project/chat/services/chat-attachment.service';
 import {
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_FILE_BYTES,
-} from '@/modules/chat/chat.constant';
+} from '@/modules/project/chat/chat.constant';
 
 describe('ChatAttachmentService Unit Tests', () => {
   let service: ChatAttachmentService;
