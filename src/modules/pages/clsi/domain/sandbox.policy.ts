@@ -56,17 +56,17 @@ export const DEFAULT_SANDBOX_PROFILE: Readonly<SandboxProfile> = Object.freeze({
   wallClockMs: 240000, // 4 minutes
 });
 
-/**
- * modules/pages/clsi/domain/sandbox.policy.ts
- * Pure function building an allow-listed environment for sandbox executions.
- * Purges all sensitive host environment variables (DATABASE_URL, JWT_SECRET, etc.)
- * and injects paranoid TeX I/O flags.
- */
+export const DOCKER_CLIENT_ENV_ALLOW_LIST = Object.freeze([
+  'DOCKER_HOST',
+  'DOCKER_CONTEXT',
+  'DOCKER_CERT_PATH',
+  'DOCKER_TLS_VERIFY',
+]);
 
 export interface SandboxEnvOptions {
   parentEnv?: Record<string, string | undefined>;
   extraEnv?: Record<string, string | undefined>;
-  clientAllowList?: string[];
+  clientAllowList?: readonly string[];
   platform?: NodeJS.Platform;
   isTexProcess?: boolean;
   openinAny?: 'p' | 'r';

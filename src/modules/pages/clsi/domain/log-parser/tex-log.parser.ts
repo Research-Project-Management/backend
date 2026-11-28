@@ -7,10 +7,8 @@
 import {
   cleanNonFileParens,
   DiagnosticItem,
-  DiagnosticReport,
   DiagnosticSeverityVo,
   DiagnosticWarningSubtype,
-  InvalidLogFormatException,
   LOG_FILE_EXTENSION_REGEX,
   LogLineVo,
   normalizeLogFilePath,
@@ -25,11 +23,10 @@ import {
   ENV_PKG_LOOKUP,
   LatexErrorCatalog,
   PKG_LOOKUP,
-  type ErrorExplainerLike,
 } from './error.catalog';
 import { BibLogParser } from './bib-log.parser';
 import { postProcessDiagnostics } from './diagnostic.normalizer';
-import { hasVietnameseCharacters } from '@/modules/pages/core/domain/latex-preamble';
+import { hasVietnameseCharacters } from '@/modules/pages/core';
 
 export class CompileLogParser {
   private static readonly LATEX_WARNING_REGEX =
@@ -43,20 +40,18 @@ export class CompileLogParser {
 
   private static readonly RUNAWAY_ARG_REGEX = /^Runaway argument\??/i;
 
-  private static readonly FILE_EXTENSION_REGEX = LOG_FILE_EXTENSION_REGEX;
-
-  private readonly explainer: ErrorExplainerLike;
+  private readonly explainer: LatexErrorCatalog;
   private readonly bibLogParser: BibLogParser;
 
-  constructor(explainer?: ErrorExplainerLike) {
+  constructor(explainer?: LatexErrorCatalog) {
     this.explainer = explainer ?? new LatexErrorCatalog();
     this.bibLogParser = new BibLogParser({ explainer: this.explainer });
   }
 
   /**
-   * Implements `ILogParser.parse()` for CLSI compile pipeline diagnostics.
-   * Delegates to `parseWithSummary()` so TeX + BibTeX/Biber parsing, deduplication,
-   * cascade suppression, and summary counting share one single source of truth.
+   * Parses TeX + BibTeX/Biber logs into post-processed diagnostics.
+   * Delegates to `parseWithSummary()` so deduplication, cascade suppression,
+   * and summary counting share one single source of truth.
    */
   public parse(
     logText: string,
@@ -355,24 +350,6 @@ export class CompileLogParser {
     }
 
     return {};
-  }
-
-  public analyzeLog(
-    logText: string,
-    defaultFile = 'main.tex',
-    _engine = 'pdflatex',
-  ): DiagnosticReport {
-    if (typeof logText !== 'string' || logText.trim().length === 0) {
-      throw new InvalidLogFormatException();
-    }
-
-    const resolvedDefaultFile = defaultFile || 'main.tex';
-    const items = this.parseTexParenTreeLog(logText, resolvedDefaultFile);
-
-    return new DiagnosticReport({
-      items,
-      rawLog: logText,
-    });
   }
 
   public parseTexParenTreeLog(

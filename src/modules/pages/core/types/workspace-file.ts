@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/core/domain/workspace-file.interface.ts
- * Shared Kernel contract representing a file in the manuscript compiler/project workspace.
+ * modules/pages/core/types/workspace-file.ts
+ * Shared Kernel contract representing a file in the compiler/page workspace.
  */
 
 export interface WorkspaceFile {

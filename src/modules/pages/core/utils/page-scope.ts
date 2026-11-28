@@ -1,5 +1,5 @@
 /**
- * modules/pages/core/page-scope.helper.ts
+ * modules/pages/core/utils/page-scope.ts
  * Canonical Page Aggregate Root resolution helpers ensuring every child entity
  * (`page_nodes`, `page_docs`, `page_files`, `page_snapshots`, review items)
  * persists a valid non-null `pageId` scoped to `spaceId`.
@@ -296,10 +296,11 @@ export function resolvePageControllerCoordinates(
 }
 
 export function resolveActiveProjectId(
-  project?: string | { id: string } | null,
+  spaceOrProject?: string | { id: string; spaceId?: string } | null,
 ): string | undefined {
-  if (!project) return undefined;
-  return typeof project === 'string' ? project : project.id;
+  if (!spaceOrProject) return undefined;
+  if (typeof spaceOrProject === 'string') return spaceOrProject;
+  return spaceOrProject.spaceId ?? spaceOrProject.id;
 }
 
 export function getRecordSpaceId(
@@ -315,8 +316,8 @@ export function isRecordDeleted(
 }
 
 /**
- * Isolates VFS nodes, docs, and binary files to a specific Manuscript Page inside a Space
- * while preserving 100% backward compatibility for legacy single-page spaces where `pageId` is null.
+ * Isolates VFS nodes, docs, and binary files to a specific Page inside a Space
+ * while preserving backward compatibility for legacy single-page spaces where `pageId` is null.
  */
 export function filterRecordsByPageScope<
   T extends { pageId?: string | null; id?: string; docId?: string | null },
@@ -387,25 +388,25 @@ export async function resolveCanonicalPageId(
 
 export async function resolveProjectIdByEntityId(
   prisma: PrismaService,
-  id: string,
+  entityId: string,
 ): Promise<string | null> {
-  if (!isUuid(id)) return null;
+  if (!isUuid(entityId)) return null;
   const page = await Promise.resolve(
     prisma.page?.findUnique?.({
-      where: { id },
+      where: { id: entityId },
       select: { spaceId: true },
     }),
   ).catch(() => null);
   const pageSpaceId = getRecordSpaceId(page);
   if (pageSpaceId) return pageSpaceId;
   const doc = await prisma.pageDoc.findUnique({
-    where: { id },
+    where: { id: entityId },
     select: { spaceId: true },
   });
   const docSpaceId = getRecordSpaceId(doc);
   if (docSpaceId) return docSpaceId;
   const node = await prisma.pageNode.findFirst({
-    where: { OR: [{ id }, { docId: id }, { spaceId: id }] },
+    where: { OR: [{ id: entityId }, { docId: entityId }, { spaceId: entityId }] },
     select: { spaceId: true },
   });
   const nodeSpaceId = getRecordSpaceId(node);
@@ -413,14 +414,14 @@ export async function resolveProjectIdByEntityId(
   if (prisma.space?.findUnique) {
     const space = await Promise.resolve(
       prisma.space.findUnique({
-        where: { id },
+        where: { id: entityId },
         select: { id: true },
       }),
     ).catch(() => null);
     if (space?.id) return space.id;
   }
   const project = await prisma.project.findUnique({
-    where: { id },
+    where: { id: entityId },
     select: { id: true },
   });
   return project?.id ?? null;

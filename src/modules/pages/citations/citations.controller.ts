@@ -32,7 +32,7 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 import { CitationsService } from './services/citations.service';
 import {
   CitationQueryDto,
@@ -50,15 +50,36 @@ import {
 interface RequestWithUser {
   user?: { id?: string; sub?: string; userId?: string };
   headers?: Record<string, string | string[] | undefined>;
+  resolvedSpaceId?: string;
+  resolvedPageId?: string;
 }
 
-@ApiTags('Manuscripts - Citations & Bibliography')
+@ApiTags('Pages - Citations & Bibliography')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages/spaces/:spaceId/citations')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
 @RequireRole(Role.REVIEWER)
 export class CitationsController {
   constructor(private readonly citationsService: CitationsService) {}
+
+  private resolveCoordinates(
+    routeSpaceId: string,
+    resolvedSpace: string | { id?: string } | undefined,
+    explicitPageId: string | undefined,
+    req?: RequestWithUser,
+  ): { spaceId: string; pageId?: string } {
+    const rawHeaderPageId = req?.headers?.['x-page-id'];
+    const headerPageId =
+      typeof rawHeaderPageId === 'string'
+        ? rawHeaderPageId.trim() || undefined
+        : undefined;
+    return resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId },
+      resolvedSpace,
+      explicitPageId || req?.resolvedPageId || headerPageId,
+      req,
+    );
+  }
 
   private resolveUserId(req?: RequestWithUser): string {
     const userId = req?.user?.id || req?.user?.sub || req?.user?.userId;
@@ -79,7 +100,6 @@ export class CitationsController {
   }
 
   @Get()
-  @RequireRole(Role.REVIEWER)
   @ApiOperation({
     summary: 'List or search citation entries in the space .bib files',
   })
@@ -92,8 +112,8 @@ export class CitationsController {
     @Req() req?: RequestWithUser,
   ): Promise<ListCitationsResponseDto> {
     try {
-      const { spaceId, pageId } = resolvePageControllerCoordinates(
-        { spaceId: routeSpaceId },
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
         resolvedSpace,
         queryPageId ?? queryDto?.pageId,
         req,
@@ -126,8 +146,8 @@ export class CitationsController {
     @Req() req?: RequestWithUser,
   ): Promise<BibMutationResponseDto> {
     try {
-      const { spaceId, pageId } = resolvePageControllerCoordinates(
-        { spaceId: routeSpaceId },
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
         resolvedSpace,
         queryPageId ?? dto?.pageId,
         req,
@@ -160,8 +180,8 @@ export class CitationsController {
     @Req() req?: RequestWithUser,
   ): Promise<BibMutationResponseDto> {
     try {
-      const { spaceId, pageId } = resolvePageControllerCoordinates(
-        { spaceId: routeSpaceId },
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
         resolvedSpace,
         queryPageId ?? dto?.pageId,
         req,
@@ -195,8 +215,8 @@ export class CitationsController {
   ): Promise<BibMutationResponseDto> {
     const userId = this.resolveUserId(req);
     try {
-      const { spaceId, pageId } = resolvePageControllerCoordinates(
-        { spaceId: routeSpaceId },
+      const { spaceId, pageId } = this.resolveCoordinates(
+        routeSpaceId,
         resolvedSpace,
         queryPageId ?? dto?.pageId,
         req,

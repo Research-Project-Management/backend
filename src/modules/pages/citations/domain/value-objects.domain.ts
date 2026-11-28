@@ -5,6 +5,7 @@
  */
 
 import { InvalidBibtexException } from './citations.errors';
+import { stripCombiningDiacritics } from './bibtex-formatter.domain';
 
 export class CitationKeyVo {
   private static readonly VALID_KEY_REGEX = /^[a-zA-Z0-9_:.-]+$/;
@@ -27,12 +28,9 @@ export class CitationKeyVo {
   }
 
   public static sanitize(input: string): string {
-    return input
-      .trim()
-      .replace(/\u0111/g, 'd')
-      .replace(/\u0110/g, 'D')
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
+    return stripCombiningDiacritics(
+      input.trim().replace(/\u0111/g, 'd').replace(/\u0110/g, 'D'),
+    )
       .replace(/[\s/\\{},~#%&$]+/g, '_')
       .replace(/[^a-zA-Z0-9_:.-]/g, '')
       .replace(/^_+|_+$/g, '');
@@ -213,18 +211,4 @@ export class IdentifierVo {
 
     return new IdentifierVo('unknown', trimmed, trimmed);
   }
-
-  public isDoi(): boolean {
-    return this.type === 'doi';
-  }
-
-  public isArxiv(): boolean {
-    return this.type === 'arxiv';
-  }
-
-  public isIsbn(): boolean {
-    return this.type === 'isbn';
-  }
 }
-
-export { IdentifierVo as AcademicIdentifierVo };

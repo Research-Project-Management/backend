@@ -11,7 +11,7 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { IntegrationsService } from '@/modules/integrations/integrations.service';
+import { IntegrationsService } from '@/modules/integrations';
 import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
 
 @Injectable()

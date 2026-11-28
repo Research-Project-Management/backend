@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/core/services/user-resolver.service.ts
- * Domain service resolving user display names and avatars from User + Profile records.
+ * modules/pages/core/services/user-resolver.service.ts
+ * Domain service resolving user display names and avatars from IdentityFacade or Prisma User + Profile records.
  */
 
 import { Injectable, Optional } from '@nestjs/common';

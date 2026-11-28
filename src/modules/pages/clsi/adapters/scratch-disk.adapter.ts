@@ -11,7 +11,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
+import { SafePath } from '../domain/path.policy';
 import { DiscoveredOutputFile } from '../domain/ports';
 
 export interface LockOptions {
@@ -387,7 +388,7 @@ export class OutputFileFinder {
     inputFiles: string[],
   ): Promise<DiscoveredOutputFile[]> {
     const inputSet = new Set(
-      inputFiles.map((f) => f.replace(/\\/g, '/').replace(/^\/+/, '')),
+      inputFiles.map((f) => SafePath.normalizeRelPath(f)),
     );
 
     const discovered: DiscoveredOutputFile[] = [];

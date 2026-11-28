@@ -9,6 +9,7 @@ import * as zlib from 'zlib';
 import { promisify } from 'util';
 import { SyncPoint, ReverseSyncPoint } from './ports';
 import { BoundedLruCache } from './lru-cache';
+import { SafePath } from './path.policy';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const MAX_CACHE_ENTRIES = 6;
@@ -98,8 +99,6 @@ export class SynctexParser {
     const cacheKey = this.getCacheKey(synctexText);
     const existing = this.lruCache.get(cacheKey);
     if (existing) {
-      this.lruCache.delete(cacheKey);
-      this.lruCache.set(cacheKey, existing);
       this.lastRawRef = synctexText;
       this.lastParsedRef = existing;
       return existing;
@@ -213,16 +212,10 @@ export class SynctexParser {
       this.parseRecords(synctexText);
     if (records.length === 0) return null;
 
-    const cleanFile = file
-      .replace(/\\/g, '/')
-      .replace(/^(\.\/)+/, '')
-      .replace(/^\/+/, '');
+    const cleanFile = SafePath.normalizeRelPath(file);
 
     let matchedInput = inputs.find((inp) => {
-      const cleanInp = inp.path
-        .replace(/\\/g, '/')
-        .replace(/^(\.\/)+/, '')
-        .replace(/^\/+/, '');
+      const cleanInp = SafePath.normalizeRelPath(inp.path);
       return (
         cleanInp === cleanFile ||
         cleanInp.endsWith(`/${cleanFile}`) ||
@@ -233,10 +226,7 @@ export class SynctexParser {
     if (!matchedInput) {
       const targetBasename = cleanFile.split('/').pop();
       matchedInput = inputs.find((inp) => {
-        const cleanInp = inp.path
-          .replace(/\\/g, '/')
-          .replace(/^(\.\/)+/, '')
-          .replace(/^\/+/, '');
+        const cleanInp = SafePath.normalizeRelPath(inp.path);
         return cleanInp.split('/').pop() === targetBasename;
       });
     }
@@ -323,10 +313,7 @@ export class SynctexParser {
 
     const matchedInput = inputs.find((inp) => inp.tag === closestRecord?.tag);
     const rawFile = matchedInput ? matchedInput.path : 'main.tex';
-    const resolvedFile = rawFile
-      .replace(/\\/g, '/')
-      .replace(/^(\.\/)+/, '')
-      .replace(/^\/+/, '');
+    const resolvedFile = SafePath.normalizeRelPath(rawFile);
 
     return {
       file: resolvedFile,

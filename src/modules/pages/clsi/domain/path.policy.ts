@@ -9,6 +9,14 @@ import * as fs from 'fs/promises';
 import { UnsafePathException } from './errors';
 
 export class SafePath {
+  public static hasControlChar(str: string): boolean {
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i);
+      if ((code >= 0 && code <= 31) || code === 127) return true;
+    }
+    return false;
+  }
+
   /**
    * Normalizes a relative path into clean POSIX form without leading `./` or `/`.
    */
@@ -18,6 +26,20 @@ export class SafePath {
       .replace(/\\/g, '/')
       .replace(/^(\.\/)+/, '')
       .replace(/^\/+/, '');
+  }
+
+  /**
+   * Validates that a normalized relative path is safe to pass as a CLI entry file
+   * (non-empty, does not start with `-` option flag, no `..`, no control chars).
+   */
+  public static isSafeCompileEntryPath(cleanRelPath: string): boolean {
+    return Boolean(
+      cleanRelPath &&
+        !cleanRelPath.startsWith('-') &&
+        !cleanRelPath.startsWith('/') &&
+        !cleanRelPath.includes('..') &&
+        !this.hasControlChar(cleanRelPath),
+    );
   }
 
   /**

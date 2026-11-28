@@ -1,6 +1,6 @@
 /**
- * modules/manuscripts/core/domain/latex-escape.ts
- * Canonical LaTeX character escaping utility shared across Citations, Docstore, and Export/Import.
+ * modules/pages/core/domain/latex-escape.ts
+ * Canonical LaTeX character escaping utility shared across Citations, Page Scaffolding, and Export/Import.
  */
 
 export function escapeLatex(text: string): string {

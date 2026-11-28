@@ -17,7 +17,6 @@ import {
   AlreadyCompilingError,
   AutoCompileShedError,
   CompileAbortedError,
-  CompileLockStats,
   CompilePriority,
   CompileRateLimitExceededError,
   CompileSupersededError,
@@ -238,15 +237,6 @@ export class CompileLockService implements OnModuleDestroy {
     this.autoShedThreshold =
       config?.autoShedThreshold ??
       Math.max(1, Math.floor(this.compileConcurrencyLimit * 0.75));
-  }
-
-  public stats(): CompileLockStats {
-    this.pruneExpiredLocks();
-    return {
-      capacity: this.compileConcurrencyLimit,
-      active: this.locks.size,
-      inFlightProjects: this.locks.size,
-    };
   }
 
   public onModuleDestroy(): void {
@@ -470,11 +460,6 @@ export class CompileLockService implements OnModuleDestroy {
       return true;
     }
     return false;
-  }
-
-  public isInFlight(spaceId: string, userId?: string): boolean {
-    const lock = this.locks.get(getCompileName(spaceId, userId));
-    return Boolean(lock && !lock.isExpired());
   }
 
   private async waitSettled(settled: Promise<void>, graceMs: number) {

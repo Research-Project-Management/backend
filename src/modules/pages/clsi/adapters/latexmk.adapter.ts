@@ -9,28 +9,14 @@ import { BadRequestException } from '@nestjs/common';
 import {
   EngineRunOptions,
   EngineRunResult,
-  ILatexEngine,
   ISandboxRunner,
 } from '../domain/ports';
 import { SandboxPolicyViolationException } from '../domain/errors';
 import { SafePath } from '../domain/path.policy';
 
-export function hasControlChar(str: string): boolean {
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if ((code >= 0 && code <= 31) || code === 127) return true;
-  }
-  return false;
-}
-
 export function assertSafeMainFile(mainFile: string): string {
   const clean = SafePath.normalizeRelPath(mainFile);
-  if (
-    !clean ||
-    clean.startsWith('-') ||
-    clean.includes('..') ||
-    hasControlChar(clean)
-  ) {
+  if (!SafePath.isSafeCompileEntryPath(clean)) {
     throw new BadRequestException(
       `Invalid or unsafe mainFile path: "${mainFile}"`,
     );
@@ -38,7 +24,7 @@ export function assertSafeMainFile(mainFile: string): string {
   return clean;
 }
 
-export class LatexmkEngine implements ILatexEngine {
+export class LatexmkEngine {
   readonly name = 'latexmk';
   private availableCache: { value: boolean; checkedAt: number } | null = null;
   private static readonly NEGATIVE_PROBE_TTL_MS = 30_000;

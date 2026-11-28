@@ -3,20 +3,8 @@
  * Shared domain types for the Citations & Bibliography module.
  */
 
-import type { CitationKeyVo } from '../domain/value-objects.domain';
-
-export type BibValueFormat = 'latex' | 'plain';
-
-export type IdentifierType = 'doi' | 'arxiv' | 'isbn' | 'unknown';
-
-export interface BibEntryProps {
-  id?: string;
-  key: string | CitationKeyVo;
-  entryType: string;
-  fields: Record<string, string>;
-  rawBibtex?: string;
-  valueFormat?: BibValueFormat;
-}
+export type { BibEntryProps, BibValueFormat } from '../domain/bib-entry.domain';
+export type { IdentifierType } from '../domain/value-objects.domain';
 
 export interface StructuredCitationEntryInput {
   id?: string;

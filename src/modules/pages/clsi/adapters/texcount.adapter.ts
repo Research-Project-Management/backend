@@ -185,11 +185,7 @@ export class TexcountCliAdapter {
     try {
       const normalizedRoot =
         SafePath.normalizeRelPath(params.rootFile || 'main.tex') || 'main.tex';
-      if (
-        normalizedRoot.startsWith('-') ||
-        normalizedRoot.includes('..') ||
-        normalizedRoot.startsWith('/')
-      ) {
+      if (!SafePath.isSafeCompileEntryPath(normalizedRoot)) {
         return null;
       }
       let combinedText = '';

@@ -171,10 +171,3 @@ export function createZipStream(entries: ZipEntry[]): Readable {
 
   return output;
 }
-
-export {
-  type ZipEntry as PkZipEntry,
-  sanitizeZipPath as sanitizePkZipPath,
-  buildZipBuffer as buildPkZipBuffer,
-  createZipStream as createPkZipStream,
-};

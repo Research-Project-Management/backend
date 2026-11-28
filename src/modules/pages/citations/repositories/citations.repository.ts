@@ -1,38 +1,25 @@
 /**
  * citations/citations.repository.ts
- * Direct @Injectable() Repository for Manuscripts Citations & Bibliography.
+ * Direct @Injectable() Repository for Pages Citations & Bibliography.
  *
  * Encapsulates:
- * - Project .bib file discovery and upsert (via StructureService & DocstoreService)
- * - External & local library sync (Zotero, Mendeley, LibraryFacade)
+ * - Page-scoped .bib file discovery and upsert (via StructureService & DocstoreService)
  * - BibTeX AST parsing & formatting
  */
 
-import {
-  Injectable,
-  Logger,
-  Optional,
-  Inject,
-  BadRequestException,
-  NotFoundException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { IntegrationsService } from '@/modules/integrations/integrations.service';
-import { LIBRARY_FACADE, ILibraryFacade } from '@/modules/library';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { DistributedLockService } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { DistributedLockService } from '@/core';
+  NodePathVo,
+  PageDomainEventBus,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { PageNodeEntity, StructureService } from '@/modules/pages/structure';
 
 import { BibEntry, BibliographyFile } from '../domain/bib-entry.domain';
 import { BibtexParser, ConflictPolicy } from '../domain/bibtex.domain';
-import { LibrarySyncAdapter } from '../services/sync.service';
 
 @Injectable()
 export class CitationsRepository {
@@ -45,11 +32,6 @@ export class CitationsRepository {
     @Optional()
     private readonly docstoreService?: DocstoreService,
     @Optional()
-    private readonly integrationsService?: IntegrationsService,
-    @Optional()
-    @Inject(LIBRARY_FACADE)
-    private readonly libraryFacade?: ILibraryFacade,
-    @Optional()
     bibParser?: BibtexParser,
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
@@ -58,8 +40,6 @@ export class CitationsRepository {
     private readonly domainEventBus?: PageDomainEventBus,
     @Optional()
     private readonly lockService?: DistributedLockService,
-    @Optional()
-    private readonly librarySyncAdapter?: LibrarySyncAdapter,
   ) {
     this.bibParser = bibParser ?? new BibtexParser();
   }
@@ -89,6 +69,12 @@ export class CitationsRepository {
     }
   }
 
+  private static isDocNode(node: Partial<PageNodeEntity>): boolean {
+    return typeof node.isDoc === 'function'
+      ? node.isDoc()
+      : node.type !== 'FOLDER' && node.type !== 'FILE';
+  }
+
   public async collectBibFiles(
     spaceId: string,
     pageId?: string,
@@ -98,15 +84,19 @@ export class CitationsRepository {
       return bibFiles;
     }
 
+    const scopedPageId = pageId?.trim() || undefined;
+
     try {
       const nodes = await this.structureService.getAllNodes(
         spaceId,
         undefined,
-        pageId,
+        scopedPageId,
       );
       const bibNodes = nodes.filter(
         (n: PageNodeEntity) =>
-          n.isDoc() && n.name.toLowerCase().endsWith('.bib'),
+          CitationsRepository.isDocNode(n) &&
+          n.name.toLowerCase().endsWith('.bib') &&
+          (!scopedPageId || !n.pageId || n.pageId === scopedPageId),
       );
 
       const validBibNodes = bibNodes.filter(
@@ -158,6 +148,7 @@ export class CitationsRepository {
     pageId?: string,
     conflictPolicy: ConflictPolicy = 'overwrite',
   ): Promise<{ filePath: string; docId?: string; conflicts: string[] }> {
+    const scopedPageId = pageId?.trim() || undefined;
     const cleanFilename = NodePathVo.toRelative(
       targetFilename.replace(/^(\.\/)+/, ''),
     );
@@ -171,14 +162,14 @@ export class CitationsRepository {
       return { filePath: cleanPath, conflicts: [] };
     }
 
-    const lockResource = `citation:bib:${spaceId}:${pageId ?? 'default'}:${cleanPath}`;
+    const lockResource = `citation:bib:${spaceId}:${scopedPageId ?? 'default'}:${cleanPath}`;
     const executeWrite = () =>
       this.appendEntriesWithOccRetry(
         spaceId,
         entries,
         cleanFilename,
         cleanPath,
-        pageId,
+        scopedPageId,
         conflictPolicy,
       );
 
@@ -278,9 +269,16 @@ export class CitationsRepository {
       undefined,
       pageId,
     );
-    const targetNode = nodes.find(
-      (n: PageNodeEntity) => n.path === cleanPath || n.name === cleanFilename,
+    const scopedDocNodes = nodes.filter(
+      (n: PageNodeEntity) =>
+        CitationsRepository.isDocNode(n) &&
+        (!pageId || !n.pageId || n.pageId === pageId),
     );
+    const targetNode =
+      scopedDocNodes.find((n) => n.path === cleanPath) ??
+      (!cleanFilename.includes('/')
+        ? scopedDocNodes.find((n) => n.name === cleanFilename)
+        : undefined);
 
     if (targetNode && targetNode.docId) {
       const docId = targetNode.docId;
@@ -378,35 +376,5 @@ export class CitationsRepository {
     }
 
     return { filePath: newNode.path, docId: createdDocId, conflicts };
-  }
-
-  // ─── Library Sync (Zotero, Mendeley, Flux Library) ──────────────────────────
-
-  public async fetchCollectionBibtex(
-    userId: string,
-    collectionId: string,
-    spaceId?: string,
-  ): Promise<string> {
-    if (this.librarySyncAdapter) {
-      return this.librarySyncAdapter.fetchCollectionBibtex(
-        userId,
-        collectionId,
-        spaceId,
-      );
-    }
-
-    const fallbackAdapter = new LibrarySyncAdapter(
-      this.integrationsService,
-      this.libraryFacade,
-    );
-    return fallbackAdapter.fetchCollectionBibtex(userId, collectionId, spaceId);
-  }
-
-  private upsertEntryText(
-    text: string,
-    key: string,
-    bibString: string,
-  ): string {
-    return BibtexParser.upsertEntry(text, key, bibString);
   }
 }

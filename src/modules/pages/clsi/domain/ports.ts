@@ -3,7 +3,7 @@
  * Domain contracts and port interfaces for CLSI artifacts, engines, sandbox runners, and workspaces.
  */
 
-import { WorkspaceFile } from '@/modules/pages/core/types/workspace-file';
+import { WorkspaceFile } from '@/modules/pages/core';
 import { SandboxProfile } from './sandbox.policy';
 
 export type CompileOutcome =
@@ -180,15 +180,6 @@ export interface EngineRunResult {
   shellEscapeAdvisories?: string[];
 }
 
-export interface ILatexEngine {
-  readonly name: string;
-  isAvailable(): Promise<boolean>;
-  compile(
-    options: EngineRunOptions,
-    compilerOverride?: 'pdflatex' | 'xelatex' | 'lualatex',
-  ): Promise<EngineRunResult>;
-}
-
 export interface ProcessExecutionOptions {
   cwd: string;
   timeoutMs?: number;
@@ -246,25 +237,4 @@ export interface CachedCompileArtifacts {
   pdf?: string;
   synctex?: string;
   logs?: string;
-}
-
-export interface IWorkspaceManager {
-  getScratchDir(spaceId: string): string;
-  ensureScratch(spaceId: string): Promise<string>;
-  syncFiles(
-    spaceId: string,
-    files: WorkspaceFile[],
-  ): Promise<WorkspaceSyncStats>;
-  cleanScratch(spaceId: string): Promise<void>;
-  cleanAuxBuildCache(spaceId: string): Promise<void>;
-  purgeExtraneousFiles(spaceId: string, inputFiles: string[]): Promise<void>;
-  listAuxFiles(spaceId: string): Promise<AuxFileInfo[]>;
-  readAuxFile(spaceId: string, filename: string): Promise<Buffer | null>;
-  readArtifact(spaceId: string, filename: string): Promise<Buffer | null>;
-  readBuildState(spaceId: string): Promise<BuildStateRecord | null>;
-  writeBuildState(spaceId: string, state: BuildStateRecord): Promise<void>;
-  writeCachedArtifacts(
-    spaceId: string,
-    artifacts: CachedCompileArtifacts,
-  ): Promise<void>;
 }

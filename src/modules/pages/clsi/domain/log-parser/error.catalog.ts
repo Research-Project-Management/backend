@@ -167,14 +167,9 @@ export interface RuleDefinition extends ErrorExplanationProps {
   patterns: RegExp[];
 }
 
-export interface ErrorExplainerLike {
-  explain(message: string, context?: string): ErrorExplanationVo | null;
-  getByCode(code: string): ErrorExplanationVo | null;
-}
-
 const LATEX_KB_BASE_URL = 'https://latexref.xyz/dev/latex2e.html';
 
-export class LatexErrorCatalog implements ErrorExplainerLike {
+export class LatexErrorCatalog {
   private readonly rules: RuleDefinition[] = [
     {
       code: 'UNDEFINED_CONTROL_SEQUENCE',

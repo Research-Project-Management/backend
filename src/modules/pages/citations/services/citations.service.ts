@@ -1,6 +1,6 @@
 /**
  * citations/citations.service.ts
- * Service orchestrating project .bib citations, DOI/arXiv resolution, and Library sync.
+ * Service orchestrating page-scoped .bib citations, DOI/arXiv resolution, and Library sync.
  */
 
 import {
@@ -8,13 +8,19 @@ import {
   Optional,
   Logger,
   BadRequestException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { CitationsRepository } from '../repositories/citations.repository';
 import { CitationIndexService } from './index.service';
+import { LibrarySyncAdapter } from './sync.service';
 import { DoiContentNegotiationService } from '@/modules/library/citation/services/doi-negotiation.service';
 import { QueryResolverService } from '@/modules/library/citation/services/query-resolver.service';
 import { IdentifierVo } from '../domain/value-objects.domain';
-import { BibEntry, buildBibEntryFromInput } from '../domain/bib-entry.domain';
+import {
+  BibEntry,
+  buildBibEntryFromInput,
+  matchesCitationQuery,
+} from '../domain/bib-entry.domain';
 import { IdentifierNotFoundException } from '../domain/citations.errors';
 import { BibtexParser } from '../domain/bibtex.domain';
 import {
@@ -41,12 +47,21 @@ export class CitationsService {
     private readonly queryResolver?: QueryResolverService,
     @Optional()
     private readonly citationIndex?: CitationIndexService,
+    @Optional()
+    private readonly librarySync?: LibrarySyncAdapter,
   ) {
     this.bibParser = bibParser ?? new BibtexParser();
   }
 
+  private resolveTargetPageId(
+    explicitPageId?: string,
+    dtoPageId?: string,
+  ): string | undefined {
+    return (explicitPageId || dtoPageId)?.trim() || undefined;
+  }
+
   /**
-   * List or search citation entries across all .bib files in the project.
+   * List or search citation entries across .bib files in the page (or space when unscoped).
    * Uses CQRS L1/L2 cached CitationIndexService when available.
    */
   public async listCitations(
@@ -54,13 +69,13 @@ export class CitationsService {
     queryDto: CitationQueryDto,
     pageId?: string,
   ): Promise<ListCitationsResponseDto> {
-    const resolvedPageId = pageId ?? queryDto.pageId;
-    const limit = queryDto.limit ?? 500;
+    const resolvedPageId = this.resolveTargetPageId(pageId, queryDto?.pageId);
+    const limit = queryDto?.limit ?? 500;
 
     if (this.citationIndex) {
       return this.citationIndex.queryCitations(
         spaceId,
-        queryDto.query,
+        queryDto?.query,
         limit,
         resolvedPageId,
       );
@@ -70,24 +85,14 @@ export class CitationsService {
       spaceId,
       resolvedPageId,
     );
-    const term = (queryDto.query || '').trim().toLowerCase();
 
     const allMatches: CitationEntryDto[] = [];
     for (const file of bibFiles) {
       for (const entry of file.entries) {
-        if (term) {
-          const matchesKey = entry.key.value.toLowerCase().includes(term);
-          const matchesTitle = (entry.title || '').toLowerCase().includes(term);
-          const matchesAuthor = entry.authors
-            .toDisplayString()
-            .toLowerCase()
-            .includes(term);
-          const matchesYear = (entry.year || '').toLowerCase().includes(term);
-          if (!matchesKey && !matchesTitle && !matchesAuthor && !matchesYear) {
-            continue;
-          }
+        const dto = entry.toJSON(file.path);
+        if (matchesCitationQuery(dto, queryDto?.query)) {
+          allMatches.push(dto);
         }
-        allMatches.push(entry.toJSON(file.path));
       }
     }
 
@@ -161,14 +166,15 @@ export class CitationsService {
       throw new IdentifierNotFoundException(dto.identifier);
     }
 
+    const resolvedPageId = this.resolveTargetPageId(pageId, dto.pageId);
     const targetFile = dto.targetBibFile || 'references.bib';
     const result = await this.repository.appendEntriesToBib(
       spaceId,
       [resolvedEntry],
       targetFile,
-      pageId ?? dto.pageId,
+      resolvedPageId,
     );
-    await this.citationIndex?.invalidateSpace(spaceId, pageId ?? dto.pageId);
+    await this.citationIndex?.invalidateSpace(spaceId, resolvedPageId);
 
     return {
       filePath: result.filePath,
@@ -179,7 +185,7 @@ export class CitationsService {
   }
 
   /**
-   * Sync reference collection from library / external provider into project .bib file.
+   * Sync reference collection from library / external provider into page .bib file.
    */
   public async syncLibraryCollection(
     spaceId: string,
@@ -187,7 +193,14 @@ export class CitationsService {
     dto: SyncLibraryDto,
     pageId?: string,
   ): Promise<BibMutationResponseDto> {
-    const rawBibtex = await this.repository.fetchCollectionBibtex(
+    if (!this.librarySync) {
+      throw new ServiceUnavailableException(
+        'Library citation sync service is not configured',
+      );
+    }
+
+    const resolvedPageId = this.resolveTargetPageId(pageId, dto.pageId);
+    const rawBibtex = await this.librarySync.fetchCollectionBibtex(
       userId,
       dto.collectionId,
       spaceId,
@@ -200,10 +213,10 @@ export class CitationsService {
       spaceId,
       entries,
       targetFile,
-      pageId ?? dto.pageId,
+      resolvedPageId,
       dto.conflictPolicy ?? 'overwrite',
     );
-    await this.citationIndex?.invalidateSpace(spaceId, pageId ?? dto.pageId);
+    await this.citationIndex?.invalidateSpace(spaceId, resolvedPageId);
 
     if (result.conflicts.length > 0) {
       this.logger.warn(
@@ -220,13 +233,14 @@ export class CitationsService {
   }
 
   /**
-   * Format and upsert structured citation entries or raw BibTeX into the project's .bib file.
+   * Format and upsert structured citation entries or raw BibTeX into the page's .bib file.
    */
   public async upsertEntries(
     spaceId: string,
     dto: UpsertCitationEntriesDto,
     pageId?: string,
   ): Promise<BibMutationResponseDto> {
+    const resolvedPageId = this.resolveTargetPageId(pageId, dto.pageId);
     const targetFile = dto.targetBibFile || 'references.bib';
     const domainEntries: BibEntry[] = [];
 
@@ -250,10 +264,10 @@ export class CitationsService {
       spaceId,
       domainEntries,
       targetFile,
-      pageId ?? dto.pageId,
+      resolvedPageId,
       dto.conflictPolicy ?? 'overwrite',
     );
-    await this.citationIndex?.invalidateSpace(spaceId, pageId ?? dto.pageId);
+    await this.citationIndex?.invalidateSpace(spaceId, resolvedPageId);
 
     return {
       filePath: result.filePath,

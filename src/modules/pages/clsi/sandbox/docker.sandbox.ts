@@ -7,7 +7,7 @@ import {
 } from '../domain/ports';
 import { LocalProcessRunner } from './local.sandbox';
 import { resolveTexLiveImage } from './sandbox.config';
-import { getSafeHostEnv } from '../../core/config/pages.config';
+import { getSafeHostEnv } from '@/modules/pages/core';
 import { SandboxUnavailableException } from '../domain/errors';
 import {
   buildSandboxEnv,

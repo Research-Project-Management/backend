@@ -6,7 +6,7 @@
 import { InvalidNodeNameError } from '../domain/errors';
 
 export const MAX_VIRTUAL_TREE_DEPTH = 32;
-export const MAX_VIRTUAL_PATH_LENGTH = 1000;
+const MAX_VIRTUAL_PATH_LENGTH = 1000;
 
 export interface ParsedFolderSegment {
   readonly name: string;
@@ -149,13 +149,6 @@ export class NodePathVo {
   public static toRelative(p: string): string {
     const norm = NodePathVo.normalize(p);
     return norm === '/' ? '' : norm.slice(1);
-  }
-
-  /**
-   * Alias for `toRelative`: converts a canonical path into a relative path without leading `/`.
-   */
-  public static toRelativePath(rawPath: string): string {
-    return NodePathVo.toRelative(rawPath);
   }
 
   /**

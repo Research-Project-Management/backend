@@ -41,37 +41,6 @@ export class PagesDomainError extends Error {
   }
 }
 
-export class PagesServiceUnavailableError extends PagesDomainError {
-  constructor(
-    message = 'Pages service dependency is not available',
-    details?: unknown,
-  ) {
-    super(message, {
-      code: 'PAGES_SERVICE_UNAVAILABLE',
-      statusCode: 503,
-      details,
-    });
-  }
-}
-
-export class DistributedLockTimeoutError extends PagesDomainError {
-  public readonly resource: string;
-  public readonly maxWaitMs: number;
-
-  constructor(resource: string, maxWaitMs: number) {
-    super(
-      `Failed to acquire distributed lock for resource "${resource}" within ${maxWaitMs}ms`,
-      {
-        code: 'DISTRIBUTED_LOCK_TIMEOUT',
-        statusCode: 409,
-        details: { resource, maxWaitMs },
-      },
-    );
-    this.resource = resource;
-    this.maxWaitMs = maxWaitMs;
-  }
-}
-
 export class StructureError extends PagesDomainError {
   constructor(message: string, httpStatus = 400, code = 'STRUCTURE_ERROR') {
     super(message, {

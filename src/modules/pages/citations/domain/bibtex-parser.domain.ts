@@ -110,16 +110,13 @@ export class BibtexParser {
     return -1;
   }
 
-  public static maskCommentsPreserveLength(text: string): string {
-    return BibtexParser.scanComments(text, true);
-  }
-
   /**
    * Single-pass O(N) comment scanner that only treats unescaped '%' as a comment
-   * when outside braces (braceDepth === 0) and outside quotes.
+   * when outside braces (braceDepth === 0) and outside quotes, replacing comment
+   * characters with spaces so byte offsets remain identical.
    * Preserves '%' inside URLs (e.g. %20) and abstracts (e.g. 20%).
    */
-  private static scanComments(text: string, preserveLength: boolean): string {
+  public static maskCommentsPreserveLength(text: string): string {
     if (!text) return '';
     const chunks: string[] = [];
     let chunkStart = 0;
@@ -154,9 +151,7 @@ export class BibtexParser {
         }
         let lineEnd = text.indexOf('\n', i);
         if (lineEnd === -1) lineEnd = text.length;
-        if (preserveLength) {
-          chunks.push(' '.repeat(lineEnd - i));
-        }
+        chunks.push(' '.repeat(lineEnd - i));
         i = lineEnd;
         chunkStart = i;
         continue;
@@ -210,7 +205,7 @@ export class BibtexParser {
       const openIdx = match.index + match[0].indexOf(openDelim);
       const closeIdx =
         openDelim === '('
-          ? BibtexParser.findMatchingClosingParenStatic(maskedText, openIdx)
+          ? BibtexParser.findMatchingClosingParen(maskedText, openIdx)
           : BibtexParser.findMatchingClosingBrace(maskedText, openIdx);
       if (closeIdx === -1) break;
       if (
@@ -318,23 +313,11 @@ export class BibtexParser {
     return { text: patched, conflicts, renamedKeys };
   }
 
-  public static upsertEntry(
-    text: string,
-    key: string,
-    bibString: string,
-  ): string {
-    return BibtexParser.upsertEntriesBatch(text, [{ key, bibString }]).text;
-  }
-
-  private findMatchingClosingBrace(text: string, openBraceIdx: number): number {
-    return BibtexParser.findMatchingClosingBrace(text, openBraceIdx);
-  }
-
   /**
    * Finds the closing parenthesis corresponding to an opening parenthesis at openParenIdx
    * (for @article(...) or @string(...) entries).
    */
-  public static findMatchingClosingParenStatic(
+  public static findMatchingClosingParen(
     text: string,
     openParenIdx: number,
   ): number {
@@ -357,5 +340,3 @@ export class BibtexParser {
     return -1;
   }
 }
-
-export { BibtexParser as RegexAstBibtexParser };

@@ -6,13 +6,10 @@
 import { ConflictException } from '@nestjs/common';
 import { PageDoc, PageNode } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import {
-  getRecordSpaceId,
-  isRecordDeleted,
-} from '@/modules/pages/core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import type { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import type { DocstoreService } from '@/modules/pages/docstore';
+import { PagesDomainError } from '../domain/errors';
+import { NodePathVo } from './node-path';
+import { getRecordSpaceId, isRecordDeleted } from './page-scope';
 
 export async function hydratePageDocLines(
   docstoreService: DocstoreService,
@@ -242,6 +239,32 @@ export async function formatPageByIdResponse(
   };
 }
 
+function buildDocVersionConflictException(params: {
+  docId: string;
+  expectedRev?: number;
+  expectedVersion?: number;
+  currentRev: number;
+  currentVersion: number;
+  remoteLines: string[];
+}): ConflictException {
+  const conflictDetails = {
+    docId: params.docId,
+    expectedRev: params.expectedRev,
+    expectedVersion: params.expectedVersion,
+    currentRev: params.currentRev,
+    rev: params.currentRev,
+    currentVersion: params.currentVersion,
+    remoteContent: params.remoteLines.join('\n'),
+  };
+  return new ConflictException({
+    statusCode: 409,
+    code: 'DOC_VERSION_CONFLICT',
+    message: 'Document has been modified by another session',
+    ...conflictDetails,
+    details: conflictDetails,
+  });
+}
+
 export async function assertExpectedVersionAndRev(
   docstoreService: DocstoreService,
   record: {
@@ -261,10 +284,10 @@ export async function assertExpectedVersionAndRev(
     (expectedVersion !== undefined && record.version !== expectedVersion)
   ) {
     let remoteLines: string[] = [];
-    const projectId = getRecordSpaceId(record);
+    const spaceId = getRecordSpaceId(record);
     try {
-      if (record.lines === undefined && projectId) {
-        const latest = await docstoreService.getDoc(projectId, record.id);
+      if (record.lines === undefined && spaceId) {
+        const latest = await docstoreService.getDoc(spaceId, record.id);
         remoteLines = Array.isArray(latest?.lines) ? latest.lines : [];
       } else {
         remoteLines = await hydratePageDocLines(docstoreService, {
@@ -275,21 +298,13 @@ export async function assertExpectedVersionAndRev(
     } catch {
       remoteLines = [];
     }
-    const conflictDetails = {
+    throw buildDocVersionConflictException({
       docId: record.id,
       expectedRev,
       expectedVersion,
       currentRev: record.rev,
-      rev: record.rev,
       currentVersion: record.version,
-      remoteContent: remoteLines.join('\n'),
-    };
-    throw new ConflictException({
-      statusCode: 409,
-      code: 'DOC_VERSION_CONFLICT',
-      message: 'Document has been modified by another session',
-      ...conflictDetails,
-      details: conflictDetails,
+      remoteLines,
     });
   }
 }
@@ -309,9 +324,9 @@ export async function executeDocstoreUpdateWithOcc(
   version?: number,
   expectedRev?: number,
 ) {
-  const projectId = getRecordSpaceId(record);
+  const spaceId = getRecordSpaceId(record);
   try {
-    return await docstoreService.updateDoc(projectId, record.id, {
+    return await docstoreService.updateDoc(spaceId, record.id, {
       lines,
       version: (version ?? record.version) + 1,
       expectedRev,
@@ -319,7 +334,7 @@ export async function executeDocstoreUpdateWithOcc(
   } catch (err) {
     if (err instanceof PagesDomainError && err.code === 'DOC_VERSION_CONFLICT') {
       const latest = await docstoreService
-        .getDoc(projectId, record.id)
+        .getDoc(spaceId, record.id)
         .catch(() => null);
       let remoteLines: string[] = Array.isArray(latest?.lines)
         ? latest.lines
@@ -337,21 +352,13 @@ export async function executeDocstoreUpdateWithOcc(
       const errWithRev = err as { currentRev?: number };
       const currentRev = latest?.rev ?? errWithRev.currentRev ?? record.rev;
       const currentVersion = latest?.version ?? record.version;
-      const conflictDetails = {
+      throw buildDocVersionConflictException({
         docId: record.id,
         expectedRev,
         expectedVersion: undefined,
         currentRev,
-        rev: currentRev,
         currentVersion,
-        remoteContent: remoteLines.join('\n'),
-      };
-      throw new ConflictException({
-        statusCode: 409,
-        code: 'DOC_VERSION_CONFLICT',
-        message: 'Document has been modified by another session',
-        ...conflictDetails,
-        details: conflictDetails,
+        remoteLines,
       });
     }
     throw err;

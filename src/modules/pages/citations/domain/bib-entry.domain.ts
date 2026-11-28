@@ -87,17 +87,6 @@ export class BibEntry {
     return this.fields.get(fieldName.toLowerCase());
   }
 
-  /**
-   * Generates a clean human-readable label for autocompletion dropdowns.
-   * Format: "Vaswani et al. (2017) - Attention is all you need"
-   */
-  public getDisplayLabel(): string {
-    const authorPart = this.authors.toDisplayString();
-    const yearPart = this.year ? ` (${this.year})` : '';
-    const titlePart = this.title ? ` - ${this.title}` : '';
-    return `${authorPart}${yearPart}${titlePart}`;
-  }
-
   public toBibtexString(): string {
     return this.generateBibtex();
   }
@@ -157,12 +146,27 @@ export class BibEntry {
   }
 }
 
+export function matchesCitationQuery(
+  entry: {
+    key: string;
+    title?: string;
+    authors: readonly string[];
+    year?: string;
+  },
+  query?: string,
+): boolean {
+  const term = (query || '').trim().toLowerCase();
+  if (!term) return true;
+  if (entry.key.toLowerCase().includes(term)) return true;
+  if ((entry.title || '').toLowerCase().includes(term)) return true;
+  if ((entry.year || '').toLowerCase().includes(term)) return true;
+  return entry.authors.some((a) => a.toLowerCase().includes(term));
+}
+
 /**
  * citations/domain/entities/bibliography-file.entity.ts
- * Entity modeling an entire parsed .bib file inside the manuscript project.
+ * Entity modeling an entire parsed .bib file inside a page workspace.
  */
-
-// ─── BibliographyFile Entity ──────────────────────────────────────────────────
 
 export interface BibliographyFileProps {
   path: string;
@@ -194,43 +198,14 @@ export class BibliographyFile {
     this.duplicateKeys = Object.freeze([...dupes]);
   }
 
-  public getEntryByKey(key: string): BibEntry | undefined {
-    const norm = key.trim().toLowerCase();
-    return this.entries.find((e) => e.key.value.toLowerCase() === norm);
-  }
-
-  public findMatches(query?: string): BibEntry[] {
-    if (!query || query.trim() === '') {
-      return [...this.entries];
-    }
-
-    const q = query.trim().toLowerCase();
-    return this.entries.filter((e) => {
-      if (e.key.value.toLowerCase().includes(q)) return true;
-      if (e.title && e.title.toLowerCase().includes(q)) return true;
-      if (e.year && e.year.includes(q)) return true;
-      if (e.authors.toDisplayString().toLowerCase().includes(q)) return true;
-      if (e.authors.toFullNameList().some((fn) => fn.toLowerCase().includes(q)))
-        return true;
-      return false;
-    });
-  }
-
   public toJSON() {
     return {
       path: this.path,
       totalCount: this.totalCount,
       duplicateKeys: [...this.duplicateKeys],
-      entries: this.entries.map((e) => e.toJSON()),
+      entries: this.entries.map((e) => e.toJSON(this.path)),
     };
   }
 }
-
-/**
- * citations/domain/citation-operations.ts
- * Converts structured citation/library payloads into normalized domain `BibEntry` entities.
- */
-
-// ─── BibliographyFile Entity ──────────────────────────────────────────────────
 
 export { buildBibEntryFromInput } from './bib-entry.mapper';

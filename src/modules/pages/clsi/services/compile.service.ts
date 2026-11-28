@@ -16,13 +16,13 @@ import {
   CompileValidationIssue,
   DiagnosticsSummary,
   EngineRunResult,
-  IWorkspaceManager,
   WorkspaceFile,
   WorkspaceSyncStats,
-  ILatexEngine,
   CompilerDiagnostic,
   DiscoveredOutputFile,
 } from '../domain/ports';
+import { ClsiRepository } from '../clsi.repository';
+import { LatexmkEngine } from '../adapters/latexmk.adapter';
 import {
   ScratchLockAdapter,
   OutputFileFinder,
@@ -35,7 +35,6 @@ import {
 } from '../domain/compile.policy';
 import { CompileLogParser } from '../domain/log-parser/tex-log.parser';
 import { SafePath } from '../domain/path.policy';
-import { hasControlChar } from '../adapters/latexmk.adapter';
 
 import {
   MAX_PARSE_LOG_BYTES,
@@ -180,8 +179,8 @@ export class CompileService {
   private readonly logger = new Logger(CompileService.name);
 
   constructor(
-    private readonly workspace: IWorkspaceManager,
-    private readonly latexmkEngine: ILatexEngine,
+    private readonly workspace: ClsiRepository,
+    private readonly latexmkEngine: LatexmkEngine,
     private readonly logParser: CompileLogParser = new CompileLogParser(),
     private readonly scratchLock: ScratchLockAdapter = new ScratchLockAdapter(),
     private readonly outputFileFinder: OutputFileFinder = new OutputFileFinder(),
@@ -339,12 +338,7 @@ export class CompileService {
     const cleanRelPath = SafePath.normalizeRelPath;
 
     let mainFile = dto.mainFile ? cleanRelPath(dto.mainFile) : '';
-    if (
-      mainFile &&
-      (mainFile.startsWith('-') ||
-        mainFile.includes('..') ||
-        hasControlChar(mainFile))
-    ) {
+    if (mainFile && !SafePath.isSafeCompileEntryPath(mainFile)) {
       throw new BadRequestException(
         `Invalid or unsafe mainFile path: "${dto.mainFile}"`,
       );
@@ -361,12 +355,7 @@ export class CompileService {
     }
 
     mainFile = cleanRelPath(mainFile);
-    if (
-      !mainFile ||
-      mainFile.startsWith('-') ||
-      mainFile.includes('..') ||
-      hasControlChar(mainFile)
-    ) {
+    if (!SafePath.isSafeCompileEntryPath(mainFile)) {
       mainFile = 'main.tex';
     }
     if (!mainFile.endsWith('.tex')) {
@@ -389,12 +378,7 @@ export class CompileService {
 
     if (!dto.mainFile && engineDetect.mainFileHint) {
       const hinted = cleanRelPath(engineDetect.mainFileHint);
-      if (
-        hinted &&
-        !hinted.startsWith('-') &&
-        !hinted.includes('..') &&
-        !hasControlChar(hinted)
-      ) {
+      if (SafePath.isSafeCompileEntryPath(hinted)) {
         mainFile = hinted.endsWith('.tex') ? hinted : `${hinted}.tex`;
       }
     }
@@ -791,30 +775,10 @@ export class CompileService {
       }
     }
 
-    const parseResult = this.logParser.parseWithSummary
-      ? this.logParser.parseWithSummary(parseTexLog, mainFile, {
-          bibLogs,
-          stopOnFirstError,
-        })
-      : (() => {
-          const parsed = this.logParser.parse(parseTexLog, mainFile, {
-            bibLogs,
-            stopOnFirstError,
-          });
-          return {
-            diagnostics: parsed,
-            summary: {
-              totalErrors: parsed.filter((d) => d.severity === 'error').length,
-              totalWarnings: parsed.filter((d) => d.severity === 'warning')
-                .length,
-              totalBadboxes: parsed.filter(
-                (d) => d.severity === 'badbox' || d.category === 'badbox',
-              ).length,
-              suppressedCascadeCount: 0,
-              truncated: false,
-            },
-          };
-        })();
+    const parseResult = this.logParser.parseWithSummary(parseTexLog, mainFile, {
+      bibLogs,
+      stopOnFirstError,
+    });
 
     const diagnostics = [...parseResult.diagnostics];
     if (shellEscapeAdvisories.length > 0) {

@@ -1,19 +1,13 @@
 /**
- * modules/manuscripts/core/utils/saga-runner.ts
+ * modules/pages/core/utils/saga-runner.ts
  *
- * Lightweight Saga / Compensation Pattern runner for multi-step cross-module operations
- * (e.g. Docstore + Filestore + Structure + Git Bridge) that span resources outside a
- * single database transaction.
+ * Lightweight imperative Saga / Compensation Pattern runner for multi-step cross-module
+ * operations (e.g. Docstore + Filestore + Structure + Git Bridge) that span resources
+ * outside a single database transaction.
  *
- * Steps execute sequentially; if any step throws, previously completed steps are
- * compensated in reverse (LIFO) order.
+ * Steps execute imperatively via `step()`; if any subsequent step throws,
+ * `compensateAll()` rolls back completed steps in reverse (LIFO) order.
  */
-
-export interface CompensableStep<TResult = void> {
-  readonly name: string;
-  execute(): Promise<TResult>;
-  compensate?(result: TResult): Promise<void> | void;
-}
 
 export interface SagaExecutionOptions {
   onCompensationError?: (stepName: string, error: unknown) => void;
@@ -28,32 +22,16 @@ export interface SagaRunnerOptions {
 }
 
 export class SagaRunner {
-  private readonly steps: Array<{
-    readonly name: string;
-    execute(): Promise<unknown>;
-    compensate?(result: unknown): Promise<void> | void;
-  }> = [];
-  private readonly completedDynamicSteps: Array<{
+  private readonly completedSteps: Array<{
     name: string;
     compensate?: () => Promise<void> | void;
   }> = [];
 
   constructor(private readonly runnerOptions?: SagaRunnerOptions) {}
 
-  public addStep<TResult>(step: CompensableStep<TResult>): this {
-    this.steps.push({
-      name: step.name,
-      execute: () => step.execute(),
-      compensate: step.compensate
-        ? (res: unknown) => step.compensate!(res as TResult)
-        : undefined,
-    });
-    return this;
-  }
-
   /**
-   * Imperative Saga step execution: runs `execute()` immediately and records `compensate(result)`
-   * so `compensateAll()` can roll back in reverse (LIFO) order if a subsequent step fails.
+   * Executes `execute()` immediately and records `compensate(result)` so
+   * `compensateAll()` can roll back in reverse (LIFO) order if a subsequent step fails.
    */
   public async step<TResult>(
     name: string,
@@ -61,7 +39,7 @@ export class SagaRunner {
     compensate?: (result: TResult) => Promise<void> | void,
   ): Promise<TResult> {
     const result = await execute();
-    this.completedDynamicSteps.push({
+    this.completedSteps.push({
       name,
       compensate: compensate ? () => compensate(result) : undefined,
     });
@@ -69,8 +47,8 @@ export class SagaRunner {
   }
 
   public async compensateAll(options?: SagaExecutionOptions): Promise<void> {
-    for (let i = this.completedDynamicSteps.length - 1; i >= 0; i--) {
-      const { name, compensate } = this.completedDynamicSteps[i];
+    for (let i = this.completedSteps.length - 1; i >= 0; i--) {
+      const { name, compensate } = this.completedSteps[i];
       if (!compensate) continue;
       try {
         await compensate();
@@ -81,34 +59,6 @@ export class SagaRunner {
         );
       }
     }
-    this.completedDynamicSteps.length = 0;
-  }
-
-  public async run(options?: SagaExecutionOptions): Promise<void> {
-    const completed: Array<{
-      step: {
-        readonly name: string;
-        compensate?(result: unknown): Promise<void> | void;
-      };
-      result: unknown;
-    }> = [];
-
-    try {
-      for (const step of this.steps) {
-        const result = await step.execute();
-        completed.push({ step, result });
-      }
-    } catch (err) {
-      for (let i = completed.length - 1; i >= 0; i--) {
-        const { step, result } = completed[i];
-        if (!step.compensate) continue;
-        try {
-          await step.compensate(result);
-        } catch (compErr) {
-          options?.onCompensationError?.(step.name, compErr);
-        }
-      }
-      throw err;
-    }
+    this.completedSteps.length = 0;
   }
 }

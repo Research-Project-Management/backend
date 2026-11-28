@@ -7,7 +7,6 @@
 import {
   Injectable,
   Logger,
-  HttpException,
   Optional,
   OnModuleDestroy,
 } from '@nestjs/common';
@@ -15,10 +14,11 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { FastifyReply } from 'fastify';
 import * as crypto from 'crypto';
 import { RedisCacheService } from '@/core';
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
-import { PAGES_CACHE_KEYS } from '@/modules/pages/core/config/cache-keys';
-import { WorkspaceCollectorService } from '@/modules/pages/core/services/workspace-collector.service';
-import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
+import {
+  PAGES_CACHE_KEYS,
+  WorkspaceCollectorService,
+} from '@/modules/pages/core';
+import { SnapshotService } from '@/modules/pages/history';
 import { CompilePageDto, ClsiWordCountDto } from './dto/compile.dto';
 import { ForwardSyncDto, ReverseSyncDto } from './dto/synctex.dto';
 import { WordCountStats } from './domain/ports';
@@ -591,7 +591,7 @@ export class ClsiService implements OnModuleDestroy {
     pageId?: string,
   ): Promise<Buffer | null> {
     const scratchId = pageId || spaceId;
-    return await this.runtime.readAuxFile(scratchId, filename);
+    return await this.runtime.readAuxFile(scratchId, filename, true);
   }
 
   public async getLastBuildSummary(

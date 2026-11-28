@@ -18,9 +18,9 @@ import {
   filterRecordsByPageScope,
   resolveSpaceRootDocIds,
   type PageScopeDbClient,
-} from '@/modules/pages/core/utils/page-scope';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { FilestoreService } from '@/modules/pages/filestore';
 import { CompilePageDto } from '../dto/compile.dto';
 import {
   planDbFileSet,

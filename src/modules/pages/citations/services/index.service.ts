@@ -8,8 +8,9 @@ import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { LRUCache } from 'lru-cache';
 import { RedisCacheService } from '@/core';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
+import { PageDomainEventBus } from '@/modules/pages/core';
 import { CitationsRepository } from '../repositories/citations.repository';
+import { matchesCitationQuery } from '../domain/bib-entry.domain';
 import {
   CitationEntryDto,
   ListCitationsResponseDto,
@@ -65,7 +66,8 @@ export class CitationIndexService implements OnModuleInit {
   }
 
   private buildCacheKey(spaceId: string, pageId?: string): string {
-    return `${INDEX_CACHE_PREFIX}:${spaceId}:${pageId ?? 'all'}`;
+    const cleanPageId = pageId?.trim() || 'all';
+    return `${INDEX_CACHE_PREFIX}:${spaceId}:${cleanPageId}`;
   }
 
   public async queryCitations(
@@ -74,8 +76,9 @@ export class CitationIndexService implements OnModuleInit {
     limit = 500,
     pageId?: string,
   ): Promise<ListCitationsResponseDto> {
-    const entries = await this.loadIndexedEntries(spaceId, pageId);
-    const term = (query || '').trim().toLowerCase();
+    const scopedPageId = pageId?.trim() || undefined;
+    const entries = await this.loadIndexedEntries(spaceId, scopedPageId);
+    const term = (query || '').trim();
 
     if (!term) {
       return {
@@ -84,18 +87,7 @@ export class CitationIndexService implements OnModuleInit {
       };
     }
 
-    const matches: CitationEntryDto[] = [];
-    for (const entry of entries) {
-      const matchesKey = entry.key.toLowerCase().includes(term);
-      const matchesTitle = (entry.title || '').toLowerCase().includes(term);
-      const matchesAuthor = entry.authors.some((a) =>
-        a.toLowerCase().includes(term),
-      );
-      const matchesYear = (entry.year || '').toLowerCase().includes(term);
-      if (matchesKey || matchesTitle || matchesAuthor || matchesYear) {
-        matches.push(entry);
-      }
-    }
+    const matches = entries.filter((entry) => matchesCitationQuery(entry, term));
 
     return {
       items: matches.slice(0, limit),
@@ -107,10 +99,21 @@ export class CitationIndexService implements OnModuleInit {
     spaceId: string,
     pageId?: string,
   ): Promise<void> {
-    const exactKey = this.buildCacheKey(spaceId, pageId);
+    const scopedPageId = pageId?.trim() || undefined;
     const allKey = this.buildCacheKey(spaceId, undefined);
-    this.l1Cache.delete(exactKey);
-    this.l1Cache.delete(allKey);
+
+    if (scopedPageId) {
+      const exactKey = this.buildCacheKey(spaceId, scopedPageId);
+      this.l1Cache.delete(exactKey);
+      this.l1Cache.delete(allKey);
+      if (this.redisCache) {
+        await Promise.allSettled([
+          this.redisCache.del(exactKey),
+          this.redisCache.del(allKey),
+        ]);
+      }
+      return;
+    }
 
     const prefix = `${INDEX_CACHE_PREFIX}:${spaceId}:`;
     for (const key of this.l1Cache.keys()) {
@@ -121,8 +124,10 @@ export class CitationIndexService implements OnModuleInit {
 
     if (this.redisCache) {
       await Promise.allSettled([
-        this.redisCache.del(exactKey),
         this.redisCache.del(allKey),
+        ...(typeof this.redisCache.delPattern === 'function'
+          ? [this.redisCache.delPattern(`${prefix}*`)]
+          : []),
       ]);
     }
   }

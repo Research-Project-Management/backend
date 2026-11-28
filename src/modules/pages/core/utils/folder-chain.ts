@@ -5,17 +5,13 @@
 
 import {
   ensureCanonicalPageId,
+  isPrismaUniqueConstraintError,
   type PageScopeDbClient,
 } from './page-scope';
-import { NodePathVo, type ParsedFolderSegment } from './node-path';
+import { type ParsedFolderSegment } from './node-path';
 import { StructureError } from '../domain/errors';
 
-export function isPrismaUniqueError(err: unknown): boolean {
-  const errObj = err as { code?: string; message?: string } | null;
-  return Boolean(
-    errObj?.code === 'P2002' || errObj?.message?.includes('P2002'),
-  );
-}
+export const isPrismaUniqueError = isPrismaUniqueConstraintError;
 
 /**
  * Shared Prisma folder-chain materializer (`mkdir -p` for `PageNode` folders).

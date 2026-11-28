@@ -4,7 +4,7 @@
  * 100% Pure TypeScript, zero framework dependencies.
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 /**
  * Citation: Overleaf `services/clsi/app/js/LockManager.js` (lines 21-33) &
@@ -91,18 +91,6 @@ export class CompileAbortedError extends PagesDomainError {
 }
 
 export type CompilePriority = 'manual' | 'auto';
-
-export interface CompileLockStats {
-  capacity: number;
-  active: number;
-  inFlightProjects: number;
-}
-
-/**
- * modules/pages/clsi/domain/errors.ts
- * Typed domain errors for CLSI compilation sandbox isolation.
- * User-facing messages are strictly sanitized to prevent host path and environment leakage.
- */
 
 export class SandboxUnavailableException extends PagesDomainError {
   constructor(

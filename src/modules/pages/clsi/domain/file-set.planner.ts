@@ -6,6 +6,7 @@
 
 import * as crypto from 'crypto';
 import { TexEngineDetector } from './compile.policy';
+import { SafePath } from './path.policy';
 import type { CompileValidationIssue } from './ports';
 
 type FileSource =
@@ -75,12 +76,7 @@ export const DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const sha256 = (s: string) =>
   crypto.createHash('sha256').update(s, 'utf8').digest('hex');
 
-const sanitizeRelativePath = (p: string) =>
-  p
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^(\.\/)+/, '')
-    .replace(/^\/+/, '');
+const sanitizeRelativePath = SafePath.normalizeRelPath;
 
 const inlineSource = (content: string): FileSource => ({
   kind: 'inline',

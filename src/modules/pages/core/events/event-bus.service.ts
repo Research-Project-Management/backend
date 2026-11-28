@@ -1,7 +1,7 @@
 ﻿/**
- * modules/manuscripts/core/events/event-bus.service.ts
+ * modules/pages/core/events/event-bus.service.ts
  *
- * Centralized Domain Event Bus for the Manuscripts Subsystem (DDD Domain Interactions).
+ * Centralized Domain Event Bus for the Pages Subsystem.
  *
  * Decouples tactical domain operations (Docstore mutations, Structure node deletions,
  * History restores, Track Changes resolutions, Git Bridge syncs) from cross-context
@@ -74,63 +74,18 @@ export class PageDomainEventBus {
   >();
   private readonly liveCollab: LiveCollaborationPort;
 
-  private static isLiveCollabCandidate(
-    obj: unknown,
-  ): obj is LiveCollaborationPort {
-    if (!obj || typeof obj !== 'object') return false;
-    const candidate = obj as Partial<LiveCollaborationPort>;
-    return (
-      typeof candidate.applyExternalText === 'function' ||
-      typeof candidate.evictDoc === 'function' ||
-      typeof candidate.isNoop === 'boolean'
-    );
-  }
-
   constructor(
     @Optional()
     @Inject(LIVE_COLLABORATION_PORT)
-    liveCollabOrResolver?:
-      | LiveCollaborationPort
-      | {
-          get?: (
-            token: unknown,
-            opts?: unknown,
-          ) => LiveCollaborationPort | null;
-        },
-    @Optional()
-    @Inject(LIVE_COLLABORATION_PORT)
-    secondLiveCollab?: LiveCollaborationPort,
+    liveCollab?: LiveCollaborationPort,
   ) {
-    let resolved: LiveCollaborationPort | null | undefined = secondLiveCollab;
-    if (!PageDomainEventBus.isLiveCollabCandidate(resolved)) {
-      if (PageDomainEventBus.isLiveCollabCandidate(liveCollabOrResolver)) {
-        resolved = liveCollabOrResolver;
-      } else if (
-        liveCollabOrResolver &&
-        typeof liveCollabOrResolver.get === 'function'
-      ) {
-        try {
-          resolved = (
-            liveCollabOrResolver as {
-              get: (
-                token: unknown,
-                opts?: unknown,
-              ) => LiveCollaborationPort | null;
-            }
-          ).get(LiveCollaborationPort, { strict: false });
-        } catch {
-          resolved = null;
-        }
-      }
-    }
-    this.liveCollab = PageDomainEventBus.isLiveCollabCandidate(resolved)
-      ? resolved
-      : NOOP_LIVE_COLLABORATION;
+    this.liveCollab =
+      liveCollab &&
+      (typeof liveCollab.applyExternalText === 'function' ||
+        typeof liveCollab.evictDoc === 'function')
+        ? liveCollab
+        : NOOP_LIVE_COLLABORATION;
     this.registerDefaultCrossContextHandlers();
-  }
-
-  private resolveLiveCollaborationPort(): LiveCollaborationPort {
-    return this.liveCollab;
   }
 
   /**
@@ -143,9 +98,8 @@ export class PageDomainEventBus {
       'manuscript.document.mutated',
       async (event) => {
         if (event.source === 'yjs-flush') return;
-        const live = this.resolveLiveCollaborationPort();
-        if (typeof live.applyExternalText === 'function') {
-          await live.applyExternalText(
+        if (typeof this.liveCollab.applyExternalText === 'function') {
+          await this.liveCollab.applyExternalText(
             event.projectId,
             event.docId,
             (event.lines || ['']).join('\n'),
@@ -158,11 +112,10 @@ export class PageDomainEventBus {
       'manuscript.nodes.deleted',
       async (event) => {
         if (event.deletedDocIds.length === 0) return;
-        const live = this.resolveLiveCollaborationPort();
-        if (typeof live.evictDoc === 'function') {
+        if (typeof this.liveCollab.evictDoc === 'function') {
           await Promise.all(
             event.deletedDocIds.map((docId) =>
-              live.evictDoc(event.projectId, docId),
+              this.liveCollab.evictDoc(event.projectId, docId),
             ),
           );
         }
@@ -173,16 +126,15 @@ export class PageDomainEventBus {
       'manuscript.history.restored',
       async (event) => {
         this.logger.debug(
-          `Processed manuscript.history.restored for project ${event.projectId} (v${event.version ?? event.snapshotId}, ${event.restoredDocIds.length} docs)`,
+          `Processed manuscript.history.restored for space ${event.projectId} (v${event.version ?? event.snapshotId}, ${event.restoredDocIds.length} docs)`,
         );
-        // Only evict documents explicitly marked in `evictedDocIds` (e.g., docs removed by snapshot restore
-        // that were not already updated in-place via `manuscript.document.mutated` -> `applyExternalText`).
         const docsToEvict = event.evictedDocIds ?? [];
         if (docsToEvict.length === 0) return;
-        const live = this.resolveLiveCollaborationPort();
-        if (typeof live.evictDoc === 'function') {
+        if (typeof this.liveCollab.evictDoc === 'function') {
           await Promise.all(
-            docsToEvict.map((docId) => live.evictDoc(event.projectId, docId)),
+            docsToEvict.map((docId) =>
+              this.liveCollab.evictDoc(event.projectId, docId),
+            ),
           );
         }
       },

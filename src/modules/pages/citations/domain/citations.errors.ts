@@ -1,4 +1,4 @@
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 /**
  * citations/domain/exceptions/identifier-not-found.exception.ts

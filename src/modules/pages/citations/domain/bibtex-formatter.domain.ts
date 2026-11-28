@@ -3,7 +3,7 @@
  * Pure domain BibTeX escaping, value formatting, and library-item serialization.
  */
 
-import { escapeLatex } from '@/modules/pages/core/domain/latex-escape';
+import { escapeLatex } from '@/modules/pages/core';
 
 export { escapeLatex };
 
@@ -153,12 +153,18 @@ export function formatBibtexName(
 }
 
 /**
+ * Strip Unicode combining diacritical marks after NFKD decomposition.
+ */
+export function stripCombiningDiacritics(raw: string): string {
+  return raw.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
  * Sanitize an arbitrary string into a valid citation key ([A-Za-z0-9_:.-]).
  */
 export function sanitizeCitationKey(raw: string): string {
-  return raw
-    .replace(/[\u0111\u0110]/g, 'd')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9_:.-]/g, '');
+  return stripCombiningDiacritics(raw.replace(/[\u0111\u0110]/g, 'd')).replace(
+    /[^A-Za-z0-9_:.-]/g,
+    '',
+  );
 }

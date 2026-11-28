@@ -109,12 +109,6 @@ export class DraftModeManager {
   }
 }
 
-/**
- * modules/pages/clsi/domain/compile.policy.ts
- * Pure in-process domain logic inspecting TeX source code for TeX magic comments
- * (% !TEX program = ...) and package hints (fontspec, luacode) to select the compiler.
- */
-
 export type SupportedEngine = 'pdflatex' | 'xelatex' | 'lualatex';
 
 export interface EngineDetectionResult {

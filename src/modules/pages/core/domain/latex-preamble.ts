@@ -4,7 +4,7 @@
  * preamble packages and engine directives from document metadata.
  */
 
-export const VIETNAMESE_LATIN_REGEX =
+const VIETNAMESE_LATIN_REGEX =
   /[\u0102\u0103\u0110\u0111\u0128\u0129\u0168\u0169\u01A0\u01A1\u01AF\u01B0\u1EA0-\u1EF9]/;
 
 export interface UnicodePreambleResolution {

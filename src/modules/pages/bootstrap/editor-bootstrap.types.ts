@@ -3,9 +3,11 @@
  * Screen-driven 3-block BFF response contracts for Editor initial hydration.
  */
 
-import type { CompilerDiagnostic } from '@/modules/pages/clsi/domain/ports';
-import type { EditorLastBuildSummary } from '@/modules/pages/clsi/clsi.service';
-import type { ProjectSymbolsResponseDto } from '@/modules/pages/structure/structure.service';
+import type {
+  CompilerDiagnostic,
+  EditorLastBuildSummary,
+} from '@/modules/pages/clsi';
+import type { ProjectSymbolsResponseDto } from '@/modules/pages/structure';
 
 export type EditorBootstrapDegradedBranch = 'symbols' | 'lastBuild';
 

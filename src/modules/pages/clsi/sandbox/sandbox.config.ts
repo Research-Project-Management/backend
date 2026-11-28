@@ -9,12 +9,10 @@ import * as path from 'path';
 import { SandboxConfigurationException } from '../domain/errors';
 import {
   DEFAULT_SANDBOX_PROFILE,
+  DOCKER_CLIENT_ENV_ALLOW_LIST,
   SandboxProfile,
 } from '../domain/sandbox.policy';
-import {
-  getClsiSandboxEnv,
-  readPagesConfig,
-} from '../../core/config/pages.config';
+import { getClsiSandboxEnv, readPagesConfig } from '@/modules/pages/core';
 
 export type SandboxMode = 'container' | 'local-unsafe' | 'remote';
 
@@ -151,13 +149,6 @@ export function parseSandboxConfig(
     env.SCRATCH_DIR ||
     path.join(os.tmpdir(), 'clsi-scratch');
 
-  const clientEnvAllowList = Object.freeze([
-    'DOCKER_HOST',
-    'DOCKER_CONTEXT',
-    'DOCKER_CERT_PATH',
-    'DOCKER_TLS_VERIFY',
-  ]);
-
   return {
     mode,
     remoteUrl,
@@ -173,7 +164,7 @@ export function parseSandboxConfig(
     runtime: env.CLSI_SANDBOX_RUNTIME || undefined,
     scratchDir,
     isProduction,
-    clientEnvAllowList,
+    clientEnvAllowList: DOCKER_CLIENT_ENV_ALLOW_LIST,
   };
 }
 

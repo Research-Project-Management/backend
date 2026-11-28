@@ -1,13 +1,13 @@
 /**
  * citations/citations.module.ts
- * NestJS Module for Manuscripts Citations & Bibliography subsystem.
+ * NestJS Module for Pages Citations & Bibliography subsystem.
  */
 
 import { Module } from '@nestjs/common';
-import { StructureModule } from '@/modules/pages/structure/structure.module';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { PagesCoreModule } from '@/modules/pages/core/core.module';
-import { IntegrationsModule } from '@/modules/integrations/integrations.module';
+import { PagesCoreModule } from '@/modules/pages/core';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { StructureModule } from '@/modules/pages/structure';
+import { IntegrationsModule } from '@/modules/integrations';
 import { LibraryModule } from '@/modules/library';
 
 import { CitationsController } from './citations.controller';
@@ -33,12 +33,6 @@ import { BibtexParser } from './domain/bibtex.domain';
     CitationsService,
     BibtexParser,
   ],
-  exports: [
-    CitationsService,
-    CitationsRepository,
-    LibrarySyncAdapter,
-    CitationIndexService,
-    BibtexParser,
-  ],
+  exports: [CitationsService, CitationIndexService],
 })
 export class CitationsModule {}

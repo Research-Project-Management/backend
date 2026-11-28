@@ -65,6 +65,36 @@ export class ClsiController {
       : undefined;
   }
 
+  private bindAuthorizedDtoScope(
+    dto: { spaceId?: string; pageId?: string },
+    resolvedSpace?: string | { id?: string },
+    req?: FastifyRequest,
+  ): string | undefined {
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
+    if (authorizedSpaceId && !dto.spaceId) {
+      dto.spaceId = authorizedSpaceId;
+    }
+    const reqPageId = this.resolveReqPageId(req);
+    if (reqPageId && !dto.pageId) {
+      dto.pageId = reqPageId;
+    }
+    return authorizedSpaceId || undefined;
+  }
+
+  private resolvePageRouteScope(
+    pageIdParam: string,
+    resolvedSpace?: string | { id?: string },
+    req?: FastifyRequest,
+  ): { authorizedSpaceId: string; candidatePageId: string; targetSpaceOrPageId: string } {
+    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
+    const candidatePageId = this.resolveReqPageId(req) || pageIdParam;
+    return {
+      authorizedSpaceId,
+      candidatePageId,
+      targetSpaceOrPageId: authorizedSpaceId || candidatePageId,
+    };
+  }
+
   @Post('compile')
   @UseGuards(ProjectAccessGuard, UserRateLimitGuard)
   @RequireRole(Role.CONTRIBUTOR)
@@ -77,14 +107,11 @@ export class ClsiController {
     @Req() req: FastifyRequest,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    if (authorizedSpaceId && !dto.spaceId) {
-      dto.spaceId = authorizedSpaceId;
-    }
-    const reqPageId = this.resolveReqPageId(req);
-    if (reqPageId && !dto.pageId) {
-      dto.pageId = reqPageId;
-    }
+    const authorizedSpaceId = this.bindAuthorizedDtoScope(
+      dto,
+      resolvedSpace,
+      req,
+    );
 
     const clientAbort = new AbortController();
     const onClientClose = () => {
@@ -98,7 +125,7 @@ export class ClsiController {
       return await this.clsiService.compile(
         dto,
         userId,
-        authorizedSpaceId || undefined,
+        authorizedSpaceId,
         clientAbort.signal,
       );
     } finally {
@@ -117,8 +144,11 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    const candidatePageId = this.resolveReqPageId(req) || pageId;
+    const { authorizedSpaceId, candidatePageId } = this.resolvePageRouteScope(
+      pageId,
+      resolvedSpace,
+      req,
+    );
     const cancelled = await this.clsiService.cancelCompile(
       candidatePageId,
       userId,
@@ -138,15 +168,12 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    if (authorizedSpaceId && !dto.spaceId) {
-      dto.spaceId = authorizedSpaceId;
-    }
-    const reqPageId = this.resolveReqPageId(req);
-    if (reqPageId && !dto.pageId) {
-      dto.pageId = reqPageId;
-    }
-    return this.clsiService.getWordCount(dto, authorizedSpaceId || undefined);
+    const authorizedSpaceId = this.bindAuthorizedDtoScope(
+      dto,
+      resolvedSpace,
+      req,
+    );
+    return this.clsiService.getWordCount(dto, authorizedSpaceId);
   }
 
   @Post('synctex/forward')
@@ -161,15 +188,12 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    if (authorizedSpaceId && !dto.spaceId) {
-      dto.spaceId = authorizedSpaceId;
-    }
-    const reqPageId = this.resolveReqPageId(req);
-    if (reqPageId && !dto.pageId) {
-      dto.pageId = reqPageId;
-    }
-    return this.clsiService.forwardSync(dto, authorizedSpaceId || undefined);
+    const authorizedSpaceId = this.bindAuthorizedDtoScope(
+      dto,
+      resolvedSpace,
+      req,
+    );
+    return this.clsiService.forwardSync(dto, authorizedSpaceId);
   }
 
   @Post('synctex/reverse')
@@ -185,15 +209,12 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    if (authorizedSpaceId && !dto.spaceId) {
-      dto.spaceId = authorizedSpaceId;
-    }
-    const reqPageId = this.resolveReqPageId(req);
-    if (reqPageId && !dto.pageId) {
-      dto.pageId = reqPageId;
-    }
-    return this.clsiService.reverseSync(dto, authorizedSpaceId || undefined);
+    const authorizedSpaceId = this.bindAuthorizedDtoScope(
+      dto,
+      resolvedSpace,
+      req,
+    );
+    return this.clsiService.reverseSync(dto, authorizedSpaceId);
   }
 
   @Get('pages/:pageId/artifacts')
@@ -207,12 +228,12 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    const candidatePageId = this.resolveReqPageId(req) || pageId;
-    return this.clsiService.listAuxFiles(
-      authorizedSpaceId || candidatePageId,
-      candidatePageId,
+    const { targetSpaceOrPageId, candidatePageId } = this.resolvePageRouteScope(
+      pageId,
+      resolvedSpace,
+      req,
     );
+    return this.clsiService.listAuxFiles(targetSpaceOrPageId, candidatePageId);
   }
 
   @Get('pages/:pageId/artifacts/archive')
@@ -225,10 +246,13 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    const candidatePageId = this.resolveReqPageId(req) || pageId;
+    const { targetSpaceOrPageId, candidatePageId } = this.resolvePageRouteScope(
+      pageId,
+      resolvedSpace,
+      req,
+    );
     return this.clsiService.downloadAllArtifactsZip(
-      authorizedSpaceId || candidatePageId,
+      targetSpaceOrPageId,
       res,
       candidatePageId,
     );
@@ -245,10 +269,13 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    const candidatePageId = this.resolveReqPageId(req) || pageId;
+    const { targetSpaceOrPageId, candidatePageId } = this.resolvePageRouteScope(
+      pageId,
+      resolvedSpace,
+      req,
+    );
     return this.clsiService.downloadAuxFile(
-      authorizedSpaceId || candidatePageId,
+      targetSpaceOrPageId,
       filename,
       res,
       candidatePageId,
@@ -267,12 +294,12 @@ export class ClsiController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: FastifyRequest,
   ) {
-    const authorizedSpaceId = this.resolveSpaceId(resolvedSpace, req);
-    const candidatePageId = this.resolveReqPageId(req) || pageId;
-    return this.clsiService.cleanScratch(
-      authorizedSpaceId || candidatePageId,
-      candidatePageId,
+    const { targetSpaceOrPageId, candidatePageId } = this.resolvePageRouteScope(
+      pageId,
+      resolvedSpace,
+      req,
     );
+    return this.clsiService.cleanScratch(targetSpaceOrPageId, candidatePageId);
   }
 
   @Get('status')

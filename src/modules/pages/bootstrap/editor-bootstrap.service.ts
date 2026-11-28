@@ -15,22 +15,20 @@ import {
 import { PageDoc, PageNode } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import { Role, RoleHierarchy } from '@/modules/project/access';
-import { PageService } from '@/modules/pages/page/services/page.service';
-import {
-  filterRecordsByPageScope,
-  isRecordDeleted,
-} from '@/modules/pages/core/utils/page-scope';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import {
-  findPageRecordWithNode,
-  formatPageByIdResponse,
-} from '@/modules/pages/core/utils/doc-occ.helper';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
 import {
   ClsiService,
   type EditorLastBuildSummary,
-} from '@/modules/pages/clsi/clsi.service';
+} from '@/modules/pages/clsi';
+import {
+  NodePathVo,
+  filterRecordsByPageScope,
+  findPageRecordWithNode,
+  formatPageByIdResponse,
+  isRecordDeleted,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { PageService } from '@/modules/pages/page';
+import { StructureService } from '@/modules/pages/structure';
 import type {
   BootstrapEditorParams,
   EditorBootstrapActiveDocDto,
@@ -123,21 +121,14 @@ function buildPathOrFilter(cleanPath: string) {
 
 function matchesPageScope(
   candidate: PageDocWithNode,
-  spaceId: string,
   canonicalPageId: string,
-  rootDocId?: string,
-  isScopedPage = false,
+  rootDocId: string,
 ): boolean {
   const candidatePageId = (candidate as { pageId?: string | null }).pageId;
-  if (
-    candidatePageId &&
-    canonicalPageId &&
-    candidatePageId !== canonicalPageId &&
-    (isScopedPage || candidatePageId !== spaceId)
-  ) {
+  if (candidatePageId && candidatePageId !== canonicalPageId) {
     return false;
   }
-  if (isScopedPage && !candidatePageId && candidate.id !== rootDocId) {
+  if (!candidatePageId && candidate.id !== rootDocId) {
     return false;
   }
   return true;
@@ -273,28 +264,27 @@ export class EditorBootstrapService {
         ? pageRow
         : null;
 
-    // Always resolve a concrete effectivePageId (even in single-page or personal spaces)
+    // Always resolve a concrete canonicalPageId (even in single-page or personal spaces)
     // so pageNode, pageDoc, pageFile, and pageGithubLink queries never leak across Pages.
-    const effectivePageId =
+    const canonicalPageId =
       validPageRow?.id ||
       entryPageId ||
       (!isRecordDeleted(entryRecord) ? entryRecord?.id : undefined) ||
       spaceId;
-    const manuscriptPageId = effectivePageId;
 
     const [allNodes, deletedDocs, activePageFiles, githubLinkRow] =
       await Promise.all([
         this.structureService.getAllNodes(
           spaceId,
           undefined,
-          effectivePageId,
+          canonicalPageId,
         ),
         this.prisma.pageDoc?.findMany
           ? Promise.resolve(
               this.prisma.pageDoc.findMany({
                 where: {
                   spaceId,
-                  pageId: effectivePageId,
+                  pageId: canonicalPageId,
                   deletedAt: { not: null },
                 },
                 select: { id: true },
@@ -306,7 +296,7 @@ export class EditorBootstrapService {
               this.prisma.pageFile.findMany({
                 where: {
                   spaceId,
-                  pageId: effectivePageId,
+                  pageId: canonicalPageId,
                   deletedAt: null,
                 },
                 select: { id: true },
@@ -332,7 +322,7 @@ export class EditorBootstrapService {
 
     const scopedAllNodes = filterRecordsByPageScope(
       allNodes,
-      effectivePageId,
+      canonicalPageId,
       spaceId,
     );
 
@@ -359,8 +349,6 @@ export class EditorBootstrapService {
       }
       return true;
     });
-
-    const hasScopedPageContext = Boolean(effectivePageId);
 
     const rootNode =
       (validPageRow?.rootDocId
@@ -407,8 +395,6 @@ export class EditorBootstrapService {
       });
     }
 
-    const canonicalPageId = manuscriptPageId || rootRecord.id;
-
     // Graceful File Fallback Invariant: missing/deleted ?fileId falls back to rootDoc within this Page
     let activeRecord: PageDocWithNode = rootRecord;
     let fallbackToRoot = false;
@@ -424,7 +410,6 @@ export class EditorBootstrapService {
         canonicalPageId,
         explicitFileId,
         rootRecord.id,
-        hasScopedPageContext,
       );
       if (candidateDoc && !isRecordDeleted(candidateDoc)) {
         activeRecord = candidateDoc;
@@ -452,27 +437,32 @@ export class EditorBootstrapService {
         .flushDocs(spaceId, flushTargets)
         .catch((): string[] => []);
       if (Array.isArray(flushedIds) && flushedIds.length > 0) {
-        const refreshedActive = await this.prisma.pageDoc
-          .findFirst({
-            where: { id: activeRecord.id, spaceId, deletedAt: null },
-            include: { node: true },
-          })
-          .catch(() => null);
+        const shouldRefreshRootSeparately =
+          rootRecord.id !== activeRecord.id &&
+          flushedIds.includes(rootRecord.id);
+        const [refreshedActive, refreshedRoot] = await Promise.all([
+          this.prisma.pageDoc
+            .findFirst({
+              where: { id: activeRecord.id, spaceId, deletedAt: null },
+              include: { node: true },
+            })
+            .catch(() => null),
+          shouldRefreshRootSeparately
+            ? this.prisma.pageDoc
+                .findFirst({
+                  where: { id: rootRecord.id, spaceId, deletedAt: null },
+                  include: { node: true },
+                })
+                .catch(() => null)
+            : Promise.resolve(null),
+        ]);
         if (refreshedActive) {
           activeRecord = refreshedActive;
         }
         if (rootRecord.id === activeRecord.id) {
           rootRecord = activeRecord;
-        } else if (flushedIds.includes(rootRecord.id)) {
-          const refreshedRoot = await this.prisma.pageDoc
-            .findFirst({
-              where: { id: rootRecord.id, spaceId, deletedAt: null },
-              include: { node: true },
-            })
-            .catch(() => null);
-          if (refreshedRoot) {
-            rootRecord = refreshedRoot;
-          }
+        } else if (refreshedRoot) {
+          rootRecord = refreshedRoot;
         }
       }
     }
@@ -685,15 +675,14 @@ export class EditorBootstrapService {
     spaceId: string,
     canonicalPageId: string,
     explicitFileId: string,
-    rootDocId?: string,
-    isScopedPage = false,
+    rootDocId: string,
   ): Promise<PageDocWithNode | null> {
     if (isUuid(explicitFileId)) {
       const candidate = await this.prisma.pageDoc
         .findFirst({
           where: {
             spaceId,
-            ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
+            pageId: canonicalPageId,
             deletedAt: null,
             OR: [{ id: explicitFileId }, { node: { id: explicitFileId } }],
           },
@@ -701,13 +690,7 @@ export class EditorBootstrapService {
         })
         .catch(() => null);
       if (!candidate) return null;
-      return matchesPageScope(
-        candidate,
-        spaceId,
-        canonicalPageId,
-        rootDocId,
-        isScopedPage,
-      )
+      return matchesPageScope(candidate, canonicalPageId, rootDocId)
         ? candidate
         : null;
     }
@@ -718,7 +701,7 @@ export class EditorBootstrapService {
       .findFirst({
         where: {
           spaceId,
-          ...(canonicalPageId ? { pageId: canonicalPageId } : {}),
+          pageId: canonicalPageId,
           deletedAt: null,
           OR: pathOr,
         },
@@ -726,13 +709,7 @@ export class EditorBootstrapService {
       })
       .catch(() => null);
     if (!scopedCandidate) return null;
-    return matchesPageScope(
-      scopedCandidate,
-      spaceId,
-      canonicalPageId,
-      rootDocId,
-      isScopedPage,
-    )
+    return matchesPageScope(scopedCandidate, canonicalPageId, rootDocId)
       ? scopedCandidate
       : null;
   }

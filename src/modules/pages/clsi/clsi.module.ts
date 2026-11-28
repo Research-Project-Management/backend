@@ -8,9 +8,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CoreModule as AppCoreModule } from '@/core';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
-import { HistoryModule } from '@/modules/pages/history/history.module';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { FilestoreModule } from '@/modules/pages/filestore';
+import { HistoryModule } from '@/modules/pages/history';
 import { ClsiController } from './clsi.controller';
 import { ClsiService } from './clsi.service';
 import { RemoteClsiClientAdapter } from './adapters/remote-clsi.adapter';
@@ -37,8 +37,8 @@ import { OutputService } from './services/output.service';
 import { ClsiMetrics } from './adapters/metrics.adapter';
 import { ClsiRuntimeAdapter } from './adapters/clsi-runtime.adapter';
 
-export const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
-export const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
+const CLSI_SANDBOX_CONFIG = Symbol('CLSI_SANDBOX_CONFIG');
+const CLSI_SANDBOX_RUNNER = Symbol('CLSI_SANDBOX_RUNNER');
 
 @Module({
   imports: [AppCoreModule, DocstoreModule, FilestoreModule, HistoryModule],

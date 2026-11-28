@@ -4,31 +4,29 @@
  * Zero I/O, zero NestJS imports.
  */
 
+import { SafePath } from '../path.policy';
 import { DiagnosticItem, DiagnosticSeverityVo } from './diagnostic.model';
-import type { ErrorExplainerLike } from './error.catalog';
+import type { LatexErrorCatalog } from './error.catalog';
 
 const DEFAULT_MAX_BIB_ENTRIES = 100;
 
 export interface BibLogParserOptions {
   maxEntries?: number;
   defaultBibFile?: string;
-  explainer?: ErrorExplainerLike;
+  explainer?: LatexErrorCatalog;
 }
 
 function normalizeBibFilePath(raw: string, fallback: string): string {
-  const cleaned = raw
-    .trim()
-    .replace(/^["']|["']$/g, '')
-    .replace(/\\/g, '/')
-    .replace(/^(\.\/)+/, '')
-    .replace(/^\/+/, '');
+  const cleaned = SafePath.normalizeRelPath(
+    raw.trim().replace(/^["']|["']$/g, ''),
+  );
   return cleaned || fallback;
 }
 
 export class BibLogParser {
   private readonly maxEntries: number;
   private readonly defaultBibFile: string;
-  private readonly explainer?: ErrorExplainerLike;
+  private readonly explainer?: LatexErrorCatalog;
 
   constructor(options: BibLogParserOptions = {}) {
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_BIB_ENTRIES;

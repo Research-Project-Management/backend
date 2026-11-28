@@ -10,8 +10,11 @@ import {
   ProcessExecutionOptions,
   ProcessExecutionResult,
 } from '../domain/ports';
-import { buildSandboxEnv } from '../domain/sandbox.policy';
-import { getSafeHostEnv } from '../../core/config/pages.config';
+import {
+  buildSandboxEnv,
+  DOCKER_CLIENT_ENV_ALLOW_LIST,
+} from '../domain/sandbox.policy';
+import { getSafeHostEnv } from '@/modules/pages/core';
 
 export class LocalProcessRunner implements ISandboxRunner {
   readonly name = 'local-process';
@@ -55,7 +58,7 @@ export class LocalProcessRunner implements ISandboxRunner {
     const filteredEnv = buildSandboxEnv({
       parentEnv: getSafeHostEnv(),
       extraEnv: options.env,
-      clientAllowList: ['DOCKER_HOST', 'DOCKER_CONTEXT'],
+      clientAllowList: DOCKER_CLIENT_ENV_ALLOW_LIST,
       isTexProcess: isTexCommand,
       openinAny: options.openinAny,
     });

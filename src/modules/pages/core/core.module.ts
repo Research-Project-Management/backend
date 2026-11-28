@@ -2,8 +2,8 @@
  * modules/pages/core/core.module.ts
  *
  * Pages Core Module (Shared Kernel)
- * Provides cross-cutting manuscript primitives, contracts, and utilities
- * shared across all 14 pages submodules.
+ * Provides cross-cutting Pages primitives, contracts, and utilities
+ * shared across all pages submodules.
  */
 
 import { Global, Module } from '@nestjs/common';
@@ -14,8 +14,6 @@ import { PagesConfigService } from './config/pages.config';
 import { WorkspaceCollectorService } from './services/workspace-collector.service';
 import { PageDomainEventBus } from './events/event-bus.service';
 import { UserResolverService } from './services/user-resolver.service';
-import { IDistributedLockPort } from './ports/distributed-lock.port';
-import { RedisLockAdapter } from './adapters/redis-lock.adapter';
 
 @Global()
 @Module({
@@ -25,18 +23,12 @@ import { RedisLockAdapter } from './adapters/redis-lock.adapter';
     WorkspaceCollectorService,
     PageDomainEventBus,
     UserResolverService,
-    RedisLockAdapter,
-    {
-      provide: IDistributedLockPort,
-      useExisting: RedisLockAdapter,
-    },
   ],
   exports: [
     PagesConfigService,
     WorkspaceCollectorService,
     PageDomainEventBus,
     UserResolverService,
-    IDistributedLockPort,
     RealtimeClientModule,
   ],
 })

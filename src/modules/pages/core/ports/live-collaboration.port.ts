@@ -1,7 +1,7 @@
 /**
- * modules/manuscripts/core/ports/live-collaboration.port.ts
+ * modules/pages/core/ports/live-collaboration.port.ts
  *
- * Shared Kernel contract through which Docstore and external manuscript modules
+ * Shared Kernel contract through which Docstore and Pages modules
  * interact with the live real-time collaboration layer (Yjs sessions + socket presence).
  */
 

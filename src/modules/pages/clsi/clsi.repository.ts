@@ -13,7 +13,6 @@ import {
   AuxFileInfo,
   BuildStateRecord,
   CachedCompileArtifacts,
-  IWorkspaceManager,
   WorkspaceFile,
   WorkspaceSyncStats,
 } from './domain/ports';
@@ -95,7 +94,7 @@ const PRE_COMPILE_PURGE_FILES = [
   'output.synctex.gz',
 ];
 
-export class ClsiRepository implements IWorkspaceManager {
+export class ClsiRepository {
   constructor(
     private readonly baseScratchDir: string = path.join(
       os.tmpdir(),
@@ -120,7 +119,7 @@ export class ClsiRepository implements IWorkspaceManager {
     return path.join(this.baseScratchDir, safeProjectId);
   }
 
-  public async ensureScratch(spaceId: string): Promise<string> {
+  private async ensureScratch(spaceId: string): Promise<string> {
     const scratchDir = this.getScratchDir(spaceId);
     await fs.mkdir(scratchDir, { recursive: true });
     return scratchDir;
@@ -288,7 +287,7 @@ export class ClsiRepository implements IWorkspaceManager {
     }
 
     const inputSet = new Set(
-      inputFiles.map((f) => f.replace(/\\/g, '/').replace(/^\/+/, '')),
+      inputFiles.map((f) => SafePath.normalizeRelPath(f)),
     );
 
     await this.cleanExtraneousDir(scratchDir, '', inputSet);
@@ -427,26 +426,6 @@ export class ClsiRepository implements IWorkspaceManager {
       ) {
         return null;
       }
-      const stat = await fs.lstat(safePath);
-      if (stat.isSymbolicLink() || !stat.isFile()) {
-        return null;
-      }
-      return await fs.readFile(safePath);
-    } catch {
-      return null;
-    }
-  }
-
-  public async readArtifact(
-    spaceId: string,
-    filename: string,
-  ): Promise<Buffer | null> {
-    const scratchDir = this.getScratchDir(spaceId);
-    try {
-      const safePath = await SafePath.assertSafeWorkspacePath(
-        scratchDir,
-        filename,
-      );
       const stat = await fs.lstat(safePath);
       if (stat.isSymbolicLink() || !stat.isFile()) {
         return null;

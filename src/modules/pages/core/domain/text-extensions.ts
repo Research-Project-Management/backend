@@ -1,13 +1,10 @@
 /**
- * modules/manuscripts/core/domain/text-extensions.ts
+ * modules/pages/core/domain/text-extensions.ts
  * Canonical text and binary file extension sets and classification helpers
- * shared across Export/Import, Git Bridge, and Linked Files.
+ * shared across Export/Import and Git Bridge.
  */
 
-/**
- * Known editable text extensions (without leading dot).
- */
-export const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
+const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
   'tex',
   'ltx',
   'bib',
@@ -122,10 +119,7 @@ export const KNOWN_BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   '.exe',
 ]);
 
-/**
- * Checks whether a file path or filename has a known text extension (case-insensitive).
- */
-export function hasTextExtension(filePath: string): boolean {
+function hasTextExtension(filePath: string): boolean {
   const base = filePath.split('/').pop() ?? filePath;
   if (base === '.latexmkrc' || base === 'latexmkrc' || base === 'Makefile') {
     return true;

@@ -1,19 +1,9 @@
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
-
-export class InvalidLogFormatException extends PagesDomainError {
-  constructor(message = 'The provided compilation log is empty or invalid') {
-    super(message, {
-      code: 'INVALID_COMPILE_LOG',
-      statusCode: 400,
-    });
-  }
-}
-
 /**
- * diagnostics/core/domain/value-objects/log-line.ts
- * Value Object for processing TeX log lines, unwrapping 79/80-char line breaks,
- * and normalizing carriage returns.
+ * modules/pages/clsi/domain/log-parser/diagnostic.model.ts
+ * Domain models and TeX paren-tree path/line normalizers for compiler logs.
  */
+
+import { SafePath } from '../path.policy';
 
 export class LogLineVo {
   private static readonly TEX_LINE_WRAP_LENGTH = 79;
@@ -58,11 +48,6 @@ export class LogLineVo {
   }
 }
 
-/**
- * modules/pages/clsi/domain/log-parser/diagnostic.model.ts
- * Pure TeX paren-cleaning and nested project relative path normalizers.
- */
-
 export const LOG_FILE_EXTENSION_REGEX =
   /\.(tex|sty|cls|bib|bbl|aux|toc|lof|lot|out|def|ldf|fd|cfg|dtx|ins)\b/i;
 
@@ -98,10 +83,7 @@ export function normalizeLogFilePath(
     return parts[parts.length - 1] || defaultFile;
   }
   if (!isDrivePath && normalized) {
-    const normalizedDefault = defaultFile
-      .replace(/\\/g, '/')
-      .replace(/^(\.\/)+/, '')
-      .replace(/^\/+/, '');
+    const normalizedDefault = SafePath.normalizeRelPath(defaultFile);
     const lastSlash = normalizedDefault.lastIndexOf('/');
     if (lastSlash > 0) {
       const baseDir = normalizedDefault.slice(0, lastSlash);
@@ -115,13 +97,6 @@ export function normalizeLogFilePath(
   }
   return normalized;
 }
-
-/**
- * diagnostics/core/domain/entities/diagnostic-item.entity.ts
- * Domain Entity modeling an individual compiler diagnostic, warning, or static lint issue.
- */
-
-import { randomUUID } from 'crypto';
 
 export type DiagnosticSeverityType = 'error' | 'warning' | 'info' | 'badbox';
 
@@ -203,18 +178,6 @@ export class ErrorExplanationVo {
     this.exampleSnippet = props.exampleSnippet;
     this.documentationUrl = props.documentationUrl;
   }
-
-  public toJSON() {
-    return {
-      code: this.code,
-      title: this.title,
-      explanation: this.explanation,
-      commonCauses: [...this.commonCauses],
-      suggestedFix: this.suggestedFix,
-      exampleSnippet: this.exampleSnippet,
-      documentationUrl: this.documentationUrl,
-    };
-  }
 }
 
 export interface QuickFixVo {
@@ -228,7 +191,6 @@ export type DiagnosticWarningSubtype =
 export type DiagnosticSourceType = 'tex' | 'bibtex' | 'biber' | 'system';
 
 export interface DiagnosticItemProps {
-  id?: string;
   file: string;
   line: number | null;
   column?: number | null;
@@ -245,7 +207,6 @@ export interface DiagnosticItemProps {
 }
 
 export class DiagnosticItem {
-  public readonly id: string;
   public readonly file: string;
   public readonly line: number | null;
   public readonly column: number | null;
@@ -261,7 +222,6 @@ export class DiagnosticItem {
   public readonly quickFix?: QuickFixVo;
 
   constructor(props: DiagnosticItemProps) {
-    this.id = props.id || `diag-${randomUUID()}`;
     this.file = props.file || 'main.tex';
     this.line =
       typeof props.line === 'number' && !isNaN(props.line) ? props.line : null;
@@ -282,105 +242,5 @@ export class DiagnosticItem {
     this.code = props.code;
     this.explanation = props.explanation;
     this.quickFix = props.quickFix;
-  }
-
-  public toJSON() {
-    return {
-      id: this.id,
-      file: this.file,
-      line: this.line,
-      column: this.column,
-      severity: this.severity.value,
-      category: this.category,
-      warningSubtype: this.warningSubtype,
-      ...(this.source ? { source: this.source } : {}),
-      ...(this.highlightCommand
-        ? { highlightCommand: this.highlightCommand }
-        : {}),
-      message: this.message,
-      context: this.context,
-      code: this.code,
-      explanation: this.explanation?.toJSON(),
-      quickFix: this.quickFix,
-    };
-  }
-}
-
-/**
- * diagnostics/core/domain/entities/diagnostic-report.entity.ts
- * Aggregate Root modeling a complete compilation or linting diagnostic report.
- */
-
-export interface DiagnosticReportProps {
-  id?: string;
-  items: DiagnosticItem[];
-  rawLog?: string;
-}
-
-export class DiagnosticReport {
-  public readonly id: string;
-  public readonly items: readonly DiagnosticItem[];
-  public readonly errorsCount: number;
-  public readonly warningsCount: number;
-  public readonly badboxesCount: number;
-  public readonly infoCount: number;
-  public readonly isSuccess: boolean;
-  public readonly rawLog?: string;
-
-  constructor(props: DiagnosticReportProps) {
-    this.id = props.id || `report-${randomUUID()}`;
-    this.items = Object.freeze([...props.items]);
-    this.rawLog = props.rawLog;
-
-    let errors = 0;
-    let warnings = 0;
-    let badboxes = 0;
-    let info = 0;
-
-    for (const item of this.items) {
-      if (item.severity.isError()) errors++;
-      else if (item.severity.isWarning()) warnings++;
-      else if (item.severity.isBadbox()) badboxes++;
-      else info++;
-    }
-
-    this.errorsCount = errors;
-    this.warningsCount = warnings;
-    this.badboxesCount = badboxes;
-    this.infoCount = info;
-    this.isSuccess = errors === 0;
-  }
-
-  public getErrors(): DiagnosticItem[] {
-    return this.items.filter((item) => item.severity.isError());
-  }
-
-  public getWarnings(): DiagnosticItem[] {
-    return this.items.filter((item) => item.severity.isWarning());
-  }
-
-  public getBadboxes(): DiagnosticItem[] {
-    return this.items.filter((item) => item.severity.isBadbox());
-  }
-
-  public getItemsByFile(filename: string): DiagnosticItem[] {
-    const norm = filename.replace(/\\/g, '/').replace(/^\/+/, '');
-    return this.items.filter((item) => {
-      const itemNorm = item.file.replace(/\\/g, '/').replace(/^\/+/, '');
-      return itemNorm === norm || itemNorm.endsWith(`/${norm}`);
-    });
-  }
-
-  public toJSON() {
-    return {
-      id: this.id,
-      isSuccess: this.isSuccess,
-      errorsCount: this.errorsCount,
-      warningsCount: this.warningsCount,
-      badboxesCount: this.badboxesCount,
-      infoCount: this.infoCount,
-      totalCount: this.items.length,
-      items: this.items.map((item) => item.toJSON()),
-    };
   }
 }
