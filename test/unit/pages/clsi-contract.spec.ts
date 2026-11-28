@@ -4,6 +4,8 @@ import { BoundedLruCache } from '@/modules/pages/clsi/domain/lru-cache';
 import { UnsafePathException } from '@/modules/pages/clsi/domain/errors';
 import { CompileLockService } from '@/modules/pages/clsi/services/compile-lock.service';
 import { CompileService } from '@/modules/pages/clsi/services/compile.service';
+import { ClsiRepository } from '@/modules/pages/clsi/clsi.repository';
+import { LatexmkEngine } from '@/modules/pages/clsi/adapters/latexmk.adapter';
 import { RemoteClsiClientAdapter } from '@/modules/pages/clsi/adapters/remote-clsi.adapter';
 import { ClsiMetrics } from '@/modules/pages/clsi/adapters/metrics.adapter';
 import {
@@ -14,7 +16,7 @@ import {
 import {
   buildZipBuffer,
   createZipStream,
-} from '@/modules/pages/core/utils/zip-builder';
+} from '@/modules/pages/core';
 import {
   TexcountCliAdapter,
   parseTexcountBriefOutput,
@@ -23,13 +25,9 @@ import { CompileSourceService } from '@/modules/pages/clsi/services/compile-sour
 import {
   PandocAdapter,
   normalizePandocExportFormat,
-} from '@/modules/pages/export-import/adapters/pandoc.adapter';
+} from '@/modules/pages/export-import';
 import { unzipSync, strFromU8 } from 'fflate';
-import type {
-  BuildStateRecord,
-  ILatexEngine,
-  IWorkspaceManager,
-} from '@/modules/pages/clsi/domain/ports';
+import type { ISandboxRunner } from '@/modules/pages/clsi/domain/ports';
 
 describe('CLSI Production Contract Suite', () => {
   describe('SafePath & BoundedLruCache', () => {
@@ -146,38 +144,20 @@ describe('CLSI Production Contract Suite', () => {
   });
 
   describe('CompileService (5-Stage Pipeline & Result Factory)', () => {
-    function createMockWorkspace(): jest.Mocked<IWorkspaceManager> {
-      let state: BuildStateRecord | null = null;
-      return {
-        getScratchDir: jest.fn().mockReturnValue('/tmp/fake-scratch'),
-        ensureScratch: jest.fn().mockResolvedValue('/tmp/fake-scratch'),
-        syncFiles: jest
+    function createTestCompileService() {
+      const sandboxRunner: jest.Mocked<ISandboxRunner> = {
+        name: 'mock-sandbox',
+        run: jest
           .fn()
-          .mockResolvedValue({ written: 1, unchanged: 0, deleted: 0 }),
-        cleanScratch: jest.fn().mockResolvedValue(undefined),
-        cleanAuxBuildCache: jest.fn().mockResolvedValue(undefined),
-        purgeExtraneousFiles: jest.fn().mockResolvedValue(undefined),
-        listAuxFiles: jest.fn().mockResolvedValue([]),
-        readAuxFile: jest.fn().mockResolvedValue(null),
-        readArtifact: jest.fn().mockResolvedValue(null),
-        readBuildState: jest.fn().mockImplementation(async () => state),
-        writeBuildState: jest
-          .fn()
-          .mockImplementation(async (_id, s) => {
-            state = s;
-          }),
-        writeCachedArtifacts: jest.fn().mockResolvedValue(undefined),
+          .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
       };
+      const workspace = new ClsiRepository('/tmp/fake-scratch');
+      const engine = new LatexmkEngine(sandboxRunner);
+      return { service: new CompileService(workspace, engine), sandboxRunner };
     }
 
     it('returns validation-problems when main TeX document is empty', async () => {
-      const workspace = createMockWorkspace();
-      const engine: ILatexEngine = {
-        name: 'latexmk',
-        isAvailable: jest.fn().mockResolvedValue(true),
-        compile: jest.fn(),
-      };
-      const service = new CompileService(workspace, engine);
+      const { service, sandboxRunner } = createTestCompileService();
 
       const res = await service.execute({
         spaceId: 'space-1',
@@ -187,17 +167,11 @@ describe('CLSI Production Contract Suite', () => {
 
       expect(res.success).toBe(false);
       expect(res.outcome).toBe('validation-problems');
-      expect(engine.compile).not.toHaveBeenCalled();
+      expect(sandboxRunner.run).not.toHaveBeenCalled();
     });
 
     it('returns terminated immediately when AbortSignal is already aborted', async () => {
-      const workspace = createMockWorkspace();
-      const engine: ILatexEngine = {
-        name: 'latexmk',
-        isAvailable: jest.fn().mockResolvedValue(true),
-        compile: jest.fn(),
-      };
-      const service = new CompileService(workspace, engine);
+      const { service, sandboxRunner } = createTestCompileService();
       const ac = new AbortController();
       ac.abort();
 
@@ -210,6 +184,7 @@ describe('CLSI Production Contract Suite', () => {
 
       expect(res.success).toBe(false);
       expect(res.outcome).toBe('terminated');
+      expect(sandboxRunner.run).not.toHaveBeenCalled();
     });
   });
 

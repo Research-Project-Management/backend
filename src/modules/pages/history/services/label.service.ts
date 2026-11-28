@@ -16,7 +16,7 @@ export class LabelService {
     pageId?: string,
   ): Promise<VersionLabelDto[]> {
     const labels = await this.repository.listLabels(spaceId, pageId);
-    return labels.map((label) => this.toLabelDto(label));
+    return labels.map((label) => label.toDto());
   }
 
   public async labelVersion(
@@ -56,7 +56,7 @@ export class LabelService {
     }
 
     const saved = await this.repository.saveLabel(versionLabel);
-    return this.toLabelDto(saved);
+    return saved.toDto();
   }
 
   public async deleteLabel(
@@ -65,15 +65,5 @@ export class LabelService {
     pageId?: string,
   ): Promise<void> {
     await this.repository.deleteLabel(projectId, labelId, pageId);
-  }
-
-  public toLabelDto(label: VersionLabel): VersionLabelDto {
-    return {
-      id: label.id,
-      version: label.version,
-      label: label.label,
-      createdById: label.createdById,
-      createdAt: label.createdAt,
-    };
   }
 }

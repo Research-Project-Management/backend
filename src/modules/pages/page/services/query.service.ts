@@ -1,256 +1,354 @@
 /**
- * modules/pages/core/services/page/page-query.ts
- * Business: Querying & listing project pages and their associated files.
+ * modules/pages/page/services/query.service.ts
+ * Domain service querying Page detail, space page catalogs, and page file lists.
  */
 
 import {
   BadRequestException,
+  Inject,
+  Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PageDoc, PageNode } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+  NOOP_LIVE_COLLABORATION,
   filterRecordsByPageScope,
+  findPageRecordWithNode,
+  formatPageByIdResponse,
   getRecordSpaceId,
+  hydratePageDocLines,
   isRecordDeleted,
   resolveActiveProjectId,
+  resolveProjectIdByEntityId,
   resolveSpaceRootDocIds,
-} from '../../core/utils/page-scope';
+} from '@/modules/pages/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
-import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
-import type { PageDocRanges, PageLifecycleContext } from './content.service';
+import type { PageDocRanges } from '../types/page.types';
 
-export async function getProjectPagesHelper(
-  ctx: Pick<
-    PageLifecycleContext,
-    'prisma' | 'docstoreService' | 'liveCollab' | 'logger'
-  >,
-  projectId: string,
-  query?: { status?: string; search?: string },
-) {
-  if (!isUuid(projectId)) {
-    return { pages: [], total: 0, isEmpty: true };
+@Injectable()
+export class PageQueryService {
+  private readonly logger = new Logger(PageQueryService.name);
+  private readonly liveCollab: LiveCollaborationPort;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly docstoreService: DocstoreService,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollab?: LiveCollaborationPort,
+  ) {
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
-  try {
-    const normalizedStatus =
-      query?.status === 'draft' ||
-      query?.status === 'published' ||
-      query?.status === 'archived'
-        ? query.status
-        : undefined;
-    const trimmedSearch = query?.search?.trim() || undefined;
 
-    // Fast metadata-only catalog query on `pages` + `page_labels` (0 Yjs flushes, 0 PageDoc.lines reads, 0 S3 unarchives)
-    if (ctx.prisma.page?.findMany) {
-      const pageRows = await ctx.prisma.page.findMany({
-        where: {
-          spaceId: projectId,
-          deletedAt: null,
-          ...(normalizedStatus ? { status: normalizedStatus } : {}),
-          ...(trimmedSearch
-            ? { title: { contains: trimmedSearch, mode: 'insensitive' } }
-            : {}),
-        },
-        include: {
-          labels: {
-            include: {
-              label: { select: { id: true, name: true, color: true } },
-            },
-          },
-          rootDoc: {
-            select: {
-              id: true,
-              lastKnownPath: true,
-              version: true,
-              rev: true,
-            },
-          },
-        },
-        orderBy: { updatedAt: 'desc' },
-      });
-
-      const creatorIds = Array.from(
-        new Set(
-          pageRows
-            .map((p) => p.createdById)
-            .filter((id): id is string => Boolean(id)),
-        ),
+  public async getPageById(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+  ) {
+    try {
+      const targetProjectId = resolveActiveProjectId(authorizedProjectId);
+      const record = await findPageRecordWithNode(
+        this.prisma,
+        pageId,
+        targetProjectId,
       );
 
-      const creators =
-        creatorIds.length > 0 && ctx.prisma.user?.findMany
-          ? await Promise.resolve(
-              ctx.prisma.user.findMany({
-                where: { id: { in: creatorIds } },
-                select: {
-                  id: true,
-                  email: true,
-                  profile: { select: { name: true } },
-                },
-              }),
-            ).catch(() => [])
-          : [];
-      const creatorById = new Map(creators.map((u) => [u.id, u]));
+      if (!record || isRecordDeleted(record)) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Document ${pageId} not found`,
+        });
+      }
 
-      const pages = pageRows.map((page) => {
-        const rootDoc = (
-          page as typeof page & {
-            rootDoc?: {
-              id?: string;
-              lastKnownPath?: string | null;
-              version?: number;
-              rev?: number;
-            } | null;
+      const recordProjectId = getRecordSpaceId(record);
+      if (recordProjectId) {
+        const flushed = await this.liveCollab
+          .flushDocs(recordProjectId, [pageId])
+          .catch(() => []);
+        if (flushed.length > 0) {
+          const refreshed = await findPageRecordWithNode(
+            this.prisma,
+            pageId,
+            recordProjectId,
+          );
+          if (refreshed && !isRecordDeleted(refreshed)) {
+            return await formatPageByIdResponse(
+              this.docstoreService,
+              refreshed,
+            );
           }
-        ).rootDoc;
-        const rootDocId = page.rootDocId || rootDoc?.id || page.id;
-        const mainFileName =
-          rootDoc?.lastKnownPath?.replace(/^\/+/, '') || 'main.tex';
-        const normalizedLabels = Array.isArray(page.labels)
-          ? page.labels.map((a) => ({
-              id: a.label.id,
-              name: a.label.name,
-              color: a.label.color || '#3b82f6',
-            }))
-          : [];
-        const creator = page.createdById
-          ? creatorById.get(page.createdById)
+        }
+      }
+
+      return await formatPageByIdResponse(this.docstoreService, record);
+    } catch (err) {
+      if (err instanceof NotFoundException) throw err;
+      throw new NotFoundException(`Document ${pageId} not found`);
+    }
+  }
+
+  public async getProjectPages(
+    projectId: string,
+    query?: { status?: string; search?: string },
+  ) {
+    if (!isUuid(projectId)) {
+      return { pages: [], total: 0, isEmpty: true };
+    }
+    try {
+      const normalizedStatus =
+        query?.status === 'draft' ||
+        query?.status === 'published' ||
+        query?.status === 'archived'
+          ? query.status
           : undefined;
-        const authorName =
-          creator?.profile?.name || creator?.email?.split('@')[0] || 'Author';
+      const trimmedSearch = query?.search?.trim() || undefined;
+
+      // Fast metadata-only catalog query on `pages` + `page_labels` (0 Yjs flushes, 0 PageDoc.lines reads, 0 S3 unarchives)
+      if (this.prisma.page?.findMany) {
+        const pageRows = await this.prisma.page.findMany({
+          where: {
+            spaceId: projectId,
+            deletedAt: null,
+            ...(normalizedStatus ? { status: normalizedStatus } : {}),
+            ...(trimmedSearch
+              ? { title: { contains: trimmedSearch, mode: 'insensitive' } }
+              : {}),
+          },
+          include: {
+            labels: {
+              include: {
+                label: { select: { id: true, name: true, color: true } },
+              },
+            },
+            rootDoc: {
+              select: {
+                id: true,
+                lastKnownPath: true,
+                version: true,
+                rev: true,
+              },
+            },
+          },
+          orderBy: { updatedAt: 'desc' },
+        });
+
+        const creatorIds = Array.from(
+          new Set(
+            pageRows
+              .map((p) => p.createdById)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        );
+
+        const creators =
+          creatorIds.length > 0 && this.prisma.user?.findMany
+            ? await Promise.resolve(
+                this.prisma.user.findMany({
+                  where: { id: { in: creatorIds } },
+                  select: {
+                    id: true,
+                    email: true,
+                    profile: { select: { name: true } },
+                  },
+                }),
+              ).catch(() => [])
+            : [];
+        const creatorById = new Map(creators.map((u) => [u.id, u]));
+
+        const pages = pageRows.map((page) => {
+          const rootDoc = (
+            page as typeof page & {
+              rootDoc?: {
+                id?: string;
+                lastKnownPath?: string | null;
+                version?: number;
+                rev?: number;
+              } | null;
+            }
+          ).rootDoc;
+          const rootDocId = page.rootDocId || rootDoc?.id || page.id;
+          const mainFileName =
+            rootDoc?.lastKnownPath?.replace(/^\/+/, '') || 'main.tex';
+          const normalizedLabels = Array.isArray(page.labels)
+            ? page.labels.map((a) => ({
+                id: a.label.id,
+                name: a.label.name,
+                color: a.label.color || '#3b82f6',
+              }))
+            : [];
+          const creator = page.createdById
+            ? creatorById.get(page.createdById)
+            : undefined;
+          const authorName =
+            creator?.profile?.name || creator?.email?.split('@')[0] || 'Author';
+
+          return {
+            id: page.id,
+            title: page.title || 'Untitled',
+            description: page.description ?? '',
+            content: '',
+            status: page.status,
+            compiler: page.compiler || 'pdflatex',
+            texlive: page.texlive || '2025',
+            spellLang: page.spellLang || 'en_US',
+            rootDocId: page.rootDocId ?? null,
+            thumbnail: page.thumbnail ?? undefined,
+            pdfThumbnail: page.thumbnail ?? undefined,
+            projectId,
+            spaceId: projectId,
+            author: {
+              id: creator?.id ?? page.createdById ?? undefined,
+              name: authorName,
+            },
+            labels: normalizedLabels,
+            mainFile: { id: rootDocId, title: mainFileName },
+            mainFileId: rootDocId,
+            rootPageId: page.id,
+            version: rootDoc?.version ?? 1,
+            rev: rootDoc?.rev ?? 1,
+            createdAt: page.createdAt.toISOString(),
+            updatedAt: page.updatedAt.toISOString(),
+          };
+        });
 
         return {
-          id: page.id,
-          title: page.title || 'Untitled',
-          description: page.description ?? '',
-          content: '',
-          status: page.status,
-          compiler: page.compiler || 'pdflatex',
-          texlive: page.texlive || '2025',
-          spellLang: page.spellLang || 'en_US',
-          rootDocId: page.rootDocId ?? null,
-          thumbnail: page.thumbnail ?? undefined,
-          pdfThumbnail: page.thumbnail ?? undefined,
-          projectId,
-          spaceId: projectId,
-          author: {
-            id: creator?.id ?? page.createdById ?? undefined,
-            name: authorName,
-          },
-          labels: normalizedLabels,
-          mainFile: { id: rootDocId, title: mainFileName },
-          mainFileId: rootDocId,
-          rootPageId: page.id,
-          version: rootDoc?.version ?? 1,
-          rev: rootDoc?.rev ?? 1,
-          createdAt: page.createdAt.toISOString(),
-          updatedAt: page.updatedAt.toISOString(),
+          pages,
+          total: pages.length,
+          isEmpty: pages.length === 0,
         };
-      });
+      }
+
+      // Fallback for lightweight mocks without prisma.page delegate
+      const rootDocIds = await resolveSpaceRootDocIds(this.prisma, projectId);
+      const rootDocIdList = Array.from(rootDocIds);
+      const [rootNodes, space, project] = await Promise.all([
+        rootDocIdList.length > 0
+          ? this.prisma.pageNode.findMany({
+              where: {
+                spaceId: projectId,
+                type: 'DOC',
+                docId: { in: rootDocIdList },
+                doc: { deletedAt: null },
+              },
+              include: { doc: true },
+              orderBy: { sortOrder: 'asc' },
+            })
+          : Promise.resolve([]),
+        this.prisma.space?.findUnique
+          ? Promise.resolve(
+              this.prisma.space.findUnique({
+                where: { id: projectId },
+                include: {
+                  project: {
+                    select: {
+                      id: true,
+                      createdBy: {
+                        select: {
+                          id: true,
+                          email: true,
+                          profile: { select: { name: true } },
+                        },
+                      },
+                    },
+                  },
+                  ownerUser: {
+                    select: {
+                      id: true,
+                      email: true,
+                      profile: { select: { name: true } },
+                    },
+                  },
+                },
+              }),
+            ).catch(() => null)
+          : Promise.resolve(null),
+        this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: {
+            id: true,
+            createdBy: {
+              select: {
+                id: true,
+                email: true,
+                profile: { select: { name: true } },
+              },
+            },
+          },
+        }),
+      ]);
+
+      const authorName =
+        project?.createdBy?.profile?.name ||
+        project?.createdBy?.email?.split('@')[0] ||
+        space?.project?.createdBy?.profile?.name ||
+        space?.project?.createdBy?.email?.split('@')[0] ||
+        space?.ownerUser?.profile?.name ||
+        space?.ownerUser?.email?.split('@')[0] ||
+        'Author';
+
+      const pages = await formatRootNodesAsProjectPages(
+        this.docstoreService,
+        projectId,
+        authorName,
+        rootNodes,
+        query?.search,
+      );
 
       return {
         pages,
         total: pages.length,
         isEmpty: pages.length === 0,
       };
+    } catch (err) {
+      if (
+        err instanceof NotFoundException ||
+        err instanceof BadRequestException ||
+        err instanceof InternalServerErrorException
+      ) {
+        throw err;
+      }
+      this.logger.error(`Error fetching docs for project ${projectId}`, err);
+      throw new InternalServerErrorException(
+        'Failed to fetch project documents and pages',
+      );
     }
+  }
 
-    // Fallback for lightweight mocks without prisma.page delegate
-    const rootDocIds = await resolveSpaceRootDocIds(ctx.prisma, projectId);
-    const rootDocIdList = Array.from(rootDocIds);
-    const [rootNodes, space, project] = await Promise.all([
-      rootDocIdList.length > 0
-        ? ctx.prisma.pageNode.findMany({
-            where: {
-              spaceId: projectId,
-              type: 'DOC',
-              docId: { in: rootDocIdList },
-              doc: { deletedAt: null },
-            },
-            include: { doc: true },
-            orderBy: { sortOrder: 'asc' },
-          })
-        : Promise.resolve([]),
-      ctx.prisma.space?.findUnique
-        ? Promise.resolve(
-            ctx.prisma.space.findUnique({
-              where: { id: projectId },
-              include: {
-                project: {
-                  select: {
-                    id: true,
-                    createdBy: {
-                      select: {
-                        id: true,
-                        email: true,
-                        profile: { select: { name: true } },
-                      },
-                    },
-                  },
-                },
-                ownerUser: {
-                  select: {
-                    id: true,
-                    email: true,
-                    profile: { select: { name: true } },
-                  },
-                },
-              },
-            }),
-          ).catch(() => null)
-        : Promise.resolve(null),
-      ctx.prisma.project.findUnique({
-        where: { id: projectId },
-        select: {
-          id: true,
-          createdBy: {
-            select: {
-              id: true,
-              email: true,
-              profile: { select: { name: true } },
-            },
-          },
-        },
-      }),
-    ]);
-
-    const authorName =
-      project?.createdBy?.profile?.name ||
-      project?.createdBy?.email?.split('@')[0] ||
-      space?.project?.createdBy?.profile?.name ||
-      space?.project?.createdBy?.email?.split('@')[0] ||
-      space?.ownerUser?.profile?.name ||
-      space?.ownerUser?.email?.split('@')[0] ||
-      'Author';
-
-    const pages = await formatRootNodesAsProjectPages(
-      ctx.docstoreService,
-      projectId,
-      authorName,
-      rootNodes,
-      query?.search,
-    );
-
-    return {
-      pages,
-      total: pages.length,
-      isEmpty: pages.length === 0,
-    };
-  } catch (err) {
-    if (
-      err instanceof NotFoundException ||
-      err instanceof BadRequestException ||
-      err instanceof InternalServerErrorException
-    ) {
-      throw err;
+  public async getPageFiles(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+    options?: { includeContent?: boolean },
+  ) {
+    try {
+      if (!isUuid(pageId)) {
+        return { files: [] };
+      }
+      const targetProjectId = resolveActiveProjectId(authorizedProjectId);
+      const resolvedProjectId =
+        targetProjectId ??
+        (await resolveProjectIdByEntityId(this.prisma, pageId));
+      if (resolvedProjectId) {
+        await this.liveCollab.flushDocs(resolvedProjectId, []).catch(() => []);
+      }
+      return await resolvePageFilesList(
+        this.prisma,
+        this.docstoreService,
+        pageId,
+        targetProjectId,
+        options,
+      );
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        throw err;
+      }
+      return { files: [] };
     }
-    ctx.logger.error(`Error fetching docs for project ${projectId}`, err);
-    throw new InternalServerErrorException(
-      'Failed to fetch project documents and pages',
-    );
   }
 }
 
@@ -468,7 +566,23 @@ export async function resolvePageFilesList(
   return { files };
 }
 
-export async function formatRootNodesAsProjectPages(
+function formatRootNodesAsProjectPages(
+  docstoreService: DocstoreService,
+  projectId: string,
+  authorName: string,
+  rootNodes: Array<PageNode & { doc: PageDoc | null }>,
+  search?: string,
+) {
+  return hydrateAndFilterRootNodes(
+    docstoreService,
+    projectId,
+    authorName,
+    rootNodes,
+    search,
+  );
+}
+
+async function hydrateAndFilterRootNodes(
   docstoreService: DocstoreService,
   projectId: string,
   authorName: string,

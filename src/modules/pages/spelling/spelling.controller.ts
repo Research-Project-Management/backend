@@ -29,7 +29,7 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { UserRateLimit, UserRateLimitGuard } from '@/core';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 import { SpellingService } from './spelling.service';
 import {
   CheckSpellingDto,

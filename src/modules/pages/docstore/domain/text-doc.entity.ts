@@ -4,7 +4,6 @@
  */
 
 import { DocRanges, DocRangeVo } from './doc-range';
-import { WorkspaceFile } from '@/modules/pages/core/types/workspace-file';
 
 export interface TextDocProps {
   id: string;
@@ -131,60 +130,6 @@ export class TextDoc {
 
   public toRawText(): string {
     return this._lines.join('\n');
-  }
-
-  public toWorkspaceFile(): WorkspaceFile {
-    return {
-      path: this._path,
-      content: this.toRawText(),
-      hash: this._hash || undefined,
-    };
-  }
-
-  public incrementRev(): number {
-    this._rev += 1;
-    return this._rev;
-  }
-
-  public updateContent(
-    lines: string[],
-    version: number,
-    ranges?: DocRanges,
-    hash?: string,
-  ): void {
-    this._lines = lines;
-    this._version = version;
-    if (ranges) {
-      this._ranges = DocRangeVo.normalize(ranges);
-    }
-    if (hash) {
-      this._hash = hash;
-    }
-    this._sizeBytes = this.calculateSizeBytes();
-    this._inStorage = false;
-    this._storageKey = null;
-    this._updatedAt = new Date();
-  }
-
-  public markArchived(storageKey: string): void {
-    this._inStorage = true;
-    this._storageKey = storageKey;
-    this._lines = [];
-  }
-
-  public unarchive(lines: string[], ranges?: DocRanges): void {
-    this._inStorage = false;
-    this._storageKey = null;
-    this._lines = lines;
-    if (ranges) {
-      this._ranges = DocRangeVo.normalize(ranges);
-    }
-    this._sizeBytes = this.calculateSizeBytes();
-  }
-
-  public markDeleted(): void {
-    this._deleted = true;
-    this._deletedAt = new Date();
   }
 }
 

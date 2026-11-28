@@ -4,18 +4,20 @@ import { mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { WorkspaceCollectorService } from '@/modules/pages/core/services/workspace-collector.service';
+  WorkspaceCollectorService,
+} from '@/modules/pages/core';
+import { ClsiService } from '@/modules/pages/clsi';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { FilestoreService } from '@/modules/pages/filestore';
+import {
+  StructureService,
+  type PageNodeEntity,
+} from '@/modules/pages/structure';
 import { resolveExportProfile } from '../domain/archive.policy';
 import type {
   ExportableFileEntry,
   RawZipEntryInput,
 } from '../types/archive.types';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { ClsiService } from '@/modules/pages/clsi/clsi.service';
-import type { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
 
 const COLLECT_CONCURRENCY = 6;
 

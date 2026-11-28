@@ -115,6 +115,16 @@ export function isPersonalSpaceAlias(spaceId: unknown): spaceId is string {
   );
 }
 
+export function resolvePersonalSpaceId(
+  spaceId: string,
+  userId?: string | null,
+): string {
+  if (isPersonalSpaceAlias(spaceId) && userId) {
+    return userId;
+  }
+  return spaceId;
+}
+
 export interface PagesYjsConfig {
   maxUpdateSizeBytes: number;
   maxDocumentSizeBytes: number;

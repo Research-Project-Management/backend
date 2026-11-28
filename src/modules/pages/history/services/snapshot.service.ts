@@ -18,9 +18,8 @@ import {
   SnapshotDetailDto,
   VersionListItemDto,
 } from '../dto/snapshot.dto';
-import { VersionLabelDto } from '../dto/label.dto';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
-import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
+import { UserResolverService } from '@/modules/pages/core';
 
 @Injectable()
 export class SnapshotService {
@@ -314,15 +313,7 @@ export class SnapshotService {
           : null),
       isAutomatic: snapshot.isAutomatic,
       fileCount: snapshot.fileCount,
-      labels: snapshot.labels.map(
-        (l): VersionLabelDto => ({
-          id: l.id,
-          version: l.version,
-          label: l.label,
-          createdById: l.createdById,
-          createdAt: l.createdAt,
-        }),
-      ),
+      labels: snapshot.labels.map((l) => l.toDto()),
       createdAt: snapshot.createdAt,
     };
   }

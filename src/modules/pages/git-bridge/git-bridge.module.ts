@@ -9,10 +9,10 @@ import type { FastifyInstance } from 'fastify';
 import { PrismaModule } from '@/core';
 import { IdentityModule } from '@/modules/identity/identity.module';
 import { AccessModule } from '@/modules/project/access';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
-import { StructureModule } from '@/modules/pages/structure/structure.module';
-import { HistoryModule } from '@/modules/pages/history/history.module';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { FilestoreModule } from '@/modules/pages/filestore';
+import { StructureModule } from '@/modules/pages/structure';
+import { HistoryModule } from '@/modules/pages/history';
 import { PackAdapter } from './adapters/pack.adapter';
 import { RepoAdapter } from './adapters/repo.adapter';
 import { ProtocolController } from './controllers/protocol.controller';
@@ -48,14 +48,7 @@ const LFS_JSON_TYPE = 'application/vnd.git-lfs+json';
     SyncService,
     MaintenanceService,
   ],
-  exports: [
-    TokenService,
-    SyncService,
-    MaintenanceService,
-    GitBridgeRepository,
-    RepoAdapter,
-    PackAdapter,
-  ],
+  exports: [TokenService, SyncService, MaintenanceService],
 })
 export class GitBridgeModule implements OnModuleInit {
   constructor(private readonly adapterHost: HttpAdapterHost) {}

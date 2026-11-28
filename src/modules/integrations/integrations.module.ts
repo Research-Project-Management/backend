@@ -1,17 +1,16 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { PagesCoreModule } from '@/modules/pages/core/core.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
-import { ExportImportModule } from '@/modules/pages/export-import/export-import.module';
+import { PagesCoreModule } from '@/modules/pages/core';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { ExportImportModule } from '@/modules/pages/export-import';
+import { FilestoreModule } from '@/modules/pages/filestore';
+import { StructureModule } from '@/modules/pages/structure';
 import { IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
 import { IntegrationsRepository } from './integrations.repository';
 import { ZoteroProvider } from './providers/zotero.provider';
 import { MendeleyProvider } from './providers/mendeley.provider';
 import { GithubProvider } from './providers/github.provider';
-
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { StructureModule } from '@/modules/pages/structure/structure.module';
 
 @Module({
   imports: [
@@ -30,11 +29,6 @@ import { StructureModule } from '@/modules/pages/structure/structure.module';
     MendeleyProvider,
     GithubProvider,
   ],
-  exports: [
-    IntegrationsService,
-    IntegrationsRepository,
-    ZoteroProvider,
-    MendeleyProvider,
-  ],
+  exports: [IntegrationsService],
 })
 export class IntegrationsModule {}

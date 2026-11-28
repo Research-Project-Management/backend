@@ -1,12 +1,17 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { DocModifiedError } from '@/modules/pages/docstore/domain/doc.errors';
 import { toSuggestionDto } from '@/modules/pages/review/domain/review.mapper';
-import { validateSuggestionRange } from '@/modules/pages/review/domain/review.policy';
+import {
+  assertReviewTransitionAllowed,
+  validateSuggestionRange,
+} from '@/modules/pages/review/domain/review.policy';
 import { YjsUpdateValidator } from '@/modules/realtime/channels/pages/yjs/sync';
 import { YjsService } from '@/modules/realtime/channels/pages/yjs/engine';
+import { LiveCollaborationAdapter } from '@/modules/realtime/channels/pages/bridge';
+import type { RoomPresenceStore } from '@/modules/realtime/channels/pages/presence';
 import { RealtimeValidationFailedException } from '@/modules/realtime/core/errors';
 import {
   PAGES_REALTIME_DEFAULTS,
@@ -180,6 +185,69 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
 
       const session = await yjsService.getOrCreateDoc(SPACE_ID, DOC_ID);
       expect(session.yText.toString()).toBe('\\section{Start}');
+    });
+
+    it('persists 3-way merged text immediately on OCC conflict during flushDoc and excludes failed flushes in LiveCollaborationAdapter.flushDocs', async () => {
+      const getDocMock = jest
+        .fn()
+        .mockResolvedValueOnce({
+          id: DOC_ID,
+          projectId: SPACE_ID,
+          lines: ['line 1', 'line 2', 'line 3'],
+          rev: 1,
+          version: 1,
+        })
+        .mockResolvedValueOnce({
+          id: DOC_ID,
+          projectId: SPACE_ID,
+          lines: ['remote line 1', 'line 2', 'line 3'],
+          rev: 2,
+          version: 2,
+          deleted: false,
+        });
+
+      const updateDocMock = jest
+        .fn()
+        .mockRejectedValueOnce(new DocModifiedError())
+        .mockResolvedValueOnce({
+          rev: 3,
+          doc: { version: 3, rev: 3 },
+        })
+        .mockRejectedValueOnce(new Error('DB write unavailable'));
+
+      yjsService = new YjsService(
+        undefined,
+        { getDoc: getDocMock, updateDoc: updateDocMock } as never,
+        new YjsUpdateValidator(),
+      );
+
+      const session = await yjsService.getOrCreateDoc(SPACE_ID, DOC_ID);
+      session.doc.transact(() => {
+        session.yText.delete(session.yText.length - 6, 6);
+        session.yText.insert(session.yText.length, 'local line 3');
+      }, 'sock-1');
+
+      const adapter = new LiveCollaborationAdapter(
+        yjsService,
+        {} as RoomPresenceStore,
+      );
+      const flushedOnOcc = await adapter.flushDocs(SPACE_ID, [DOC_ID]);
+      expect(flushedOnOcc).toEqual([DOC_ID]);
+      expect(updateDocMock).toHaveBeenCalledTimes(2);
+      expect(updateDocMock).toHaveBeenNthCalledWith(2, SPACE_ID, DOC_ID, {
+        lines: ['remote line 1', 'line 2', 'local line 3'],
+        version: 3,
+        expectedRev: 2,
+      });
+      expect(yjsService.hasUnflushedChanges(SPACE_ID, DOC_ID)).toBe(false);
+
+      // Next edit encountering a DB write failure leaves unflushed changes and is excluded from flushed list
+      session.doc.transact(() => {
+        session.yText.insert(session.yText.length, '\n% trailing');
+      }, 'sock-1');
+      const flushedOnFailure = await adapter.flushDocs(SPACE_ID, [DOC_ID]);
+      expect(flushedOnFailure).toEqual([]);
+      expect(yjsService.hasUnflushedChanges(SPACE_ID, DOC_ID)).toBe(true);
     });
   });
 
@@ -941,6 +1009,42 @@ describe('Khối 2 / Tầng 3 — Live Yjs Sync, Project History & Track Changes
         }),
       );
       await yjs.onModuleDestroy();
+    });
+
+    it('rejects cross-space docId spoofing on CommentsService.create and enforces assertReviewTransitionAllowed', async () => {
+      const OTHER_SPACE_ID = '99999999-1111-4111-8111-111111111111';
+      const saveThread = jest.fn();
+      const service = new CommentsService(
+        { getPrisma: () => ({}), saveThread } as never,
+        {
+          findDocInProject: jest.fn().mockResolvedValue(null),
+          getPrisma: () => ({}),
+        } as never,
+        { resolveUserNames: jest.fn().mockResolvedValue(new Map()) } as never,
+        {
+          resolveActiveProjectId: () => SPACE_ID,
+          resolveProjectId: jest.fn().mockResolvedValue(OTHER_SPACE_ID),
+        } as never,
+      );
+
+      await expect(
+        service.create(
+          DOC_ID,
+          { content: 'Cross-space spoof attempt', line: 1 },
+          { user: { id: AUTHOR_ID } } as never,
+          SPACE_ID,
+          SPACE_ID,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(saveThread).not.toHaveBeenCalled();
+
+      expect(() =>
+        assertReviewTransitionAllowed({
+          role: 'reviewer',
+          fromStatus: 'in_review',
+          toStatus: 'locked',
+        }),
+      ).toThrow(ForbiddenException);
     });
   });
 });

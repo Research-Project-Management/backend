@@ -1,17 +1,17 @@
 /**
  * modules/pages/page/services/labels.service.ts
- * Business: Resolving project labels and assigning labels to page documents.
+ * Domain service resolving space labels and managing 3NF page_labels assignments.
  */
 
-import { NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/core';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { PrismaService, isUuid } from '@/core';
+import { getRecordSpaceId } from '@/modules/pages/core';
 import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
-import { getRecordSpaceId } from '../../core/utils/page-scope';
 import { PageRepository, type ResolvedSpaceLabel } from '../page.repository';
 
 export async function resolveProjectLabels(
   prismaOrRepo: PrismaService | PageRepository,
-  projectId: string,
+  spaceId: string,
   labelIds: string[],
 ): Promise<ResolvedSpaceLabel[]> {
   if (!labelIds || labelIds.length === 0) return [];
@@ -19,45 +19,101 @@ export async function resolveProjectLabels(
     prismaOrRepo instanceof PageRepository
       ? prismaOrRepo
       : new PageRepository(prismaOrRepo);
-  return repo.findSpaceLabelsByIds(projectId, labelIds);
+  return repo.findSpaceLabelsByIds(spaceId, labelIds);
 }
 
-export async function resolveAndAssignLabelsForDoc(
-  prismaOrRepo: PrismaService | PageRepository,
-  pageScopeRepo: ScopeRepository,
-  projectId: string,
-  pageId: string,
-  labelIds: string[],
-) {
-  const repo =
-    prismaOrRepo instanceof PageRepository
-      ? prismaOrRepo
-      : new PageRepository(prismaOrRepo);
+@Injectable()
+export class PageLabelsService {
+  private readonly pageRepo: PageRepository;
+  private readonly pageScopeRepo: ScopeRepository;
 
-  const ownedPage = await repo.findActivePageInSpace(projectId, pageId);
-  let canonicalPageId = ownedPage?.id ?? null;
-  let targetProjectId = ownedPage?.spaceId ?? projectId;
-
-  if (!canonicalPageId) {
-    const doc = await pageScopeRepo.findDocInProject(projectId, pageId);
-    if (!doc) {
-      throw new NotFoundException({
-        statusCode: 404,
-        code: 'RESOURCE_NOT_FOUND',
-        message: `Page ${pageId} not found`,
-      });
-    }
-    canonicalPageId = doc.pageId || pageId;
-    targetProjectId = getRecordSpaceId(doc) || projectId;
+  constructor(
+    prisma: PrismaService,
+    @Optional() pageRepo?: PageRepository,
+    @Optional() pageScopeRepo?: ScopeRepository,
+  ) {
+    this.pageRepo = pageRepo ?? new PageRepository(prisma);
+    this.pageScopeRepo = pageScopeRepo ?? new ScopeRepository(prisma);
   }
 
-  const labels = await resolveProjectLabels(repo, targetProjectId, labelIds);
+  private async resolveTargetPage(
+    spaceId: string,
+    pageId: string,
+    requireExistence: boolean,
+  ): Promise<{ canonicalPageId: string; targetSpaceId: string } | null> {
+    const ownedPage = await this.pageRepo.findActivePageInSpace(spaceId, pageId);
+    if (ownedPage) {
+      return {
+        canonicalPageId: ownedPage.id,
+        targetSpaceId: ownedPage.spaceId || spaceId,
+      };
+    }
 
-  // Persist to 3NF page_labels join table (source of truth)
-  await repo.replacePageLabels(
-    canonicalPageId,
-    labels.map((l) => l.id),
-  );
+    const doc = await this.pageScopeRepo.findDocInProject(spaceId, pageId);
+    if (!doc) {
+      if (requireExistence) {
+        throw new NotFoundException({
+          statusCode: 404,
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Page ${pageId} not found`,
+        });
+      }
+      return null;
+    }
 
-  return { labels };
+    return {
+      canonicalPageId: doc.pageId || (requireExistence ? pageId : ''),
+      targetSpaceId: getRecordSpaceId(doc) || spaceId,
+    };
+  }
+
+  public async getPageLabels(
+    spaceId: string,
+    pageId: string,
+  ): Promise<{ labels: ResolvedSpaceLabel[] }> {
+    if (!isUuid(pageId)) {
+      return { labels: [] };
+    }
+    const target = await this.resolveTargetPage(spaceId, pageId, false);
+    if (!target?.canonicalPageId) {
+      return { labels: [] };
+    }
+    const labels = await this.pageRepo.findPageLabels(target.canonicalPageId);
+    return { labels };
+  }
+
+  public async assignPageLabels(
+    spaceId: string,
+    pageId: string,
+    labelIds?: string[],
+  ): Promise<{ labels: ResolvedSpaceLabel[] }> {
+    if (!isUuid(pageId) || !Array.isArray(labelIds)) {
+      return { labels: [] };
+    }
+    const target = await this.resolveTargetPage(spaceId, pageId, true);
+    const labels = await resolveProjectLabels(
+      this.pageRepo,
+      target!.targetSpaceId,
+      labelIds,
+    );
+    await this.pageRepo.replacePageLabels(
+      target!.canonicalPageId,
+      labels.map((l) => l.id),
+    );
+    return { labels };
+  }
+
+  public async removePageLabel(
+    spaceId: string,
+    pageId: string,
+    labelId: string,
+  ): Promise<{ labels: ResolvedSpaceLabel[] }> {
+    if (!isUuid(pageId)) {
+      return { labels: [] };
+    }
+    const target = await this.resolveTargetPage(spaceId, pageId, true);
+    await this.pageRepo.removePageLabel(target!.canonicalPageId, labelId);
+    const labels = await this.pageRepo.findPageLabels(target!.canonicalPageId);
+    return { labels };
+  }
 }

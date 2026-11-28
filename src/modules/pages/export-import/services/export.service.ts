@@ -1,5 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
+import { SnapshotService } from '@/modules/pages/history';
 import { ArchiveManifest } from '../domain/archive.domain';
 import { ExportProfile, resolveExportProfile } from '../domain/archive.policy';
 import { PageArchiveAggregatorAdapter } from '../adapters/collector.adapter';

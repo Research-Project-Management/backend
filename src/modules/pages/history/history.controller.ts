@@ -37,6 +37,7 @@ import {
   UserRateLimit,
   UserRateLimitGuard,
 } from '@/core';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 import { SnapshotService } from './services/snapshot.service';
 import { DiffService } from './services/diff.service';
 import { LabelService } from './services/label.service';
@@ -67,14 +68,17 @@ export class HistoryController {
     private readonly restore: RestoreService,
   ) {}
 
-  private resolveSpaceId(
+  private resolveCoordinates(
     routeSpaceId: string,
     resolvedSpace?: string | { id?: string } | null,
-  ): string {
-    return (
-      (typeof resolvedSpace === 'string'
-        ? resolvedSpace
-        : resolvedSpace?.id) || routeSpaceId
+    explicitPageId?: string,
+    req?: AuthenticatedRequest,
+  ): { spaceId: string; pageId?: string } {
+    return resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId },
+      resolvedSpace,
+      explicitPageId,
+      req,
     );
   }
 
@@ -91,11 +95,15 @@ export class HistoryController {
     @Param('spaceId') routeSpaceId: string,
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<VersionListItemDto[]> {
-    return await this.snapshots.listVersions(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
       pageId,
+      req,
     );
+    return await this.snapshots.listVersions(coords.spaceId, coords.pageId);
   }
 
   @Post('snapshots')
@@ -111,11 +119,17 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
+      pageId ?? dto.pageId,
+      req,
+    );
     return await this.snapshots.createSnapshot(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      coords.spaceId,
       dto,
       this.resolveUserId(req),
-      pageId ?? dto.pageId,
+      coords.pageId,
     );
   }
 
@@ -129,11 +143,18 @@ export class HistoryController {
     @Param('version', ParseIntPipe) version: number,
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<SnapshotDetailDto> {
-    return await this.snapshots.getSnapshot(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
-      version,
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
       pageId,
+      req,
+    );
+    return await this.snapshots.getSnapshot(
+      coords.spaceId,
+      version,
+      coords.pageId,
     );
   }
 
@@ -147,12 +168,19 @@ export class HistoryController {
     @Query() query: DiffQueryDto,
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<DiffResponseDto> {
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
+      pageId,
+      req,
+    );
     return await this.diff.compareVersions(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      coords.spaceId,
       query.baseVersion,
       query.targetVersion,
-      pageId,
+      coords.pageId,
     );
   }
 
@@ -170,12 +198,18 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<VersionLabelDto> {
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
+      pageId ?? dto.pageId,
+      req,
+    );
     return await this.labels.labelVersion(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      coords.spaceId,
       version,
       dto.label,
       this.resolveUserId(req),
-      pageId ?? dto.pageId,
+      coords.pageId,
     );
   }
 
@@ -189,12 +223,15 @@ export class HistoryController {
     @Param('labelId') labelId: string,
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<void> {
-    await this.labels.deleteLabel(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
-      labelId,
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
       pageId,
+      req,
     );
+    await this.labels.deleteLabel(coords.spaceId, labelId, coords.pageId);
   }
 
   @Post('restore')
@@ -211,11 +248,17 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ) {
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
+      pageId ?? dto.pageId,
+      req,
+    );
     return await this.restore.restoreVersion(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      coords.spaceId,
       dto.targetVersion,
       this.resolveUserId(req),
-      pageId ?? dto.pageId,
+      coords.pageId,
     );
   }
 
@@ -235,12 +278,18 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ): Promise<RestoreSingleFileResponseDto> {
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
+      pageId ?? dto.pageId,
+      req,
+    );
     return await this.restore.restoreSingleFile(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      coords.spaceId,
       version,
       dto,
       this.resolveUserId(req),
-      pageId ?? dto.pageId,
+      coords.pageId,
     );
   }
 
@@ -251,11 +300,15 @@ export class HistoryController {
     @Param('spaceId') routeSpaceId: string,
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<VersionLabelDto[]> {
-    return await this.labels.listLabels(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
       pageId,
+      req,
     );
+    return await this.labels.listLabels(coords.spaceId, coords.pageId);
   }
 
   @Get('blobs/:contentHash')
@@ -268,11 +321,15 @@ export class HistoryController {
     @Param('spaceId') routeSpaceId: string,
     @Param('contentHash') contentHash: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ) {
-    return await this.snapshots.getBlob(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
-      contentHash,
+    const { spaceId } = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
+      undefined,
+      req,
     );
+    return await this.snapshots.getBlob(spaceId, contentHash);
   }
 
   @Post('flush')
@@ -290,10 +347,16 @@ export class HistoryController {
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Req() req?: AuthenticatedRequest,
   ) {
-    return await this.snapshots.flushHistory(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
-      this.resolveUserId(req),
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
       pageId,
+      req,
+    );
+    return await this.snapshots.flushHistory(
+      coords.spaceId,
+      this.resolveUserId(req),
+      coords.pageId,
     );
   }
 
@@ -311,12 +374,19 @@ export class HistoryController {
     @Res() res: FastifyReply,
     @Query('pageId') pageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
+    @Req() req?: AuthenticatedRequest,
   ): Promise<void> {
+    const coords = this.resolveCoordinates(
+      routeSpaceId,
+      resolvedSpace,
+      pageId,
+      req,
+    );
     const result = await this.snapshots.exportVersionZipStream(
-      this.resolveSpaceId(routeSpaceId, resolvedSpace),
+      coords.spaceId,
       version,
       projectName,
-      pageId,
+      coords.pageId,
     );
 
     res.header('Content-Type', 'application/zip');

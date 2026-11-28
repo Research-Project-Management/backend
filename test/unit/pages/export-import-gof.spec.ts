@@ -1,33 +1,25 @@
 import * as zlib from 'node:zlib';
 import {
   ArchiveEntryVo,
-  ArchiveManifest,
-  ImportSummaryVo,
-} from '@/modules/pages/export-import/domain/archive.domain';
-import {
   ArchiveFileLimitExceededException,
+  ArchiveManifest,
+  ConvertService,
+  ExportService,
+  ImportService,
+  ImportSummaryVo,
   InvalidZipArchiveException,
+  PageArchiveAggregatorAdapter,
+  PageArchiveHydratorAdapter,
+  PandocAdapter,
+  ZipAdapter,
   ZipSlipSecurityException,
-} from '@/modules/pages/export-import/domain/archive.errors';
-import {
   resolveExportProfile,
-  validateExtractedArchiveEntries,
-} from '@/modules/pages/export-import/domain/archive.policy';
-import {
+  resolveImportFormat,
   resolveIncludedLatexContent,
   transpileLatexDocument,
-} from '@/modules/pages/export-import/domain/latex-export.domain';
-import {
-  resolveImportFormat,
   transpileMarkdownToLatex,
-} from '@/modules/pages/export-import/domain/latex-import.domain';
-import { ZipAdapter } from '@/modules/pages/export-import/adapters/zip.adapter';
-import { PandocAdapter } from '@/modules/pages/export-import/adapters/pandoc.adapter';
-import { PageArchiveAggregatorAdapter } from '@/modules/pages/export-import/adapters/collector.adapter';
-import { PageArchiveHydratorAdapter } from '@/modules/pages/export-import/adapters/hydrator.adapter';
-import { ExportService } from '@/modules/pages/export-import/services/export.service';
-import { ImportService } from '@/modules/pages/export-import/services/import.service';
-import { ConvertService } from '@/modules/pages/export-import/services/convert.service';
+  validateExtractedArchiveEntries,
+} from '@/modules/pages/export-import';
 import { ExportImportController } from '@/modules/pages/export-import/export-import.controller';
 
 describe('Export-Import Deep Module Suite', () => {
@@ -626,6 +618,36 @@ describe('Export-Import Deep Module Suite', () => {
         format: 'md',
         includeChildren: undefined,
       });
+
+      const importFromUrl = jest.fn().mockResolvedValue({
+        filename: 'paper.tex',
+        sizeBytes: 42,
+        imported: true,
+      });
+      const urlController = new ExportImportController(
+        exportSvc,
+        { importFromUrl } as never,
+        { exportSpaceDocument: exportSpaceDoc } as never,
+      );
+
+      await urlController.importFromUrl(
+        'personal',
+        { url: 'https://example.com/paper.tex', filename: 'paper.tex' },
+        {
+          user: { id: SPACE_ID },
+          resolvedSpaceId: SPACE_ID,
+          resolvedPageId: RESOLVED_PAGE_ID,
+        } as never,
+        null,
+      );
+
+      expect(importFromUrl).toHaveBeenCalledWith(
+        SPACE_ID,
+        'https://example.com/paper.tex',
+        'paper.tex',
+        RESOLVED_PAGE_ID,
+        SPACE_ID,
+      );
     });
   });
 });

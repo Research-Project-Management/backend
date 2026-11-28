@@ -11,9 +11,9 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { resolveActiveProjectId } from '@/modules/pages/core/utils/page-scope';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+  resolveActiveProjectId,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
 import { ArchiveEntryVo } from '../domain/archive.domain';
 import {
   ExportFormattedDocResult,

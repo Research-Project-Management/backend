@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { PagesCoreModule } from '@/modules/pages/core/core.module';
-import { StructureModule } from '@/modules/pages/structure/structure.module';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
-import { ClsiModule } from '@/modules/pages/clsi/clsi.module';
-import { HistoryModule } from '@/modules/pages/history/history.module';
+import { PagesCoreModule } from '@/modules/pages/core';
+import { StructureModule } from '@/modules/pages/structure';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { FilestoreModule } from '@/modules/pages/filestore';
+import { ClsiModule } from '@/modules/pages/clsi';
+import { HistoryModule } from '@/modules/pages/history';
 
 import { ZipAdapter } from './adapters/zip.adapter';
 import { PandocAdapter } from './adapters/pandoc.adapter';

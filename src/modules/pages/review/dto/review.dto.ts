@@ -173,11 +173,3 @@ export class BatchResolveDto {
   @IsString({ each: true })
   suggestionIds?: string[];
 }
-
-export class SuggestionIdsDto {
-  @ApiPropertyOptional({ type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  suggestionIds?: string[];
-}

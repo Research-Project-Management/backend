@@ -12,7 +12,7 @@ import {
   PAGES_REALTIME_DEFAULTS,
   PAGES_ROOMS,
   PagesRealtimeConfigService,
-  isPersonalSpaceAlias,
+  resolvePersonalSpaceId,
 } from './config';
 import type { ClientSocketData, UserPresence } from './types';
 import type { CursorUpdateDto, JoinDocDto, JoinProjectDto } from './dto';
@@ -51,13 +51,6 @@ export class PagesSessionService {
     @Optional() private readonly yjs?: YjsService,
     @Optional() private readonly config?: PagesRealtimeConfigService,
   ) {}
-
-  private resolveSpaceId(spaceId: string, userId: string): string {
-    if (isPersonalSpaceAlias(spaceId)) {
-      return userId;
-    }
-    return spaceId;
-  }
 
   private runBackground(
     op: 'evictDoc' | 'flushDoc',
@@ -99,7 +92,7 @@ export class PagesSessionService {
     userId: string,
     spaceId: string,
   ): Promise<ProjectAccess> {
-    const resolvedSpaceId = this.resolveSpaceId(spaceId, userId);
+    const resolvedSpaceId = resolvePersonalSpaceId(spaceId, userId);
     const access = await this.realtimeAccess.getProjectAccess(
       resolvedSpaceId,
       userId,
@@ -127,7 +120,7 @@ export class PagesSessionService {
   }> {
     const clientData = this.getClientData(client);
     const userId = clientData.userId;
-    const targetSpaceId = this.resolveSpaceId(dto.spaceId, userId);
+    const targetSpaceId = resolvePersonalSpaceId(dto.spaceId, userId);
 
     const prevSpaceId = clientData.spaceId;
     const prevDocId = clientData.activeDocId;
@@ -394,7 +387,11 @@ export class PagesSessionService {
     server: Server | undefined,
   ): Promise<void> {
     const clientData = this.getClientData(client);
-    const { spaceId, activeDocId } = clientData;
+    const orphaned = !clientData.spaceId
+      ? this.roomStore.getSession(client.id)
+      : null;
+    const spaceId = clientData.spaceId ?? orphaned?.spaceId ?? null;
+    const activeDocId = clientData.activeDocId ?? orphaned?.activeDocId ?? null;
 
     if (spaceId && activeDocId) {
       try {

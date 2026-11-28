@@ -18,7 +18,7 @@ import {
   LiveCollaborationPort,
   LivePresenceUser,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
+} from '@/modules/pages/core';
 
 export interface ActivePresenceUser {
   id: string;
@@ -104,8 +104,14 @@ export class PresenceService implements OnModuleDestroy {
     this.liveCollab = undefined;
   }
 
-  private getLiveCollaboration(): LiveCollaborationPort | null {
-    return this.liveCollab ?? null;
+  private invalidatePresenceCache(
+    pageId: string,
+    authorizedProjectId?: string,
+  ): void {
+    this.presenceCache.delete(pageId);
+    if (authorizedProjectId) {
+      this.presenceCache.delete(`${authorizedProjectId}:${pageId}`);
+    }
   }
 
   private async resolveProjectId(id: string): Promise<string | null> {
@@ -265,7 +271,7 @@ export class PresenceService implements OnModuleDestroy {
       }
     }
 
-    const live = this.getLiveCollaboration();
+    const live = this.liveCollab ?? null;
     if (live) {
       const projectId =
         authorizedProjectId ?? (await this.resolveProjectId(pageId));
@@ -327,10 +333,7 @@ export class PresenceService implements OnModuleDestroy {
       cursor: sanitizeCursorPayload(body?.cursor),
       lastSeen: Date.now(),
     });
-    this.presenceCache.delete(pageId);
-    if (authorizedProjectId) {
-      this.presenceCache.delete(`${authorizedProjectId}:${pageId}`);
-    }
+    this.invalidatePresenceCache(pageId, authorizedProjectId);
     return { success: true };
   }
 
@@ -348,10 +351,7 @@ export class PresenceService implements OnModuleDestroy {
         this.httpPresence.delete(`${authorizedProjectId}:${pageId}:${userId}`);
       }
     }
-    this.presenceCache.delete(pageId);
-    if (authorizedProjectId) {
-      this.presenceCache.delete(`${authorizedProjectId}:${pageId}`);
-    }
+    this.invalidatePresenceCache(pageId, authorizedProjectId);
     return { success: true };
   }
 }

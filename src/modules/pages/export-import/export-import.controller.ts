@@ -26,7 +26,10 @@ import {
   ResolvedSpace,
   Role,
 } from '@/modules/project/access';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+import {
+  resolveActiveProjectId,
+  resolvePageControllerCoordinates,
+} from '@/modules/pages/core';
 import { UserRateLimit, UserRateLimitGuard, isUuid } from '@/core';
 
 import { ExportService } from './services/export.service';
@@ -111,7 +114,7 @@ function resolveExplicitPageId(
   return undefined;
 }
 
-@ApiTags('Pages - Project Archive & Templates')
+@ApiTags('Pages - Export & Import')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -296,16 +299,20 @@ export class ExportImportController {
     @Body() body?: ExportDocumentDto,
     @Query('format') queryFormat?: string,
     @Query('includeChildren') queryIncludeChildren?: string,
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @ResolvedSpace() project?: string | { id: string; spaceId?: string } | null,
     @Req() req?: FastifyRequest,
   ) {
     const effectivePageId =
       pageId?.trim() || resolveExplicitPageId(undefined, req) || pageId;
+    const resolvedSpace =
+      resolveActiveProjectId(project) ||
+      (req as { resolvedSpaceId?: string } | undefined)?.resolvedSpaceId ||
+      null;
     return this.convertService.exportSingleDocument({
       pageId: effectivePageId,
       format: body?.format || queryFormat,
       includeChildren: body?.includeChildren ?? queryIncludeChildren,
-      project,
+      project: resolvedSpace,
     });
   }
 
@@ -315,19 +322,26 @@ export class ExportImportController {
   @UserRateLimit('import')
   @HttpCode(HttpStatus.OK)
   public async importFromUrl(
-    @Param('spaceId') spaceId: string,
+    @Param('spaceId') routeSpaceId: string,
     @Body() dto: ImportUrlDto,
-    @Req() req?: { user?: { sub?: string; id?: string; userId?: string } },
-    @ResolvedSpace() project?: string | { id: string } | null,
+    @Req() req?: FastifyRequest,
+    @ResolvedSpace() authorizedSpace?: string | { id?: string } | null,
   ) {
-    const effectiveSpaceId =
-      (typeof project === 'string' ? project : project?.id) || spaceId;
-    const userId = req?.user?.sub || req?.user?.id || req?.user?.userId;
+    const explicitPageId = resolveExplicitPageId(dto.pageId, req);
+    const { spaceId, pageId } = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId },
+      authorizedSpace,
+      explicitPageId,
+      req,
+    );
+    const resolvedPageId =
+      explicitPageId || (pageId && isUuid(pageId) ? pageId : undefined);
+    const userId = resolveRequestUserId(req) ?? undefined;
     return this.importService.importFromUrl(
-      effectiveSpaceId,
+      spaceId,
       dto.url,
       dto.filename,
-      dto.pageId,
+      resolvedPageId,
       userId,
     );
   }

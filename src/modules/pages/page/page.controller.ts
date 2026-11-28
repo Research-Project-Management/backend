@@ -27,7 +27,7 @@ import {
   Role,
   ResolvedSpace,
 } from '@/modules/project/access';
-import { AuthenticatedRequest } from '@/core';
+import { AuthenticatedRequest, isUuid } from '@/core';
 import { PageService } from './services/page.service';
 import {
   AssignPageLabelsDto,
@@ -54,8 +54,13 @@ export class PageController {
     @Param('spaceId') spaceId: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @ResolvedSpace() authorizedSpaceId?: string | null,
   ) {
-    return this.pageService.getProjectPages(spaceId, { status, search });
+    const effectiveSpaceId =
+      authorizedSpaceId && isUuid(authorizedSpaceId)
+        ? authorizedSpaceId
+        : spaceId;
+    return this.pageService.getProjectPages(effectiveSpaceId, { status, search });
   }
 
   @Post('spaces/:spaceId/docs')
@@ -66,9 +71,14 @@ export class PageController {
     @Param('spaceId') spaceId: string,
     @Body() body: CreateProjectPageDto,
     @Req() req: AuthenticatedRequest,
+    @ResolvedSpace() authorizedSpaceId?: string | null,
   ) {
+    const effectiveSpaceId =
+      authorizedSpaceId && isUuid(authorizedSpaceId)
+        ? authorizedSpaceId
+        : spaceId;
     const userId = req?.user?.id || req?.user?.sub || null;
-    return this.pageService.createProjectPage(spaceId, body, userId);
+    return this.pageService.createProjectPage(effectiveSpaceId, body, userId);
   }
 
   // ── Page Metadata & Thumbnail ───────────────────────────────────────────────
@@ -157,8 +167,15 @@ export class PageController {
 
   @Get('spaces/:spaceId/trash')
   @ApiOperation({ summary: 'List soft-deleted pages in a project space trash' })
-  async getTrashPages(@Param('spaceId') spaceId: string) {
-    return this.pageService.getTrashPages(spaceId);
+  async getTrashPages(
+    @Param('spaceId') spaceId: string,
+    @ResolvedSpace() authorizedSpaceId?: string | null,
+  ) {
+    const effectiveSpaceId =
+      authorizedSpaceId && isUuid(authorizedSpaceId)
+        ? authorizedSpaceId
+        : spaceId;
+    return this.pageService.getTrashPages(effectiveSpaceId);
   }
 
   @Delete('docs/:pageId')

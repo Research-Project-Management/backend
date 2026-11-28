@@ -3,7 +3,7 @@
  * Pure domain errors for Pages Templates (zero framework imports).
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 export class InvalidTemplateError extends PagesDomainError {
   constructor(message: string) {

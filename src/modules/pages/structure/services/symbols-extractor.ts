@@ -1,23 +1,21 @@
 /**
  * modules/pages/structure/services/symbols-extractor.ts
- * Project-wide LaTeX symbol extraction, outline generation, and compiler payload building helpers.
+ * Project-wide LaTeX symbol extraction and outline generation helpers.
  */
 
 import { Logger } from '@nestjs/common';
-import { FileTreeBuilder } from '@/modules/pages/structure/domain/tree-builder';
-import type { StructureRepository } from '@/modules/pages/structure/structure.repository';
-import { LatexOutlineEntryDto, LatexOutlineExtractor } from '@/modules/pages/structure/domain/latex-outline.extractor';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
-import { RootDocNotFoundError } from '@/modules/pages/structure/domain/structure.errors';
 import {
-  CompilationPayload,
-  WorkspaceFile,
-} from '@/modules/pages/core/types/workspace-file';
-import { filterRecordsByPageScope } from '@/modules/pages/core/utils/page-scope';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { parseBibtexEntries } from '@/modules/pages/core/utils/bibtex-parse';
+  NodePathVo,
+  filterRecordsByPageScope,
+  parseBibtexEntries,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import {
+  LatexOutlineEntryDto,
+  LatexOutlineExtractor,
+} from '../domain/latex-outline.extractor';
+import { PageNodeEntity } from '../domain/node.entity';
+import type { StructureRepository } from '../structure.repository';
 import type {
   ProjectSymbolLabelDto,
   ProjectSymbolCitationDto,
@@ -53,96 +51,12 @@ export interface ProjectSymbolsContext {
   readonly repository: StructureRepository;
   readonly logger: Logger;
   readonly docstoreService?: DocstoreService;
-  readonly filestoreService?: FilestoreService;
   readonly autoDetectRootDoc: (
     projectId: string,
     docContents: Map<string, string[]>,
     existingNodes?: PageNodeEntity[],
     pageId?: string | null,
   ) => Promise<PageNodeEntity | null>;
-}
-
-export async function buildCompilerPayloadHelper(
-  ctx: ProjectSymbolsContext,
-  projectId: string,
-  docContentsMap: Map<string, { lines: string[]; hash?: string | null }>,
-  pageId?: string,
-): Promise<CompilationPayload> {
-  const nodes = await ctx.repository.getAllNodes(projectId, pageId);
-
-  let rootNode = nodes.find((n) => n.isRootDoc) ?? null;
-  if (!rootNode) {
-    const linesMap = new Map<string, string[]>();
-    for (const [id, val] of docContentsMap.entries()) {
-      linesMap.set(id, val.lines);
-    }
-    rootNode = await ctx.autoDetectRootDoc(projectId, linesMap, nodes, pageId);
-  }
-
-  if (!rootNode) {
-    throw new RootDocNotFoundError(projectId);
-  }
-
-  const nonFolderNodes = nodes.filter((n) => !n.isFolder());
-  const files: WorkspaceFile[] = new Array(nonFolderNodes.length);
-  const STREAM_CONCURRENCY = 8;
-
-  for (let i = 0; i < nonFolderNodes.length; i += STREAM_CONCURRENCY) {
-    const batch = nonFolderNodes.slice(i, i + STREAM_CONCURRENCY);
-    await Promise.all(
-      batch.map(async (node, idx) => {
-        const targetIndex = i + idx;
-        const relativePath = FileTreeBuilder.toRelativeCompilerPath(node.path);
-
-        if (node.isDoc()) {
-          const docData =
-            docContentsMap.get(node.id) ||
-            (node.docId ? docContentsMap.get(node.docId) : undefined);
-          const content = docData ? docData.lines.join('\n') : '';
-          const hash = docData?.hash || node.hash || undefined;
-
-          files[targetIndex] = {
-            path: relativePath,
-            content,
-            hash,
-          };
-        } else {
-          let binaryContent: Buffer | string = '';
-          if (node.fileId && ctx.filestoreService) {
-            try {
-              const { stream } = await ctx.filestoreService.openReadStream(
-                projectId,
-                node.fileId,
-              );
-              const chunks: Buffer[] = [];
-              for await (const chunk of stream) {
-                chunks.push(
-                  Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
-                );
-              }
-              binaryContent = Buffer.concat(chunks);
-            } catch (err: unknown) {
-              const msg = err instanceof Error ? err.message : String(err);
-              ctx.logger.warn(
-                `Failed to read binary file ${node.fileId} (${relativePath}) from filestore: ${msg}`,
-              );
-            }
-          }
-
-          files[targetIndex] = {
-            path: relativePath,
-            content: binaryContent,
-            hash: node.hash || undefined,
-          };
-        }
-      }),
-    );
-  }
-
-  return {
-    rootDocPath: FileTreeBuilder.toRelativeCompilerPath(rootNode.path),
-    files: files.filter(Boolean),
-  };
 }
 
 export function extractSingleDocSymbols(
@@ -227,13 +141,7 @@ export function extractSingleDocSymbols(
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i] ?? '';
     const lineNum = i + 1;
-    let cleanLine = rawLine;
-    for (let c = 0; c < rawLine.length; c++) {
-      if (rawLine[c] === '%' && (c === 0 || rawLine[c - 1] !== '\\')) {
-        cleanLine = rawLine.slice(0, c);
-        break;
-      }
-    }
+    const cleanLine = LatexOutlineExtractor.stripComment(rawLine);
 
     if (cleanLine.trim().length > 0) {
       const labelRe = /\\label\s*\{\s*([^}]+?)\s*\}/g;
@@ -453,15 +361,13 @@ export async function loadProjectDocsContextHelper(
       .autoDetectRootDoc(projectId, docContentsMap, nodes, pageId)
       .catch(() => null);
   }
-  const rootDocPath = rootNode
-    ? FileTreeBuilder.toRelativeCompilerPath(rootNode.path)
-    : null;
+  const rootDocPath = rootNode ? NodePathVo.toRelative(rootNode.path) : null;
 
   const docsToScan = new Map<string, string[]>();
   const docHashByPath = new Map<string, string>();
   for (const node of nodes) {
     if (!node.isDoc()) continue;
-    const relPath = FileTreeBuilder.toRelativeCompilerPath(node.path);
+    const relPath = NodePathVo.toRelative(node.path);
     const lines =
       (node.docId ? docContentsMap.get(node.docId) : undefined) ||
       docContentsMap.get(node.id) ||
@@ -527,7 +433,7 @@ export async function getProjectSymbolsHelper(
   // Collect all known file paths from structure tree
   for (const node of nodes) {
     if (node.isFolder()) continue;
-    const relPath = FileTreeBuilder.toRelativeCompilerPath(node.path);
+    const relPath = NodePathVo.toRelative(node.path);
     if (!relPath) continue;
     allFilesSet.add(relPath);
     if (IMAGE_EXT_RE.test(relPath)) {
@@ -643,7 +549,7 @@ export async function getProjectOutlineHelper(
         (n) => n.docId === options.docId || n.id === options.docId,
       );
       const relPath = matchingNode
-        ? FileTreeBuilder.toRelativeCompilerPath(matchingNode.path)
+        ? NodePathVo.toRelative(matchingNode.path)
         : options.filePath || 'main.tex';
       const entries = LatexOutlineExtractor.extractFromContent(
         lines.join('\n'),

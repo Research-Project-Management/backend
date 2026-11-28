@@ -13,19 +13,16 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
-import {
-  resolveSpaceRootDocIds,
-  type PageScopeDbClient,
-} from '@/modules/pages/core/utils/page-scope';
-import { DocstoreService } from '../docstore.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { buildSearchRegex, replaceInText } from '@/modules/pages/docstore/domain/text-replace';
+  PageDomainEventBus,
+  resolveSpaceRootDocIds,
+} from '@/modules/pages/core';
+import { DocstoreService } from '../docstore.service';
+import { buildSearchRegex, replaceInText } from '../domain/text-replace';
 
 export interface SearchDocumentsParams {
   query: string;
@@ -64,18 +61,17 @@ export class SearchReplaceService {
     this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
-  private getLiveCollaboration(): LiveCollaborationPort {
-    return this.liveCollab;
-  }
-
   private async syncLiveDoc(
     projectId: string,
     docId: string,
     lines: string[],
   ): Promise<boolean> {
-    const live = this.getLiveCollaboration();
     try {
-      return await live.applyExternalText(projectId, docId, lines.join('\n'));
+      return await this.liveCollab.applyExternalText(
+        projectId,
+        docId,
+        lines.join('\n'),
+      );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(
@@ -149,10 +145,7 @@ export class SearchReplaceService {
         Array.isArray(body?.fileIds) && body.fileIds.length > 0
           ? body.fileIds.filter((id) => isUuid(id))
           : [];
-      const live = this.getLiveCollaboration();
-      if (live) {
-        await live.flushDocs(projectId, targetDocIds).catch(() => []);
-      }
+      await this.liveCollab.flushDocs(projectId, targetDocIds).catch(() => []);
 
       const [docs, rootDocIds] = await Promise.all([
         this.prisma.pageDoc.findMany({
@@ -314,9 +307,8 @@ export class SearchReplaceService {
         take: 1000,
       })
     ).map((d) => d.id);
-    const live = this.getLiveCollaboration();
-    if (live && candidateIds.length > 0) {
-      await live.flushDocs(projectId, candidateIds);
+    if (candidateIds.length > 0) {
+      await this.liveCollab.flushDocs(projectId, candidateIds);
     }
 
     const docs = await this.prisma.pageDoc.findMany({

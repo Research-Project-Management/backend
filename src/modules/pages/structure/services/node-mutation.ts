@@ -4,28 +4,25 @@
  */
 
 import { Logger, NotFoundException } from '@nestjs/common';
+import { NodePathVo, PageDomainEventBus } from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
+import { PageNodeEntity } from '../domain/node.entity';
 import {
   DuplicateNodePathError,
   InvalidNodeNameError,
   NodeNotFoundError,
   StructureError,
-} from '@/modules/pages/structure/domain/structure.errors';
-import { FileTreeBuilder } from '@/modules/pages/structure/domain/tree-builder';
-import type { StructureRepository } from '@/modules/pages/structure/structure.repository';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
+} from '../domain/structure.errors';
+import { FileTreeBuilder } from '../domain/tree-builder';
 import { CreateNodeDto, MoveNodeDto, RenameNodeDto } from '../dto/node.dto';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
+import type { StructureRepository } from '../structure.repository';
 
 export interface NodeMutationContext {
   readonly repository: StructureRepository;
   readonly logger: Logger;
   readonly domainEventBus: PageDomainEventBus;
   readonly realtimeService?: RealtimeFacade;
-  readonly filestoreService?: FilestoreService;
   readonly docstoreService?: DocstoreService;
 }
 

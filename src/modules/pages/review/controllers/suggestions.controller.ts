@@ -22,7 +22,7 @@ import {
 import { BatchResolveDto, CreateSuggestionDto } from '../dto/review.dto';
 import { SuggestionsService } from '../services/suggestions.service';
 
-@ApiTags('Manuscripts - Pages Review & Comments')
+@ApiTags('Pages - Review & Comments')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages/docs/:docId/suggestions')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)

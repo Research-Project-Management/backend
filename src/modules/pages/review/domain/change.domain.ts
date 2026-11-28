@@ -157,13 +157,6 @@ export class TrackChange {
     this._updatedAt = new Date();
   }
 
-  public reopen(): void {
-    this._status = 'pending';
-    this._resolvedById = null;
-    this._resolvedAt = null;
-    this._updatedAt = new Date();
-  }
-
   public toJSON(): Record<string, unknown> {
     return {
       id: this._id,

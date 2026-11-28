@@ -22,6 +22,7 @@ import {
   PagesRealtimeConfigService,
   classifyPagesEvent,
   isPersonalSpaceAlias,
+  resolvePersonalSpaceId,
 } from './config';
 import type { ClientSocketData } from './types';
 import { RealtimeAccessService } from './access';
@@ -214,9 +215,7 @@ export class WsAccessGuard implements CanActivate {
 
     if (data && typeof data === 'object' && typeof data.spaceId === 'string') {
       if (isPersonalSpaceAlias(data.spaceId)) {
-        if (userId) {
-          data.spaceId = userId;
-        }
+        data.spaceId = resolvePersonalSpaceId(data.spaceId, userId);
       } else if (
         typeof this.realtimeAccess.resolveCanonicalSpaceAndPage === 'function'
       ) {

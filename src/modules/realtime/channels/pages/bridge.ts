@@ -41,6 +41,8 @@ type ManagedSocket = RemoteSocket<DefaultEventsMap, ClientSocketData>;
 
 @Injectable()
 export class LiveCollaborationAdapter extends LiveCollaborationPort {
+  private readonly logger = new Logger(LiveCollaborationAdapter.name);
+
   constructor(
     private readonly yjs: YjsService,
     private readonly rooms: RoomPresenceStore,
@@ -100,9 +102,22 @@ export class LiveCollaborationAdapter extends LiveCollaborationPort {
 
     const flushed = new Set<string>();
     for (const docId of docIds) {
-      if (this.yjs.isActive(projectId, docId)) {
+      if (!this.yjs.isActive(projectId, docId)) continue;
+      try {
         await this.yjs.flushDoc(projectId, docId);
-        flushed.add(docId);
+        if (!this.yjs.hasUnflushedChanges?.(projectId, docId)) {
+          flushed.add(docId);
+        } else {
+          this.logger.warn(
+            `Explicit flushDoc left unflushed changes pending retry (projectId=${projectId}, docId=${docId})`,
+          );
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `Explicit flushDocs failed (projectId=${projectId}, docId=${docId}, error=${message})`,
+          err instanceof Error ? err.stack : undefined,
+        );
       }
     }
     return Array.from(flushed);
@@ -129,8 +144,10 @@ export class LiveCollaborationAdapter extends LiveCollaborationPort {
               .leaveDocRoom(projectId, docId, socket.id)
               .catch(() => {});
           }
-        } catch {
-          // Best effort room kick
+        } catch (err: unknown) {
+          this.logger.warn(
+            `Room socket kick failed during evictDoc (projectId=${projectId}, docId=${docId}, error=${(err as Error)?.message})`,
+          );
         }
       }
     }
@@ -168,31 +185,6 @@ export class PagesDomainEventsListener
   public onModuleDestroy(): void {
     this.unsubscribeBus?.();
     this.unsubscribeBus = undefined;
-  }
-
-  public handleFileTreeChangeEvent(payload: {
-    projectId: string;
-    change: { action: string; node: unknown };
-  }): void {
-    if (!payload?.projectId || !payload?.change) return;
-    this.pagesGateway?.broadcastToProject(
-      payload.projectId,
-      PAGES_EVENTS.FILE_TREE_UPDATE,
-      payload.change,
-    );
-  }
-
-  public handleProjectEvent(payload: {
-    projectId: string;
-    event: string;
-    payload: unknown;
-  }): void {
-    if (!payload?.projectId || !payload?.event) return;
-    this.pagesGateway?.broadcastToProject(
-      payload.projectId,
-      payload.event,
-      payload.payload,
-    );
   }
 }
 
@@ -324,9 +316,21 @@ export class AccessRevocationListener implements OnModuleInit, OnModuleDestroy {
               PAGES_ROOMS.doc(projectId, activeDocId),
             );
             if (!docRoom || docRoom.size === 0) {
-              await this.yjs.evictDoc(projectId, activeDocId).catch(() => null);
+              await this.yjs
+                .evictDoc(projectId, activeDocId)
+                .catch((err: unknown) =>
+                  this.logger.warn(
+                    `evictDoc failed on member removal (projectId=${projectId}, docId=${activeDocId}, error=${(err as Error)?.message})`,
+                  ),
+                );
             } else {
-              await this.yjs.flushDoc(projectId, activeDocId).catch(() => null);
+              await this.yjs
+                .flushDoc(projectId, activeDocId)
+                .catch((err: unknown) =>
+                  this.logger.warn(
+                    `flushDoc failed on member removal (projectId=${projectId}, docId=${activeDocId}, error=${(err as Error)?.message})`,
+                  ),
+                );
             }
           }
 
@@ -419,6 +423,7 @@ export class AccessRevocationListener implements OnModuleInit, OnModuleDestroy {
   }): Promise<void> {
     const projectId = event?.projectId || event?.entityId;
     if (!projectId) return;
+    this.realtimeAccess.evictCache(projectId);
     try {
       const server = this.gateway?.server;
       if (server) {
@@ -430,6 +435,11 @@ export class AccessRevocationListener implements OnModuleInit, OnModuleDestroy {
               reason: 'project_deleted',
             });
             const docId = socket.data?.activeDocId;
+            if (this.roomStore) {
+              await this.roomStore
+                .removeProjectSession(projectId, socket.id)
+                .catch(() => null);
+            }
             socket.leave(PAGES_ROOMS.project(projectId));
             if (docId) {
               socket.leave(PAGES_ROOMS.doc(projectId, docId));
@@ -439,8 +449,12 @@ export class AccessRevocationListener implements OnModuleInit, OnModuleDestroy {
           }
         }
       }
-      if (this.yjs && typeof this.yjs.flushProjectDocs === 'function') {
-        await this.yjs.flushProjectDocs(projectId).catch(() => []);
+      if (this.yjs) {
+        if (typeof this.yjs.evictProjectDocs === 'function') {
+          await this.yjs.evictProjectDocs(projectId, { skipFlush: true });
+        } else if (typeof this.yjs.flushProjectDocs === 'function') {
+          await this.yjs.flushProjectDocs(projectId).catch(() => []);
+        }
       }
     } catch (err: unknown) {
       this.logger.warn(

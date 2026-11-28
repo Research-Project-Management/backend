@@ -10,8 +10,16 @@ import { RedisCacheService, isUuid } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
+  PageDomainEventBus,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import {
+  ArchiveEntryVo,
+  ExportService,
+  ImportService,
+} from '@/modules/pages/export-import';
+import { FilestoreService } from '@/modules/pages/filestore';
+import { StructureService } from '@/modules/pages/structure';
 import { INTEGRATIONS_CACHE_KEYS } from './integrations.cache-keys';
 import { UserIntegration } from '@prisma/client';
 import { IntegrationsRepository } from './integrations.repository';
@@ -26,9 +34,6 @@ import { ZoteroProvider } from './providers/zotero.provider';
 import { MendeleyProvider } from './providers/mendeley.provider';
 import { GithubProvider } from './providers/github.provider';
 import { decryptToken, encryptToken } from './utils/integration-crypto.utils';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { StructureService } from '@/modules/pages/structure/structure.service';
 import { SyncCollectionDto } from './dto/sync-collection.dto';
 import {
   CreateGithubRepoDto,
@@ -37,9 +42,6 @@ import {
   PullGithubDto,
   ImportGithubRepoDto,
 } from './dto/github-sync.dto';
-import { ExportService } from '@/modules/pages/export-import/services/export.service';
-import { ImportService } from '@/modules/pages/export-import/services/import.service';
-import { ArchiveEntryVo } from '@/modules/pages/export-import/domain/archive.domain';
 
 export interface ProviderStatusSummary {
   provider: IntegrationProviderType;
@@ -575,12 +577,15 @@ export class IntegrationsService {
     }
 
     const providerInstance = this.getProvider(provider);
-    const decryptedToken = decryptToken(conn.accessToken);
-
-    const bibtexContent = await providerInstance.fetchCollectionBibtex(
-      decryptedToken,
-      conn.providerUserId,
-      dto.collectionId,
+    const bibtexContent = await this.executeWithTokenRefresh(
+      userId,
+      conn,
+      (token) =>
+        providerInstance.fetchCollectionBibtex(
+          token,
+          conn.providerUserId,
+          dto.collectionId,
+        ),
     );
 
     const targetBibFile = dto.targetBibFile || 'references.bib';
@@ -717,12 +722,12 @@ export class IntegrationsService {
     }
 
     const providerInstance = this.getProvider(provider);
-    const decryptedToken = decryptToken(conn.accessToken);
-
-    const bibtex = await providerInstance.fetchCollectionBibtex(
-      decryptedToken,
-      conn.providerUserId,
-      collectionId,
+    const bibtex = await this.executeWithTokenRefresh(userId, conn, (token) =>
+      providerInstance.fetchCollectionBibtex(
+        token,
+        conn.providerUserId,
+        collectionId,
+      ),
     );
 
     return {
@@ -938,11 +943,9 @@ export class IntegrationsService {
     let targetPageId: string | undefined;
 
     const existingPage =
-      rawPageId && isUuid(rawPageId) && !rawSpaceId
+      rawPageId && isUuid(rawPageId)
         ? await this.repo.findActivePageById(rawPageId)
-        : rawPageId && isUuid(rawPageId) && rawSpaceId
-          ? await this.repo.findActivePageById(rawPageId)
-          : null;
+        : null;
 
     const treatAsExistingPage =
       Boolean(existingPage) &&

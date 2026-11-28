@@ -54,14 +54,6 @@ export class CommentReply {
     return this._updatedAt;
   }
 
-  public updateContent(content: string): void {
-    if (!content || !content.trim()) {
-      throw new InvalidReplyError('Reply content cannot be empty.');
-    }
-    this._content = content.trim();
-    this._updatedAt = new Date();
-  }
-
   public toJSON(): Record<string, unknown> {
     return {
       id: this._id,
@@ -209,13 +201,6 @@ export class CommentThread {
     this._isResolved = true;
     this._resolvedById = resolvedBy ?? null;
     this._resolvedAt = new Date();
-    this._updatedAt = new Date();
-  }
-
-  public unresolve(): void {
-    this._isResolved = false;
-    this._resolvedById = null;
-    this._resolvedAt = null;
     this._updatedAt = new Date();
   }
 

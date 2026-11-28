@@ -5,20 +5,22 @@
 
 export const DICTIONARY_PACKAGES = {
   en: 'dictionary-en',
-  'en-us': 'dictionary-en',
-  'en-ca': 'dictionary-en',
-  'en-gb': 'dictionary-en-gb',
+  'en-US': 'dictionary-en',
+  'en-CA': 'dictionary-en',
+  'en-GB': 'dictionary-en-gb',
   vi: 'dictionary-vi',
-  'vi-vn': 'dictionary-vi',
+  'vi-VN': 'dictionary-vi',
   fr: 'dictionary-fr',
-  'fr-fr': 'dictionary-fr',
+  'fr-FR': 'dictionary-fr',
   de: 'dictionary-de',
-  'de-de': 'dictionary-de',
+  'de-DE': 'dictionary-de',
   es: 'dictionary-es',
-  'es-es': 'dictionary-es',
+  'es-ES': 'dictionary-es',
 } as const;
 
 export type SupportedLanguage = keyof typeof DICTIONARY_PACKAGES;
+
+export type SpellingLanguage = SupportedLanguage | 'off';
 
 export const SUPPORTED_LANGUAGES = Object.keys(
   DICTIONARY_PACKAGES,
@@ -35,7 +37,7 @@ export interface MisspelledWord {
 }
 
 export interface SpellingReport {
-  language: SupportedLanguage;
+  language: SpellingLanguage;
   totalWordsChecked: number;
   misspelledCount: number;
   errors: MisspelledWord[];

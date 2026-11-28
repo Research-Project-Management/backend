@@ -1,17 +1,19 @@
 /**
- * modules/manuscripts/core/services/cleanup.listener.ts
+ * modules/pages/page/listeners/cleanup.listener.ts
  *
- * Cascading deletion listener for deleted projects to prevent orphaned manuscript rows.
+ * Cascading deletion listener for deleted pages and projects to prevent orphaned rows,
+ * leaked cold-tier S3 documents, or uncollected CAS binary blobs.
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { PAGES_CACHE_KEYS } from '../../core/config/cache-keys';
 import { ModuleRef } from '@nestjs/core';
 import { OnEvent } from '@nestjs/event-emitter';
-import { PrismaService, RedisCacheService } from '@/core';
-import { WorkspaceCollectorService } from '../../core/services/workspace-collector.service';
-import { FilestoreRepository } from '../../filestore/filestore.repository';
-import { FilestoreService } from '../../filestore/filestore.service';
+import { PrismaService } from '@/core';
+import { WorkspaceCollectorService } from '@/modules/pages/core';
+import {
+  FilestoreRepository,
+  FilestoreService,
+} from '@/modules/pages/filestore';
 import { IDocPersistor } from '@/modules/pages/docstore/domain/doc.ports';
 
 interface ProjectDeletedEvent {
@@ -43,8 +45,6 @@ export class CleanupListener {
     private readonly prisma: PrismaService,
     @Optional()
     private readonly workspaceCollector?: WorkspaceCollectorService,
-    @Optional()
-    private readonly redis?: RedisCacheService,
     @Optional()
     private readonly filestoreRepository?: FilestoreRepository,
     @Optional()
@@ -130,7 +130,7 @@ export class CleanupListener {
 
     try {
       this.logger.log(
-        `Starting cascading cleanup for deleted project ${projectId} across manuscript stores...`,
+        `Starting cascading cleanup for deleted project ${projectId} across pages stores...`,
       );
 
       const filestoreRepo = this.resolveFilestoreRepository();
@@ -280,7 +280,7 @@ export class CleanupListener {
       );
     } catch (err: unknown) {
       this.logger.error(
-        `Error during manuscript cascading cleanup for project ${projectId}: ${err}`,
+        `Error during pages cascading cleanup for project ${projectId}: ${err}`,
       );
     }
   }

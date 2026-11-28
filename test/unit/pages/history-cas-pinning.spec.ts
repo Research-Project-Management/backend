@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { ZipAdapter } from '@/modules/pages/export-import/adapters/zip.adapter';
+import { ZipAdapter } from '@/modules/pages/export-import';
 import { HistoryRepository } from '@/modules/pages/history/history.repository';
 import { SnapshotCollectorAdapter } from '@/modules/pages/history/adapters/collector.adapter';
 import { SnapshotRestorerAdapter } from '@/modules/pages/history/adapters/restorer.adapter';
@@ -318,5 +318,82 @@ describe('History Immutable Binary CAS Pinning, ZIP Streaming, Restore & GC', ()
 
     expect(out.deletedOrphanBlobs).toBe(1);
     expect(releaseBlob).toHaveBeenCalledWith(BLOB_V2_ID);
+  });
+
+  it('emits ONE consolidated fileTree:update event at the end of restoreToState via StructureRepository', async () => {
+    const broadcastFileTreeChange = jest.fn();
+    const deleteSubtree = jest.fn().mockResolvedValue([]);
+    const createNode = jest.fn().mockResolvedValue({ id: 'node-restored' });
+    const setRootDoc = jest.fn().mockResolvedValue(undefined);
+    const structureService = {
+      getAllNodes: jest.fn().mockResolvedValue([
+        {
+          id: 'stale-1',
+          name: 'stale1.tex',
+          path: '/stale1.tex',
+          type: 'DOC',
+          docId: 'doc-stale-1',
+          isFolder: () => false,
+          isDoc: () => true,
+        },
+        {
+          id: 'stale-2',
+          name: 'stale2.tex',
+          path: '/stale2.tex',
+          type: 'DOC',
+          docId: 'doc-stale-2',
+          isFolder: () => false,
+          isDoc: () => true,
+        },
+      ]),
+      deleteNode: jest.fn(),
+      createNode: jest.fn(),
+    };
+
+    const restorer = new SnapshotRestorerAdapter(
+      structureService as never,
+      {
+        createDoc: jest.fn().mockResolvedValue({ id: 'doc-main', rev: 1, version: 1 }),
+      } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        deleteSubtree,
+        createNode,
+        setRootDoc,
+        findByPath: jest.fn().mockResolvedValue(null),
+      } as never,
+      { broadcastFileTreeChange } as never,
+    );
+
+    const snap = Snapshot.create({
+      projectId: SPACE_ID,
+      spaceId: SPACE_ID,
+      pageId: PAGE_ID,
+      version: 3,
+      files: new Map([
+        [
+          '/main.tex',
+          FileSnapshotVo.createDoc('/main.tex', null, ['\\section{Restored}'], 'h1', true),
+        ],
+      ]),
+    });
+
+    await restorer.restoreToState(SPACE_ID, snap, PAGE_ID);
+
+    expect(deleteSubtree).toHaveBeenCalledTimes(2);
+    expect(structureService.deleteNode).not.toHaveBeenCalled();
+    expect(structureService.createNode).not.toHaveBeenCalled();
+    expect(broadcastFileTreeChange).toHaveBeenCalledTimes(1);
+    expect(broadcastFileTreeChange).toHaveBeenCalledWith(SPACE_ID, {
+      action: 'restore',
+      node: { pageId: PAGE_ID, version: 3 },
+    });
   });
 });

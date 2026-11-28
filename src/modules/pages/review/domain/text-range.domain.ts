@@ -29,33 +29,6 @@ export class TextRange {
     return new TextRange(props);
   }
 
-  public isMultiline(): boolean {
-    return this.endLine > this.startLine;
-  }
-
-  public overlaps(other: TextRange): boolean {
-    if (this.endLine < other.startLine || this.startLine > other.endLine) {
-      return false;
-    }
-    if (this.endLine === other.startLine && this.endCol <= other.startCol) {
-      return false;
-    }
-    if (this.startLine === other.endLine && this.startCol >= other.endCol) {
-      return false;
-    }
-    return true;
-  }
-
-  public contains(other: TextRange): boolean {
-    const startAfter =
-      this.startLine < other.startLine ||
-      (this.startLine === other.startLine && this.startCol <= other.startCol);
-    const endBefore =
-      this.endLine > other.endLine ||
-      (this.endLine === other.endLine && this.endCol >= other.endCol);
-    return startAfter && endBefore;
-  }
-
   public toJSON(): TextRangeProps {
     return {
       startLine: this.startLine,

@@ -21,21 +21,3 @@ export class SyncCollectionDto {
   })
   targetBibFile?: string;
 }
-
-export class SyncLibraryCollectionDto {
-  @IsNotEmpty()
-  @IsString()
-  collectionId!: string;
-
-  @IsOptional()
-  @IsString()
-  collectionName?: string;
-
-  @IsOptional()
-  @IsString()
-  targetCollectionId?: string;
-
-  @IsOptional()
-  @IsString()
-  spaceId?: string;
-}

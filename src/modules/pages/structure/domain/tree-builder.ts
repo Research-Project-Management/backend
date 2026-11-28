@@ -5,7 +5,8 @@
  */
 
 import { PageNodeEntity, SerializedTreeNode } from './node.entity';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { LatexOutlineExtractor } from './latex-outline.extractor';
+import { NodePathVo } from '@/modules/pages/core';
 import { MaxProjectFilesExceededError } from './structure.errors';
 
 export type TreeNode = SerializedTreeNode;
@@ -166,21 +167,13 @@ export class FileTreeBuilder {
 
   public static extractDocumentclass(lines: readonly string[]): string | null {
     const cleanText = lines
-      .map((line) => line.split(/(?<!\\)%/)[0])
+      .map((line) => LatexOutlineExtractor.stripComment(line))
       .join('\n')
       .replace(/\\iffalse\b[\s\S]*?\\fi\b/g, '');
     const match = cleanText.match(
       /\\documentclass\s*(?:\[[\s\S]*?\])?\s*\{([^}]+)\}/i,
     );
     return match && match[1] ? match[1].trim() : null;
-  }
-
-  /**
-   * Converts an absolute virtual path (e.g. `/chapters/intro.tex`) to a relative
-   * compiler workspace path (`chapters/intro.tex`).
-   */
-  public static toRelativeCompilerPath(virtualPath: string): string {
-    return NodePathVo.toRelative(virtualPath);
   }
 
   /**
@@ -194,25 +187,4 @@ export class FileTreeBuilder {
       throw new MaxProjectFilesExceededError(maxFiles);
     }
   }
-
-  /**
-   * Validates that moving `node` to `destPath` does not move root `/` or create a folder cycle.
-   */
-  public static validateMoveTarget(
-    node: PageNodeEntity,
-    destPath: string,
-  ): void {
-    node.validateMoveTo(destPath);
-  }
 }
-
-export class RootDocDetector {
-  public detectRootDoc(
-    nodes: readonly PageNodeEntity[],
-    docContents: Map<string, string[]>,
-  ): PageNodeEntity | null {
-    return FileTreeBuilder.detectRootDoc(nodes, docContents);
-  }
-}
-
-export { RootDocDetector as HeuristicRootDocDetector };

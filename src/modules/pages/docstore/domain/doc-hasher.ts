@@ -1,6 +1,6 @@
 /**
  * modules/pages/docstore/domain/doc-hasher.ts
- * Pure in-process cryptographic hashing functions and contracts for document lines and buffers.
+ * Pure in-process cryptographic hashing functions for document lines and buffers.
  */
 
 import * as crypto from 'crypto';
@@ -18,21 +18,4 @@ export function computeDocSha256(lines: readonly string[]): string {
  */
 export function computeContentMd5(content: string | Buffer): string {
   return crypto.createHash('md5').update(content).digest('hex');
-}
-
-/** @deprecated Call pure computeDocSha256 / computeContentMd5 functions directly. */
-export abstract class IDocHasher {
-  abstract computeHash(lines: string[]): string;
-  abstract computeMd5(content: string | Buffer): string;
-}
-
-/** @deprecated Call pure computeDocSha256 / computeContentMd5 functions directly. */
-export class DocHasherAdapter implements IDocHasher {
-  public computeHash(lines: string[]): string {
-    return computeDocSha256(lines);
-  }
-
-  public computeMd5(content: string | Buffer): string {
-    return computeContentMd5(content);
-  }
 }

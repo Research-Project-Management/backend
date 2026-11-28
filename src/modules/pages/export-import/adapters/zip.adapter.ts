@@ -2,10 +2,7 @@ import * as zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  buildZipBuffer,
-  createZipStream,
-} from '@/modules/pages/core/utils/zip-builder';
+import { buildZipBuffer, createZipStream } from '@/modules/pages/core';
 import { ArchiveEntryVo } from '../domain/archive.domain';
 import {
   ArchiveFileLimitExceededException,

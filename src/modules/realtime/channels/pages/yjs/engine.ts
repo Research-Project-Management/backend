@@ -13,15 +13,13 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 
 import { RedisCacheService, RedisPubSubService, SystemResourceGovernor } from '@/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { DocstoreService } from '@/modules/pages/docstore';
 import {
   PAGES_REALTIME_DEFAULTS,
-  PAGES_REDIS_KEYS,
   PagesRealtimeConfigService,
   type PagesYjsConfig,
 } from '../config';
 import { YjsSyncProtocol, YjsUpdateValidator } from './sync';
-import { YjsCursorDiffEngine, type YjsCursorPreservingEdit } from './merge';
 import {
   type ActiveDocSession,
   type SyncMessageResult,
@@ -74,20 +72,9 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly resourceGovernor?: SystemResourceGovernor,
     @Optional() private readonly pubSub?: RedisPubSubService,
   ) {
-    const raw = this.config?.getYjsConfig?.();
-    const d = PAGES_REALTIME_DEFAULTS.yjs;
     this.yjsConfig = {
-      maxUpdateSizeBytes: raw?.maxUpdateSizeBytes ?? d.maxUpdateSizeBytes,
-      maxDocumentSizeBytes: raw?.maxDocumentSizeBytes ?? d.maxDocumentSizeBytes,
-      flushDebounceMs: raw?.flushDebounceMs ?? d.flushDebounceMs,
-      maxFlushDelayMs: raw?.maxFlushDelayMs ?? d.maxFlushDelayMs,
-      flushRetryDelayMs: raw?.flushRetryDelayMs ?? d.flushRetryDelayMs,
-      flushLockTtlMs: raw?.flushLockTtlMs ?? d.flushLockTtlMs,
-      idleThresholdMs: raw?.idleThresholdMs ?? d.idleThresholdMs,
-      maxActiveDocs: raw?.maxActiveDocs ?? d.maxActiveDocs,
-      sweepIntervalMs: raw?.sweepIntervalMs ?? d.sweepIntervalMs,
-      redisSnapshotTtlSeconds:
-        raw?.redisSnapshotTtlSeconds ?? d.redisSnapshotTtlSeconds,
+      ...PAGES_REALTIME_DEFAULTS.yjs,
+      ...this.config?.getYjsConfig?.(),
     };
     this.validator = validator ?? new YjsUpdateValidator();
     this.syncProtocol = new YjsSyncProtocol(
@@ -185,20 +172,19 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     this.pubSubSubscriber = await initRedisClusterRelayHelper(
       this.redis,
       this.logger,
-      (raw) => this.handleClusterRelayRaw(raw),
+      (raw) => {
+        try {
+          this.handleClusterRelayMessage(
+            JSON.parse(raw) as YjsClusterRelayMessage,
+          );
+        } catch (err: unknown) {
+          this.logger.warn(
+            `Invalid Yjs cluster relay payload: ${(err as Error)?.message}`,
+          );
+        }
+      },
       this.pubSub,
     );
-  }
-
-  public handleClusterRelayRaw(raw: string): void {
-    try {
-      const msg = JSON.parse(raw) as YjsClusterRelayMessage;
-      this.handleClusterRelayMessage(msg);
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Invalid Yjs cluster relay payload: ${(err as Error)?.message}`,
-      );
-    }
   }
 
   public handleClusterRelayMessage(msg: YjsClusterRelayMessage): void {
@@ -247,10 +233,6 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       'Gracefully flushed and destroyed all active Y.Doc sessions',
     );
-  }
-
-  public getRedisBinaryKey(projectId: string, docId: string): string {
-    return PAGES_REDIS_KEYS.yjsBinary(projectId, docId);
   }
 
   public async deleteRedisSnapshot(
@@ -333,13 +315,17 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     return this.syncProtocol.handleSyncUpdate(session, update, origin);
   }
 
-  public async getText(projectId: string, docId: string): Promise<string> {
-    const session = await this.getOrCreateDoc(projectId, docId);
-    return session.yText.toString();
-  }
-
   public isActive(projectId: string, docId: string): boolean {
     return this.activeDocs.has(yjsDocKey(projectId, docId));
+  }
+
+  public hasUnflushedChanges(projectId: string, docId: string): boolean {
+    const session = this.activeDocs.get(yjsDocKey(projectId, docId));
+    if (!session) return false;
+    return (
+      session.firstUnflushedAt !== undefined ||
+      session.yText.toString() !== session.lastFlushedText
+    );
   }
 
   public replaceTextIfActive(
@@ -375,13 +361,6 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     const encoder = encoding.createEncoder();
     syncProtocol.writeUpdate(encoder, captured);
     return Buffer.from(encoding.toUint8Array(encoder));
-  }
-
-  public computeCursorPreservingEdits(
-    current: string,
-    nextText: string,
-  ): YjsCursorPreservingEdit[] {
-    return YjsCursorDiffEngine.computeCursorPreservingEdits(current, nextText);
   }
 
   public async applyExternalTextAndSyncRedis(
@@ -473,27 +452,44 @@ export class YjsService implements OnModuleInit, OnModuleDestroy {
     const docKeys = this.projectDocKeys.get(projectId);
     if (!docKeys || docKeys.size === 0) return [];
 
-    const flushedDocIds: string[] = [];
-    const promises: Promise<void>[] = [];
+    const candidates: ActiveDocSession[] = [];
     for (const key of docKeys) {
       const session = this.activeDocs.get(key);
-      if (session) {
-        flushedDocIds.push(session.docId);
-        promises.push(this.flushDoc(session.projectId, session.docId));
-      }
+      if (session) candidates.push(session);
     }
-    if (promises.length > 0) {
-      await Promise.all(promises);
-      this.logger.log(
-        `Pre-compile flush barrier completed for ${promises.length} active doc(s) in project ${projectId}`,
-      );
-    }
+    if (candidates.length === 0) return [];
+
+    const flushedDocIds: string[] = [];
+    await Promise.all(
+      candidates.map(async (s) => {
+        await this.flushDoc(s.projectId, s.docId);
+        if (!this.hasUnflushedChanges(s.projectId, s.docId)) {
+          flushedDocIds.push(s.docId);
+        }
+      }),
+    );
+    this.logger.log(
+      `Pre-compile flush barrier completed (${flushedDocIds.length}/${candidates.length} persisted) in project ${projectId}`,
+    );
     return flushedDocIds;
   }
 
   public async flushProject(projectId: string): Promise<number> {
     const flushed = await this.flushProjectDocs(projectId);
     return flushed.length;
+  }
+
+  public async evictProjectDocs(
+    projectId: string,
+    options?: { skipFlush?: boolean },
+  ): Promise<void> {
+    const docKeys = [...(this.projectDocKeys.get(projectId) ?? [])];
+    await Promise.all(
+      docKeys.map((key) => {
+        const s = this.activeDocs.get(key);
+        return s ? this.evictDoc(s.projectId, s.docId, options) : undefined;
+      }),
+    );
   }
 
   public async evictDoc(

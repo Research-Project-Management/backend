@@ -1,79 +1,50 @@
 /**
  * modules/pages/index.ts
- * Root entrypoint and barrel export for the Pages Subsystem
- * (Overleaf-parity modular architecture for LaTeX & Academic Publishing).
+ * Public entry point for the Pages Subsystem.
+ * Exposes only top-level NestJS modules and public service facades — never internal
+ * repositories, adapters, controllers, or domain implementation helpers.
  */
 
-export * from './pages.module';
-export { PagesCoreModule } from './core/core.module';
-export { PagesConfigService } from './core/config/pages.config';
-export { PageModule } from './page/page.module';
-export { PageService } from './page/services/page.service';
-export { PageScaffoldService } from './page/services/scaffold.service';
+export { PagesModule } from './pages.module';
+export { PagesCoreModule, PagesConfigService } from './core';
+export { PageModule, PageService, PageScaffoldService } from './page';
+export {
+  EditorBootstrapModule,
+  EditorBootstrapService,
+  type BootstrapEditorParams,
+  type EditorBootstrapResponseDto,
+} from './bootstrap';
 
 // Subsystem 1: Virtual File System & Storage
-export { FilestoreModule } from './filestore/filestore.module';
-export { FilestoreService } from './filestore/filestore.service';
-export { FilestoreRepository } from './filestore/filestore.repository';
-export * from './filestore/domain/filestore.errors';
-export * from './filestore/domain/file.entity';
-export * from './filestore/domain/filestore.ports';
-export * from './filestore/types/filestore.types';
-export { DocstoreModule } from './docstore/docstore.module';
-export { DocstoreService } from './docstore/docstore.service';
-export { DocstoreRepository } from './docstore/repositories/docstore.repository';
-export { StructureModule } from './structure/structure.module';
-export { StructureService } from './structure/structure.service';
-export { StructureRepository } from './structure/structure.repository';
+export { FilestoreModule, FilestoreService } from './filestore';
+export { DocstoreModule, DocstoreService } from './docstore';
+export { StructureModule, StructureService } from './structure';
 
 // Subsystem 3: Compilation & CLSI
-export * from './clsi/clsi.module';
-export * from './clsi/clsi.controller';
+export { ClsiModule, ClsiService } from './clsi';
 
 // Subsystem 4: Review & Versioning
-export * from './review/review.module';
-export * from './review/review.events';
-export * from './review/review.repository';
-export * from './review/services/comments.service';
-export * from './review/services/suggestions.service';
-export * from './review/services/status.service';
-export * from './review/domain/change.domain';
-export * from './review/domain/comment.domain';
-export * from './review/domain/text-range.domain';
-export * from './review/domain/patcher.domain';
-export * from './review/domain/review.errors';
-export * from './review/domain/review.policy';
-export * from './review/domain/review.mapper';
-export * from './history/history.module';
-export * from './history/history.controller';
-export * from './history/services/snapshot.service';
-export * from './history/services/diff.service';
-export * from './history/services/label.service';
-export * from './history/services/restore.service';
-export * from './history/history.repository';
-export * from './history/adapters/collector.adapter';
-export * from './history/adapters/restorer.adapter';
-export * from './history/dto/snapshot.dto';
-export * from './history/dto/diff.dto';
-export * from './history/dto/label.dto';
-export * from './history/dto/restore.dto';
-export * from './history/domain/diff';
-export * from './history/domain/snapshot';
-export * from './history/domain/label';
-export * from './history/domain/errors';
+export { ReviewModule } from './review';
+export { HistoryModule } from './history';
 
 // Subsystem 5: Academic Authoring & Packaging
-export { SpellingModule } from './spelling/spelling.module';
-export { SpellingService } from './spelling/spelling.service';
-export * from './spelling/dto/spelling.dto';
-export { CitationsModule } from './citations/citations.module';
-export { CitationsService } from './citations/services/citations.service';
-export * from './citations/dto/citations.dto';
-export { TemplatesModule } from './templates/templates.module';
-export * from './export-import/export-import.module';
-export * from './export-import/services/export.service';
-export * from './export-import/services/import.service';
-export * from './export-import/services/convert.service';
-export * from './export-import/dto/export.dto';
-export * from './export-import/dto/import.dto';
-export { GitBridgeModule } from './git-bridge/git-bridge.module';
+export { SpellingModule, SpellingService } from './spelling';
+export { CitationsModule, CitationsService } from './citations';
+export {
+  TemplatesModule,
+  GalleryService,
+  PublishService,
+  InstantiateService,
+} from './templates';
+export {
+  ExportImportModule,
+  ExportService,
+  ImportService,
+  ConvertService,
+} from './export-import';
+export {
+  GitBridgeModule,
+  TokenService,
+  SyncService,
+  MaintenanceService,
+} from './git-bridge';

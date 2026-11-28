@@ -24,7 +24,7 @@ import {
   ResolvedSpace,
   Role,
 } from '@/modules/project/access';
-import type { EditorBootstrapResponseDto } from '@/modules/pages/bootstrap/editor-bootstrap.types';
+import type { EditorBootstrapResponseDto } from '@/modules/pages';
 import {
   BffService,
   type BffEnvelope,

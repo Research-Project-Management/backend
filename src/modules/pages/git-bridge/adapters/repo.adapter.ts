@@ -12,7 +12,7 @@ import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import * as isoGit from 'isomorphic-git';
 import { LRUCache } from 'lru-cache';
-import { readPagesConfig } from '../../core/config/pages.config';
+import { readPagesConfig } from '@/modules/pages/core';
 import { DEFAULT_BRANCH, MAIN_REF, RepoPathVo } from '../domain/policy';
 import {
   EMPTY_TREE_OID,

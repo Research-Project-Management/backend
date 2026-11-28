@@ -34,7 +34,7 @@ import {
   ResolvedSpace,
   Role,
 } from '@/modules/project/access';
-import { resolvePageControllerCoordinates } from '../core/utils/page-scope';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 import {
   InstantiateTemplateDto,
   PublishTemplateDto,

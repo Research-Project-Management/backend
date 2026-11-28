@@ -5,15 +5,12 @@ import { ChatCacheService } from '@/modules/project/chat/services/chat-cache.ser
 import { ChatService } from '@/modules/project/chat/services/chat.service';
 import { IdentityFacade } from '@/modules/identity/identity.facade';
 import { UserRepository } from '@/modules/identity/user/user.repository';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { DocHasherAdapter, IDocHasher } from '@/modules/pages/docstore/domain/doc-hasher';
-
-import { IDocPersistor, IDocRepository } from '@/modules/pages/docstore/domain/doc.ports';
 import {
   DocArchiveRepository,
-  StoragePortDocArchiveAdapter,
-} from '@/modules/pages/docstore/repositories/archive.repository';
-import { DocstoreRepository } from '@/modules/pages/docstore/repositories/docstore.repository';
+  DocstoreRepository,
+  DocstoreService,
+  IDocPersistor,
+} from '@/modules/pages/docstore';
 import { AccessRepository } from '@/modules/project/access/access.repository';
 import { AccessService } from '@/modules/project/access/access.service';
 import { CHAT_REALTIME_PORT } from '../ports/chat';
@@ -38,12 +35,8 @@ import { WorkItemsAccessAdapter } from './work-items';
     ChatInProcessAdapter,
     { provide: CHAT_REALTIME_PORT, useExisting: ChatInProcessAdapter },
     DocstoreRepository,
-    { provide: IDocRepository, useExisting: DocstoreRepository },
-    DocHasherAdapter,
-    { provide: IDocHasher, useExisting: DocHasherAdapter },
     DocArchiveRepository,
-    StoragePortDocArchiveAdapter,
-    { provide: IDocPersistor, useExisting: StoragePortDocArchiveAdapter },
+    { provide: IDocPersistor, useExisting: DocArchiveRepository },
     DocstoreService,
   ],
   exports: [

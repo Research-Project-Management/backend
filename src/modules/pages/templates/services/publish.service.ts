@@ -11,14 +11,14 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService, isUuid } from '@/core';
 import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
 import {
+  hydratePageDocLines,
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
+  UserResolverService,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
 import {
   InvalidTemplateError,
   TemplateForbiddenError,
@@ -126,9 +126,6 @@ export class PublishService {
         .filter((id): id is string => Boolean(id)),
     );
     const currentBlobIds = new Set<string>(blobIds);
-    const newlyAddedBlobIds = blobIds.filter(
-      (id) => !previousBlobIds.has(id),
-    );
 
     const authorName =
       existing?.author || (await this.resolveUserName(userId)) || null;
@@ -156,45 +153,27 @@ export class PublishService {
       updatedAt: new Date(),
     });
 
-    await this.repo.save(manifest);
+    let acquiredBlobIds: string[];
+    let orphanedBlobIds: string[];
 
-    // Clean up newly-orphaned TemplateBlob rows and release orphaned FileBlob CAS references on republish
-    let orphanedBlobIds: string[] = [];
-    if (existing) {
-      if (this.prisma.templateBlob?.findMany) {
-        const orphans = await Promise.resolve(
-          this.prisma.templateBlob.findMany({
-            where: { templateFiles: { none: {} } },
-            select: { contentHash: true, blobId: true },
-          }),
-        ).catch(() => []);
-        if (orphans.length > 0) {
-          orphanedBlobIds = orphans
-            .map((o) => o.blobId)
-            .filter((id): id is string => Boolean(id));
-          if (this.prisma.templateBlob?.deleteMany) {
-            await Promise.resolve(
-              this.prisma.templateBlob.deleteMany({
-                where: {
-                  contentHash: { in: orphans.map((o) => o.contentHash) },
-                },
-              }),
-            ).catch(() => undefined);
-          }
-        }
-      } else {
-        orphanedBlobIds = Array.from(previousBlobIds).filter(
-          (id) => !currentBlobIds.has(id),
-        );
-      }
+    if (typeof this.repo.saveWithLifecycle === 'function') {
+      const saved = await this.repo.saveWithLifecycle(manifest);
+      acquiredBlobIds = saved.acquiredBlobIds;
+      orphanedBlobIds = saved.releasedBlobIds;
+    } else {
+      await this.repo.save(manifest);
+      acquiredBlobIds = blobIds.filter((id) => !previousBlobIds.has(id));
+      orphanedBlobIds = Array.from(previousBlobIds).filter(
+        (id) => !currentBlobIds.has(id),
+      );
     }
 
     if (
       typeof this.filesPort?.acquireBlob === 'function' &&
-      newlyAddedBlobIds.length > 0
+      acquiredBlobIds.length > 0
     ) {
       await Promise.all(
-        newlyAddedBlobIds.map((id) =>
+        acquiredBlobIds.map((id) =>
           Promise.resolve(this.filesPort!.acquireBlob(id)).catch(() => null),
         ),
       );

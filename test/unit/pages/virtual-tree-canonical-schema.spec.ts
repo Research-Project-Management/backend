@@ -703,7 +703,7 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
       expect(clonedIntroNode?.parentId).not.toBe(NODE_CHAPTERS_ID);
     });
 
-    it('invokes PostgreSQL clone_page_virtual_tree Stored Procedure in one atomic CALL when available', async () => {
+    it('flushes live Yjs sessions BEFORE reading PageDoc.lines and increments Copy suffix in single $transaction batch', async () => {
       const sourcePage = {
         id: PAGE_ID,
         spaceId: SPACE_ID,
@@ -711,20 +711,25 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
         title: 'Large Monograph',
         deletedAt: null,
       };
-      const sourceDoc = {
+      let liveFlushed = false;
+      const staleDoc = {
         id: DOC_MAIN_ID,
         spaceId: SPACE_ID,
         pageId: PAGE_ID,
         lastKnownPath: 'main.tex',
-        lines: ['\\documentclass{book}'],
+        lines: ['\\documentclass{book}', '% stale persisted line'],
         inStorage: false,
         ranges: { title: 'Large Monograph' },
         deletedAt: null,
       };
+      const flushedDoc = {
+        ...staleDoc,
+        lines: ['\\documentclass{book}', '% fresh live-typed line'],
+      };
 
-      const executeRawMock = jest.fn().mockResolvedValue(undefined);
-      const queryRawMock = jest.fn().mockResolvedValue([{ exists: true }]);
-      const pageCreateMock = jest.fn();
+      const pageCreateMock = jest.fn().mockResolvedValue({});
+      const pageUpdateManyMock = jest.fn().mockResolvedValue({ count: 1 });
+      const createdDocBatches: Array<Record<string, unknown>> = [];
 
       const mockPrisma = {
         page: {
@@ -737,9 +742,16 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
             ]),
         },
         pageDoc: {
-          findUnique: jest.fn().mockResolvedValue(sourceDoc),
-          findFirst: jest.fn().mockResolvedValue(sourceDoc),
-          findMany: jest.fn().mockResolvedValue([sourceDoc]),
+          findUnique: jest.fn(async () =>
+            liveFlushed ? flushedDoc : staleDoc,
+          ),
+          findFirst: jest.fn(async () => (liveFlushed ? flushedDoc : staleDoc)),
+          findMany: jest.fn(async (args?: { select?: { id?: boolean } }) => {
+            if (args?.select?.id) {
+              return [{ id: DOC_MAIN_ID }];
+            }
+            return [liveFlushed ? flushedDoc : staleDoc];
+          }),
         },
         pageFile: {
           findMany: jest.fn().mockResolvedValue([]),
@@ -750,34 +762,54 @@ describe('Virtual Tree Canonical BCNF/3NF Schema Contracts', () => {
         $transaction: jest.fn(
           async (cb: (tx: Record<string, unknown>) => Promise<unknown>) =>
             cb({
-              $queryRaw: queryRawMock,
-              $executeRaw: executeRawMock,
-              page: { create: pageCreateMock },
+              page: {
+                create: pageCreateMock,
+                updateMany: pageUpdateManyMock,
+              },
+              pageDoc: {
+                createMany: jest.fn(
+                  async ({ data }: { data: Array<Record<string, unknown>> }) => {
+                    createdDocBatches.push(...data);
+                    return { count: data.length };
+                  },
+                ),
+              },
+              pageFile: { createMany: jest.fn() },
+              pageNode: { createMany: jest.fn() },
             }),
         ),
       } as unknown as PrismaService;
+
+      const flushDocs = jest.fn(async () => {
+        liveFlushed = true;
+        return [DOC_MAIN_ID];
+      });
 
       const pageService = new PageService(
         mockPrisma,
         {} as DocstoreService,
         {} as PageScaffoldService,
+        undefined,
+        {
+          applyExternalText: jest.fn(),
+          flushDocs,
+          flushDoc: jest.fn(),
+          evictDoc: jest.fn(),
+          getPresence: jest.fn(),
+        },
       );
 
       const res = await pageService.duplicatePage(PAGE_ID, SPACE_ID);
 
+      expect(flushDocs).toHaveBeenCalledWith(SPACE_ID, [DOC_MAIN_ID]);
       expect(res.page.title).toBe('Large Monograph (Copy 2)');
-      expect(queryRawMock).toHaveBeenCalledTimes(1);
-      expect(executeRawMock).toHaveBeenCalledTimes(1);
-      const executeCalls = (
-        executeRawMock as jest.Mock<
-          unknown,
-          [TemplateStringsArray, ...unknown[]]
-        >
-      ).mock.calls[0];
-      expect(executeCalls[0].join('?')).toContain(
-        'CALL clone_page_virtual_tree',
-      );
-      expect(pageCreateMock).not.toHaveBeenCalled();
+      expect(res.page.content).toContain('% fresh live-typed line');
+      expect(pageCreateMock).toHaveBeenCalledTimes(1);
+      expect(createdDocBatches).toHaveLength(1);
+      expect(createdDocBatches[0].lines).toEqual([
+        '\\documentclass{book}',
+        '% fresh live-typed line',
+      ]);
     });
   });
 });

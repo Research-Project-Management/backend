@@ -7,13 +7,7 @@
  */
 
 import * as path from 'path';
-import { escapeLatex } from '@/modules/pages/core/domain/latex-escape';
-import {
-  buildZipBuffer,
-  type ZipEntry,
-} from '@/modules/pages/core/utils/zip-builder';
-
-export { escapeLatex };
+import { buildZipBuffer } from '@/modules/pages/core';
 
 export function sanitizeLatexUrl(url: string): string {
   return (url || '').replace(/[{}\\%#\r\n\0]/g, '').trim();
@@ -169,10 +163,6 @@ export function convertLatexToHtml(latex: string, title?: string): string {
 </html>`;
 }
 
-export function buildMinimalZip(entries: ZipEntry[]): Buffer {
-  return buildZipBuffer(entries);
-}
-
 export function convertLatexToDocxBuffer(
   latex: string,
   title?: string,
@@ -225,7 +215,7 @@ export function convertLatexToDocxBuffer(
   const wordRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`;
 
-  return buildMinimalZip([
+  return buildZipBuffer([
     { path: '[Content_Types].xml', data: Buffer.from(contentTypesXml, 'utf8') },
     { path: '_rels/.rels', data: Buffer.from(rootRelsXml, 'utf8') },
     { path: 'word/_rels/document.xml.rels', data: Buffer.from(wordRelsXml, 'utf8') },

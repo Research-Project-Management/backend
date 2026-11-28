@@ -9,25 +9,33 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma, PageDoc } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
+  NodePathVo,
   ensureCanonicalPageId,
+  ensurePrismaFolderChain,
   filterRecordsByPageScope,
-} from '@/modules/pages/core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { ensurePrismaFolderChain } from '@/modules/pages/core/utils/folder-chain';
-import { TextDoc } from '@/modules/pages/docstore/domain/text-doc.entity';
-import { DocModifiedError, DocNotFoundError } from '@/modules/pages/docstore/domain/doc.errors';
-import { DocRanges } from '@/modules/pages/docstore/domain/doc-range';
+} from '@/modules/pages/core';
+import { TextDoc } from '../domain/text-doc.entity';
+import { DocModifiedError, DocNotFoundError } from '../domain/doc.errors';
+import { DocRanges } from '../domain/doc-range';
 import {
   DocstoreMetrics,
   CreateDocData,
   UpdateDocData,
   PatchDocData,
-} from '@/modules/pages/docstore/domain/doc.ports';
+} from '../domain/doc.ports';
 
 export type { CreateDocData, UpdateDocData, PatchDocData };
 
 function toInputJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function computeLinesByteSize(lines: readonly string[]): number {
+  let bytes = 0;
+  for (let i = 0; i < lines.length; i++) {
+    bytes += Buffer.byteLength(lines[i], 'utf8');
+  }
+  return bytes + Math.max(0, lines.length - 1);
 }
 
 @Injectable()
@@ -108,28 +116,6 @@ export class DocstoreRepository {
     return this.mapToEntity(record);
   }
 
-  public async getDocByPath(
-    projectId: string,
-    path: string,
-  ): Promise<TextDoc | null> {
-    const cleanPath = path.replace(/\\/g, '/').replace(/^\/+/, '');
-    const record = await this.prisma.pageDoc.findFirst({
-      where: {
-        spaceId: projectId,
-        deletedAt: null,
-        OR: [
-          { node: { path: `/${cleanPath}` } },
-          { lastKnownPath: cleanPath },
-          { lastKnownPath: `/${cleanPath}` },
-        ],
-      },
-    });
-
-    DocstoreMetrics.recordRead();
-    if (!record) return null;
-    return this.mapToEntity(record);
-  }
-
   public async getAllDocs(
     projectId: string,
     pageId?: string,
@@ -159,11 +145,7 @@ export class DocstoreRepository {
     pageId?: string,
   ): Promise<TextDoc[]> {
     const hasScopedPage =
-      typeof pageId === 'string' &&
-      pageId !== projectId &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        pageId,
-      );
+      typeof pageId === 'string' && pageId !== projectId && isUuid(pageId);
     const records = await this.prisma.pageDoc.findMany({
       where: {
         spaceId: projectId,
@@ -181,11 +163,7 @@ export class DocstoreRepository {
 
   public async createDoc(data: CreateDocData): Promise<TextDoc> {
     const cleanPath = data.path.replace(/\\/g, '/').replace(/^\/+/, '');
-    const bytes = data.lines.reduce(
-      (acc, l) => acc + Buffer.byteLength(l, 'utf8'),
-      0,
-    );
-    const sizeBytes = bytes + Math.max(0, data.lines.length - 1);
+    const sizeBytes = computeLinesByteSize(data.lines);
 
     const client = data.tx ?? this.prisma;
     const effectivePageId = await ensureCanonicalPageId(
@@ -224,12 +202,7 @@ export class DocstoreRepository {
     docId: string,
     data: UpdateDocData,
   ): Promise<{ doc: TextDoc; modified: boolean }> {
-    let bytes = 0;
-    const lines = data.lines;
-    for (let i = 0; i < lines.length; i++) {
-      bytes += Buffer.byteLength(lines[i], 'utf8');
-    }
-    const sizeBytes = bytes + Math.max(0, lines.length - 1);
+    const sizeBytes = computeLinesByteSize(data.lines);
 
     // 1. Optimistic Concurrency Control (OCC) check if expectedRev specified
     if (data.expectedRev !== undefined) {
@@ -502,11 +475,7 @@ export class DocstoreRepository {
     lines: string[],
     ranges?: DocRanges,
   ): Promise<TextDoc> {
-    const bytes = lines.reduce(
-      (acc, l) => acc + Buffer.byteLength(l, 'utf8'),
-      0,
-    );
-    const sizeBytes = bytes + Math.max(0, lines.length - 1);
+    const sizeBytes = computeLinesByteSize(lines);
 
     const existing =
       typeof this.prisma.pageDoc.findFirst === 'function'
@@ -562,12 +531,5 @@ export class DocstoreRepository {
       where: { id: docId, spaceId: projectId },
     });
     return result.count > 0;
-  }
-
-  public async destroyAllDocs(projectId: string): Promise<number> {
-    const result = await this.prisma.pageDoc.deleteMany({
-      where: { spaceId: projectId },
-    });
-    return result.count;
   }
 }

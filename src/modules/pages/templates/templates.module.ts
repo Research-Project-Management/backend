@@ -7,7 +7,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
 import { FilesModule } from '@/modules/files/files.module';
 import { AccessModule } from '@/modules/project/access';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
+import { DocstoreModule } from '@/modules/pages/docstore';
 import { GalleryService } from './services/gallery.service';
 import { InstantiateService } from './services/instantiate.service';
 import { PublishService } from './services/publish.service';
@@ -23,5 +23,6 @@ import { TemplatesRepository } from './templates.repository';
     PublishService,
     InstantiateService,
   ],
+  exports: [GalleryService, PublishService, InstantiateService],
 })
 export class TemplatesModule {}

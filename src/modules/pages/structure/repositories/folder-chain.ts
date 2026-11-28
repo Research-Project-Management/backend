@@ -1,16 +1,17 @@
 /**
  * modules/pages/structure/repositories/folder-chain.ts
- * Folder chain materialization, hydration, and entity mapping helpers for StructureRepository.
+ * Hydration include contract, backing asset path sync, and entity mapping helpers for StructureRepository.
  */
 
 import { PageNode, Prisma } from '@prisma/client';
 import {
-  ensureCanonicalPageId,
-  type PageScopeDbClient,
-} from '@/modules/pages/core/utils/page-scope';
-import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
-import { NodePathVo, ParsedFolderSegment } from '@/modules/pages/core/utils/node-path';
-import { StructureError } from '@/modules/pages/structure/domain/structure.errors';
+  NodePathVo,
+  ensurePrismaFolderChain,
+  isPrismaUniqueError,
+} from '@/modules/pages/core';
+import { PageNodeEntity } from '../domain/node.entity';
+
+export { isPrismaUniqueError, ensurePrismaFolderChain };
 
 export const NODE_HYDRATION_INCLUDE = {
   doc: { select: { sizeBytes: true, hash: true, rev: true } },
@@ -35,44 +36,6 @@ export type HydratedPageNodeRow = PageNode & {
   hash?: string | null;
   rev?: number | null;
 };
-
-import {
-  isPrismaUniqueError,
-  ensurePrismaFolderChain,
-} from '@/modules/pages/core/utils/folder-chain';
-export { isPrismaUniqueError, ensurePrismaFolderChain };
-
-export async function ensureFolderChainInTxHelper(
-  tx: Prisma.TransactionClient,
-  projectId: string,
-  folderPathOrChain: string | readonly ParsedFolderSegment[],
-  pageId?: string | null,
-): Promise<string | null> {
-  if (typeof folderPathOrChain === 'string') {
-    const normalized = NodePathVo.normalize(folderPathOrChain);
-    if (normalized === '/') return null;
-    const segments = normalized.slice(1).split('/');
-    const chain: ParsedFolderSegment[] = [];
-    let currentPath = '';
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      NodePathVo.validateFilename(seg);
-      currentPath = `${currentPath}/${seg}`;
-      chain.push({
-        name: seg,
-        path: currentPath,
-        depth: i + 1,
-      });
-    }
-    return await ensurePrismaFolderChain(tx, projectId, chain, pageId);
-  }
-  return await ensurePrismaFolderChain(
-    tx,
-    projectId,
-    folderPathOrChain,
-    pageId,
-  );
-}
 
 export async function syncBackingAssetPath(
   db: Pick<Prisma.TransactionClient, 'pageDoc' | 'pageFile'>,

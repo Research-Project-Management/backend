@@ -5,14 +5,16 @@ import { PrismaService, isUuid, mapWithConcurrency } from '@/core';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
+  PageDomainEventBus,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { FilestoreService } from '@/modules/pages/filestore';
+import {
+  StructureService,
+  type PageNodeEntity,
+} from '@/modules/pages/structure';
 import { ArchiveEntryVo, ImportSummaryVo } from '../domain/archive.domain';
 import type { HydrateProjectOptions } from '../types/archive.types';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import type { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
 
 const HYDRATE_CONCURRENCY = 6;
 const WRAPPER_ROOT_TEX_RE = /\.(tex|ltx|rtex|latex)$/i;

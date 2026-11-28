@@ -5,12 +5,13 @@ import { applyTextEditsAndCapture } from './util';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import { RedisCacheService, RedisPubSubService } from '@/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { LineArray } from '@/modules/pages/docstore/domain/line-array';
-
-import { DocNotFoundError } from '@/modules/pages/docstore/domain/doc.errors';
+import {
+  DocNotFoundError,
+  DocstoreService,
+  LineArray,
+} from '@/modules/pages/docstore';
 import { PAGES_EVENTS, PAGES_REDIS_KEYS, PAGES_ROOMS } from '../config';
-import { YjsCursorDiffEngine, mergeThreeWayText } from './merge';
+import { mergeThreeWayText } from './merge';
 import {
   type ActiveDocSession,
   type YjsClusterRelayMessage,
@@ -21,6 +22,7 @@ import {
   deleteRedisSnapshotHelper,
   publishClusterRelayHelper,
   releaseFlushLockHelper,
+  removeActiveDocSessionHelper,
   saveBinaryToRedisHelper,
 } from './cluster';
 
@@ -138,20 +140,12 @@ export async function hydrateOrInitYDocSessionHelper(
 
   if (!loadedFromRedis && ctx.docstoreService) {
     let rawText: string | null = null;
-    const legacyDocstore = ctx.docstoreService as {
-      getRawDoc?: (
-        spaceId: string,
-        targetDocId: string,
-      ) => Promise<string | null>;
-    };
     if (baselineDocRecord && Array.isArray(baselineDocRecord.lines)) {
       rawText = baselineDocRecord.lines.join('\n');
     } else if (typeof ctx.docstoreService.getDoc === 'function') {
       const res = await ctx.docstoreService.getDoc(projectId, docId);
       baselineDocRecord = res;
       rawText = Array.isArray(res?.lines) ? res.lines.join('\n') : '';
-    } else if (typeof legacyDocstore.getRawDoc === 'function') {
-      rawText = await legacyDocstore.getRawDoc(projectId, docId);
     }
     if (rawText && rawText.length > 0) {
       doc.transact(() => {
@@ -192,12 +186,18 @@ export async function hydrateOrInitYDocSessionHelper(
       return;
     }
     if (update && update.byteLength > 0) {
-      publishClusterRelayHelper(ctx.redis, ctx.logger, ctx.instanceId, {
-        type: 'yjs-update',
-        projectId,
-        docId,
-        updateBase64: Buffer.from(update).toString('base64'),
-      });
+      publishClusterRelayHelper(
+        ctx.redis,
+        ctx.logger,
+        ctx.instanceId,
+        {
+          type: 'yjs-update',
+          projectId,
+          docId,
+          updateBase64: Buffer.from(update).toString('base64'),
+        },
+        ctx.pubSub,
+      );
     }
     ctx.onDocUpdated(projectId, docId, session);
   });
@@ -294,7 +294,7 @@ export async function executeFlushDocHelper(
               err.name === 'DocModifiedError'
             ) {
               ctx.logger.warn(
-                `OCC conflict during Y.Doc flush for ${key}. Rebasing against latest Docstore rev.`,
+                `OCC conflict during Y.Doc flush (projectId=${projectId}, docId=${docId}, expectedRev=${session.lastFlushedRev ?? 'none'}). Rebasing against latest Docstore rev.`,
               );
               const fresh = await ctx.docstoreService
                 ?.getDoc(projectId, docId)
@@ -344,6 +344,25 @@ export async function executeFlushDocHelper(
                 convergedOnConflict = true;
                 return;
               }
+
+              const rebasedRes = await ctx.docstoreService!.updateDoc(
+                projectId,
+                docId,
+                {
+                  lines: LineArray.textToLines(reconciledText),
+                  version: (fresh.version ?? 0) + 1,
+                  expectedRev: fresh.rev,
+                },
+              );
+              session.currentVersion =
+                rebasedRes.doc?.version ?? (fresh.version ?? 0) + 1;
+              session.lastFlushedRev = rebasedRes.rev ?? rebasedRes.doc?.rev;
+              session.lastFlushedText = reconciledText;
+              convergedOnConflict = true;
+              ctx.logger.log(
+                `Persisted 3-way merged Y.Doc after OCC conflict (projectId=${projectId}, docId=${docId}, rev=${session.lastFlushedRev})`,
+              );
+              return;
             }
             throw err;
           }),
@@ -398,27 +417,31 @@ export async function executeFlushDocHelper(
       (err as { name?: string })?.name === 'DocNotFoundError';
     if (isMissing) {
       ctx.logger.warn(
-        `Stopping flush retries for deleted/missing Y.Doc ${key}: ${(err as Error)?.message}`,
+        `Stopping flush retries for deleted/missing Y.Doc (projectId=${projectId}, docId=${docId}): ${(err as Error)?.message}`,
       );
-      if (session.flushTimeout) {
-        clearTimeout(session.flushTimeout);
-        session.flushTimeout = undefined;
-      }
       await deleteRedisSnapshotHelper(
         ctx.redis,
         ctx.logger,
         projectId,
         docId,
       ).catch(() => {});
-      ctx.activeDocs.delete(key);
-      ctx.projectDocKeys.get(projectId)?.delete(key);
-      session.doc.destroy();
+      removeActiveDocSessionHelper(
+        ctx.activeDocs,
+        ctx.projectDocKeys,
+        projectId,
+        key,
+        session,
+      );
       return;
     }
+    const isOccConflict =
+      Boolean(err) &&
+      typeof err === 'object' &&
+      (err as { name?: string }).name === 'DocModifiedError';
     session.firstUnflushedAt = flushedTimestamp ?? Date.now();
     session.currentVersion = undefined;
     ctx.logger.error(
-      `Error flushing Y.Doc ${key}: ${(err as Error)?.message}`,
+      `Y.Doc flush failed (projectId=${projectId}, docId=${docId}, reason=${isOccConflict ? 'occ_conflict' : 'db_write_failure'}, expectedRev=${session.lastFlushedRev ?? 'none'}): ${(err as Error)?.message}`,
       (err as Error)?.stack,
     );
     if (!session.flushTimeout) {
@@ -454,22 +477,26 @@ export async function evictDocHelper(
   }
 
   if (options?.skipFlush) {
-    if (session.flushTimeout) {
-      clearTimeout(session.flushTimeout);
-      session.flushTimeout = undefined;
-    }
     await deleteRedisSnapshotHelper(ctx.redis, ctx.logger, projectId, docId);
     const payload: Omit<YjsClusterRelayMessage, 'instanceId'> = {
       type: 'evict',
       projectId,
       docId,
     };
-    publishClusterRelayHelper(ctx.redis, ctx.logger, ctx.instanceId, payload);
+    publishClusterRelayHelper(
+      ctx.redis,
+      ctx.logger,
+      ctx.instanceId,
+      payload,
+      ctx.pubSub,
+    );
   } else {
     try {
       await ctx.flushDoc(projectId, docId);
-    } catch {
-      // Ignore flush errors on forced eviction
+    } catch (err: unknown) {
+      ctx.logger.warn(
+        `Flush failed during Y.Doc eviction (projectId=${projectId}, docId=${docId}, error=${(err as Error)?.message})`,
+      );
     }
     if (
       session.firstUnflushedAt !== undefined &&
@@ -483,21 +510,19 @@ export async function evictDocHelper(
         session.doc,
         session.lastFlushedRev,
         ctx.redisSnapshotTtlSeconds,
-      ).catch(() => {});
-    }
-    if (session.flushTimeout) {
-      clearTimeout(session.flushTimeout);
-      session.flushTimeout = undefined;
-    }
-  }
-  ctx.activeDocs.delete(key);
-  const projSet = ctx.projectDocKeys.get(projectId);
-  if (projSet) {
-    projSet.delete(key);
-    if (projSet.size === 0) {
-      ctx.projectDocKeys.delete(projectId);
+      ).catch((err: unknown) => {
+        ctx.logger.warn(
+          `Fallback Redis snapshot failed during Y.Doc eviction (projectId=${projectId}, docId=${docId}, error=${(err as Error)?.message})`,
+        );
+      });
     }
   }
-  session.doc.destroy();
+  removeActiveDocSessionHelper(
+    ctx.activeDocs,
+    ctx.projectDocKeys,
+    projectId,
+    key,
+    session,
+  );
   ctx.logger.debug(`Evicted inactive Y.Doc: ${key}`);
 }

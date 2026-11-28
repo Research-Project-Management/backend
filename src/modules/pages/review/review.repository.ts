@@ -128,18 +128,6 @@ export class ReviewRepository {
       : [];
   }
 
-  public async updateChange(
-    spaceId: string,
-    changeId: string,
-    data: Prisma.DocChangeUpdateManyMutationInput,
-  ): Promise<boolean> {
-    const res = await this.prisma.docChange.updateMany({
-      where: { id: changeId, doc: { spaceId } },
-      data,
-    });
-    return res.count > 0;
-  }
-
   public async claimPendingChanges(
     spaceId: string,
     changeIds: string[],

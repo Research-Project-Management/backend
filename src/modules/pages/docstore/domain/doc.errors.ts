@@ -3,7 +3,7 @@
  * Domain errors matching Overleaf Docstore specifications.
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 export class DocNotFoundError extends PagesDomainError {
   constructor(message: string = 'Document not found') {

@@ -1,5 +1,5 @@
 /**
- * modules/pages/docstore/services/page-scaffold.service.ts
+ * modules/pages/page/services/scaffold.service.ts
  * Domain/Application service encapsulating project page bootstrap, Overleaf-compatible
  * blank and example LaTeX templates, and companion references.bib initialization.
  */
@@ -10,10 +10,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
   ensureCanonicalPageId,
+  escapeLatex,
   resolveSpaceRootDocIds,
-} from '@/modules/pages/core/utils/page-scope';
-import { escapeLatex } from '@/modules/pages/core/domain/latex-escape';
-import { resolveUnicodePreamblePackages } from '@/modules/pages/core/domain/latex-preamble';
+  resolveUnicodePreamblePackages,
+} from '@/modules/pages/core';
 import { DocstoreService } from '../../docstore/docstore.service';
 import { resolveProjectLabels } from './labels.service';
 

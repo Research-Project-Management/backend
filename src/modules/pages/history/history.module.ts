@@ -1,15 +1,15 @@
 /**
  * history/history.module.ts
- * NestJS Module for Manuscripts Project History, Snapshots, Diff, Labels & Restore.
+ * NestJS Module for Pages History, Snapshots, Diff, Labels & Restore.
  */
 
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '@/core';
+import { PrismaModule, RedisModule } from '@/core';
 import { FilesModule } from '@/modules/files/files.module';
-import { PagesCoreModule } from '@/modules/pages/core/core.module';
-import { StructureModule } from '@/modules/pages/structure/structure.module';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
+import { PagesCoreModule } from '@/modules/pages/core';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { FilestoreModule } from '@/modules/pages/filestore';
+import { StructureModule } from '@/modules/pages/structure';
 
 import { HistoryController } from './history.controller';
 import { SnapshotService } from './services/snapshot.service';
@@ -25,6 +25,7 @@ import { DiffEngine } from './domain/diff';
 @Module({
   imports: [
     PrismaModule,
+    RedisModule,
     FilesModule,
     PagesCoreModule,
     StructureModule,
@@ -49,9 +50,6 @@ import { DiffEngine } from './domain/diff';
     LabelService,
     RestoreService,
     MaintenanceService,
-    HistoryRepository,
-    SnapshotCollectorAdapter,
-    SnapshotRestorerAdapter,
   ],
 })
 export class HistoryModule {}

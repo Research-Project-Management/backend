@@ -9,10 +9,12 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthenticatedRequest, isUuid } from '@/core';
-import { getRecordSpaceId } from '@/modules/pages/core/utils/page-scope';
-import { PageService } from '@/modules/pages/page/services/page.service';
-import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+import {
+  UserResolverService,
+  getRecordSpaceId,
+} from '@/modules/pages/core';
+import { ScopeRepository } from '@/modules/pages/docstore';
+import { PageService } from '@/modules/pages/page';
 import {
   ProjectRolePolicy,
   ResourceAccessPolicy,
@@ -48,14 +50,18 @@ export class CommentsService {
 
   private resolveTarget(
     targetId: string,
+    routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
+    bodySpaceId?: string,
   ) {
     return resolveReviewTarget({
       scopeRepo: this.scopeRepo,
       pageService: this.pageService,
       targetId,
       authSpace,
-      fallbackPrisma: this.repo.getPrisma(),
+      routeSpaceId,
+      bodySpaceId,
+      fallbackPrisma: this.repo.getPrisma?.(),
     });
   }
 
@@ -64,25 +70,24 @@ export class CommentsService {
     commentId: string,
     routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
+    notFoundMessage = `Comment thread ${commentId} not found`,
   ) {
     if (!isUuid(commentId)) {
       throw new BadRequestException('A valid UUID is required for commentId');
     }
-    const { docId, spaceId: resolvedSpace } = await this.resolveTarget(
+    const { docId, spaceId, crossSpaceMismatch } = await this.resolveTarget(
       targetId,
-      routeSpaceId || authSpace,
+      routeSpaceId,
+      authSpace,
     );
-    const spaceId =
-      resolvedSpace ||
-      this.pageService.resolveActiveProjectId(authSpace) ||
-      routeSpaceId;
-    const thread = spaceId
-      ? await this.repo.findThread(spaceId, commentId, docId)
-      : null;
-    if (!thread) {
-      throw new NotFoundException(`Comment thread ${commentId} not found`);
+    if (!spaceId || crossSpaceMismatch) {
+      throw new NotFoundException(notFoundMessage);
     }
-    return { spaceId: spaceId!, thread };
+    const thread = await this.repo.findThread(spaceId, commentId, docId);
+    if (!thread) {
+      throw new NotFoundException(notFoundMessage);
+    }
+    return { spaceId, thread };
   }
 
   private async assertDocNotLocked(docId: string): Promise<void> {
@@ -184,16 +189,13 @@ export class CommentsService {
         : { comments: [] };
     }
     try {
-      const { docId, spaceId: resolvedSpace } = await this.resolveTarget(
+      const { docId, spaceId, crossSpaceMismatch } = await this.resolveTarget(
         targetId,
-        authSpace || routeSpaceId,
+        routeSpaceId,
+        authSpace,
       );
-      const spaceId =
-        resolvedSpace ||
-        this.pageService.resolveActiveProjectId(authSpace) ||
-        routeSpaceId;
       const docTargetId = docId || targetId;
-      if (!spaceId) {
+      if (!spaceId || crossSpaceMismatch) {
         return isPaginated
           ? { comments: [], nextCursor: null, hasMore: false }
           : { comments: [] };
@@ -261,18 +263,20 @@ export class CommentsService {
     routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
   ) {
-    const activeSpace =
-      this.pageService.resolveActiveProjectId(authSpace) || routeSpaceId;
     const {
       docId,
-      spaceId: docSpaceId,
+      spaceId,
       pageId,
-    } = await this.resolveTarget(targetId, activeSpace || body?.spaceId);
-    const spaceId =
-      docSpaceId ||
-      activeSpace ||
-      body?.spaceId ||
-      (await this.pageService.resolveProjectId(targetId));
+      crossSpaceMismatch,
+    } = await this.resolveTarget(
+      targetId,
+      routeSpaceId,
+      authSpace,
+      body?.spaceId,
+    );
+    if (crossSpaceMismatch) {
+      throw new NotFoundException(`Document ${targetId} not found`);
+    }
     const docTargetId = docId || targetId;
     if (!spaceId || !isUuid(spaceId) || !isUuid(docTargetId)) {
       throw new BadRequestException(
@@ -530,22 +534,13 @@ export class CommentsService {
     routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
   ) {
-    const { docId, spaceId } = await this.resolveTarget(
-      targetId,
-      routeSpaceId || authSpace,
-    );
     const userId = req?.user?.id || req?.user?.sub || null;
-    if (!isUuid(commentId)) {
-      throw new BadRequestException('A valid UUID is required for commentId');
-    }
-    if (!spaceId) {
-      throw new NotFoundException(`Comment thread ${commentId} not found`);
-    }
-
-    const thread = await this.repo.findThread(spaceId, commentId, docId);
-    if (!thread) {
-      throw new NotFoundException(`Comment thread ${commentId} not found`);
-    }
+    const { spaceId, thread } = await this.loadThreadOrThrow(
+      targetId,
+      commentId,
+      routeSpaceId,
+      authSpace,
+    );
     await this.assertDocNotLocked(thread.docId);
     if (thread.isResolved) {
       throw new BadRequestException(
@@ -607,17 +602,15 @@ export class CommentsService {
       );
     }
 
-    const { docId, spaceId } = await this.resolveTarget(
+    const { spaceId, thread } = await this.loadThreadOrThrow(
       targetId,
-      routeSpaceId || authSpace,
+      commentId,
+      routeSpaceId,
+      authSpace,
+      `Reply ${replyId} not found`,
     );
-    if (!spaceId) {
-      throw new NotFoundException(`Reply ${replyId} not found`);
-    }
-
-    const thread = await this.repo.findThread(spaceId, commentId, docId);
-    const reply = thread?.replies?.find((r) => r.id === replyId);
-    if (!thread || !reply) {
+    const reply = thread.replies?.find((r) => r.id === replyId);
+    if (!reply) {
       throw new NotFoundException(`Reply ${replyId} not found`);
     }
     await this.assertDocNotLocked(thread.docId);
@@ -683,17 +676,15 @@ export class CommentsService {
       );
     }
 
-    const { docId, spaceId } = await this.resolveTarget(
+    const { spaceId, thread } = await this.loadThreadOrThrow(
       targetId,
-      routeSpaceId || authSpace,
+      commentId,
+      routeSpaceId,
+      authSpace,
+      `Reply ${replyId} not found`,
     );
-    if (!spaceId) {
-      throw new NotFoundException(`Reply ${replyId} not found`);
-    }
-
-    const thread = await this.repo.findThread(spaceId, commentId, docId);
-    const reply = thread?.replies?.find((r) => r.id === replyId);
-    if (!thread || !reply) {
+    const reply = thread.replies?.find((r) => r.id === replyId);
+    if (!reply) {
       throw new NotFoundException(`Reply ${replyId} not found`);
     }
     await this.assertDocNotLocked(thread.docId);

@@ -6,7 +6,11 @@
 import { Injectable } from '@nestjs/common';
 import { LRUCache } from 'lru-cache';
 import { SpellingRepository } from './spelling.repository';
-import { SpellingEngine, validateCustomWord } from './domain/spelling.engine';
+import {
+  normalizeLanguageCode,
+  SpellingEngine,
+  validateCustomWord,
+} from './domain/spelling.engine';
 import { DictionaryLimitExceededException } from './domain/spelling.errors';
 import type {
   CheckSpellingInput,
@@ -27,7 +31,7 @@ export class SpellingService {
     string,
     Promise<ReadonlySet<string>>
   >();
-  private readonly spaceEpochs = new Map<string, number>();
+  private readonly spaceEpochs = new LRUCache<string, number>({ max: 2_000 });
 
   constructor(
     private readonly repository: SpellingRepository,
@@ -77,9 +81,18 @@ export class SpellingService {
     spaceId: string,
     input: CheckSpellingInput,
   ): Promise<SpellingReport> {
-    const customWords =
-      input.words.length > 0 ? await this.getCachedWordSet(spaceId) : undefined;
-    return this.engine.checkWords(input.words, input.language, customWords);
+    const language = normalizeLanguageCode(input.language);
+    if (language === 'off' || input.words.length === 0) {
+      return {
+        language,
+        totalWordsChecked: 0,
+        misspelledCount: 0,
+        errors: [],
+      };
+    }
+
+    const customWords = await this.getCachedWordSet(spaceId);
+    return this.engine.checkWords(input.words, language, customWords);
   }
 
   public async listWords(spaceId: string): Promise<CustomDictionaryResult> {

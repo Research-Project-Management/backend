@@ -12,7 +12,7 @@ export interface PatchResult {
   mutated: boolean;
 }
 
-export interface ChangePatchStrategy {
+interface ChangePatchStrategy {
   accept(sourceLines: readonly string[], change: TrackChange): PatchResult;
   reject(sourceLines: readonly string[], change: TrackChange): PatchResult;
 }
@@ -23,7 +23,7 @@ export class LinePatcher {
    * - accept('insert') === reject('delete') === insertIfAbsent
    * - reject('insert') === accept('delete') === removeIfNonEmptyRange / acceptDeleteAnchored
    */
-  public static readonly CHANGE_PATCH_STRATEGIES: Readonly<
+  private static readonly CHANGE_PATCH_STRATEGIES: Readonly<
     Record<'insert' | 'delete', ChangePatchStrategy>
   > = Object.freeze({
     insert: {
@@ -299,14 +299,9 @@ export class LinePatcher {
     };
   }
 
-  public static clampLineIndex(
-    rawLine: number,
-    linesLength: number,
-    preferOneBased = false,
-  ): number {
+  private static clampLineIndex(rawLine: number, linesLength: number): number {
     if (linesLength <= 0) return 0;
-    const candidate = preferOneBased ? rawLine - 1 : rawLine;
-    return Math.max(0, Math.min(candidate, linesLength - 1));
+    return Math.max(0, Math.min(rawLine, linesLength - 1));
   }
 
   public static removeRange(

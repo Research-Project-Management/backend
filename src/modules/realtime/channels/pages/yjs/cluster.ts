@@ -13,12 +13,34 @@ import {
   PAGES_REDIS_KEYS,
   PAGES_ROOMS,
 } from '../config';
-import { YjsCursorDiffEngine } from './merge';
 import {
   type ActiveDocSession,
   type YjsClusterRelayMessage,
   yjsDocKey,
 } from '../types';
+
+export function removeActiveDocSessionHelper(
+  activeDocs: Map<string, ActiveDocSession>,
+  projectDocKeys: Map<string, Set<string>>,
+  projectId: string,
+  key: string,
+  session?: ActiveDocSession,
+): void {
+  const target = session ?? activeDocs.get(key);
+  if (target?.flushTimeout) {
+    clearTimeout(target.flushTimeout);
+    target.flushTimeout = undefined;
+  }
+  activeDocs.delete(key);
+  const projSet = projectDocKeys.get(projectId);
+  if (projSet) {
+    projSet.delete(key);
+    if (projSet.size === 0) {
+      projectDocKeys.delete(projectId);
+    }
+  }
+  target?.doc.destroy();
+}
 
 const RELEASE_FLUSH_LOCK_LUA = `
   if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -231,13 +253,13 @@ export function handleClusterRelayMessageHelper(
   if (!session) return;
 
   if (msg.type === 'evict') {
-    if (session.flushTimeout) {
-      clearTimeout(session.flushTimeout);
-      session.flushTimeout = undefined;
-    }
-    ctx.activeDocs.delete(key);
-    ctx.projectDocKeys.get(msg.projectId)?.delete(key);
-    session.doc.destroy();
+    removeActiveDocSessionHelper(
+      ctx.activeDocs,
+      ctx.projectDocKeys,
+      msg.projectId,
+      key,
+      session,
+    );
     return;
   }
 

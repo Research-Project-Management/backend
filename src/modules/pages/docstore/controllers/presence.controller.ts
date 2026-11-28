@@ -25,7 +25,7 @@ import {
   ResolvedSpace,
 } from '@/modules/project/access';
 import { AuthenticatedRequest } from '@/core';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 import { PresenceService, HeartbeatBody } from '../services/presence.service';
 
 @ApiTags('Pages - Search & Presence')

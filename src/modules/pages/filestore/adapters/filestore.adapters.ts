@@ -22,7 +22,7 @@ import {
   StorageUploadOptions,
   StreamHashResult,
 } from '../types/filestore.types';
-import { ContentHash, StorageKey } from '../domain/file.entity';
+import { ContentHash } from '../domain/file.entity';
 import {
   FilestoreValidationException,
   MAX_FILE_SIZE_BYTES,
@@ -93,36 +93,7 @@ export class ContentHasherAdapter {
       throw err;
     }
   }
-
-  public hashBuffer(buffer: Buffer): StreamHashResult {
-    const sizeBytes = buffer.length;
-    const gitHeader = Buffer.from(`blob ${sizeBytes}\0`, 'utf8');
-
-    const gitHashObj = createHash('sha1');
-    gitHashObj.update(gitHeader);
-    gitHashObj.update(buffer);
-    const gitBlobHash = gitHashObj.digest('hex');
-
-    const sha256Obj = createHash('sha256');
-    sha256Obj.update(buffer);
-    const sha256Hex = sha256Obj.digest('hex');
-
-    const dataStream = Readable.from(buffer);
-
-    return {
-      contentHash: ContentHash.create(gitBlobHash),
-      sha256Hex,
-      sizeBytes,
-      dataStream,
-    };
-  }
-
-  public buildStorageKey(hash: ContentHash, prefix = 'blobs'): StorageKey {
-    return StorageKey.fromHash(hash, prefix);
-  }
 }
-
-export { ContentHasherAdapter as CryptoGitBlobHasherAdapter };
 
 /**
  * Unified Platform Binary Storage Adapter (Overleaf Filestore -> Flux FilesModule bridge).
@@ -310,7 +281,7 @@ export class LocalDiskBinaryStorageAdapter extends IBinaryStoragePort {
   constructor(@Optional() baseDir?: string) {
     super();
     this.baseDir =
-      baseDir ?? path.resolve(process.cwd(), '.tmp', 'storage', 'manuscripts');
+      baseDir ?? path.resolve(process.cwd(), '.tmp', 'storage', 'pages');
   }
 
   private resolvePath(bucket: string, key: string): string {

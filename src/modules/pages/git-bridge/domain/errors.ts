@@ -3,7 +3,7 @@
  * Domain error hierarchy for Git Bridge (zero framework imports).
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 export class GitBridgeError extends PagesDomainError {
   constructor(message: string, code = 'GIT_BRIDGE_ERROR', statusCode = 400) {

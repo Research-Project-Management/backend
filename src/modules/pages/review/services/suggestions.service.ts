@@ -10,9 +10,9 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ChangeType } from '@prisma/client';
 import { AuthenticatedRequest, isUuid } from '@/core';
-import { PageService } from '@/modules/pages/page/services/page.service';
-import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+import { UserResolverService } from '@/modules/pages/core';
+import { ScopeRepository } from '@/modules/pages/docstore';
+import { PageService } from '@/modules/pages/page';
 import { DocPatcher } from '../adapters/doc-patcher.adapter';
 import { TrackChange } from '../domain/change.domain';
 import { LinePatcher } from '../domain/patcher.domain';
@@ -27,22 +27,8 @@ import { validateSuggestionRange } from '../domain/review.policy';
 import { TextRange } from '../domain/text-range.domain';
 import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
 import { ReviewRepository } from '../review.repository';
+import { CreateSuggestionDto } from '../dto/review.dto';
 import { resolveReviewTarget } from './review-target.resolver';
-
-export interface CreateSuggestionInput {
-  type?: string;
-  suggestedText?: string;
-  originalText?: string;
-  fromLine?: number;
-  fromColumn?: number;
-  toLine?: number;
-  toColumn?: number;
-  groupId?: string;
-  anchorStart?: string;
-  anchorEnd?: string;
-  baseDocRev?: number;
-  spaceId?: string;
-}
 
 @Injectable()
 export class SuggestionsService {
@@ -59,14 +45,18 @@ export class SuggestionsService {
 
   private resolveTarget(
     targetId: string,
+    routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
+    bodySpaceId?: string,
   ) {
     return resolveReviewTarget({
       scopeRepo: this.scopeRepo,
       pageService: this.pageService,
       targetId,
       authSpace,
-      fallbackPrisma: this.repo.getPrisma(),
+      routeSpaceId,
+      bodySpaceId,
+      fallbackPrisma: this.repo.getPrisma?.(),
     });
   }
 
@@ -89,16 +79,13 @@ export class SuggestionsService {
   ) {
     if (!isUuid(targetId)) return { suggestions: [] };
     try {
-      const { docId, spaceId: resolvedSpace } = await this.resolveTarget(
+      const { docId, spaceId, crossSpaceMismatch } = await this.resolveTarget(
         targetId,
-        routeSpaceId || authSpace,
+        routeSpaceId,
+        authSpace,
       );
-      const spaceId =
-        resolvedSpace ||
-        this.pageService.resolveActiveProjectId(authSpace) ||
-        routeSpaceId;
       const docTargetId = docId || targetId;
-      if (!spaceId) return { suggestions: [] };
+      if (!spaceId || crossSpaceMismatch) return { suggestions: [] };
 
       const changes = await this.repo.listChanges(spaceId, docTargetId, status);
       const userMap = await this.userResolver.resolveUserNames(
@@ -117,24 +104,26 @@ export class SuggestionsService {
 
   public async create(
     targetId: string,
-    body: CreateSuggestionInput,
+    body: Omit<CreateSuggestionDto, 'type'> & { type?: string },
     req: AuthenticatedRequest,
     routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
   ) {
     const userId = req?.user?.id || req?.user?.sub || null;
-    const activeSpace =
-      this.pageService.resolveActiveProjectId(authSpace) || routeSpaceId;
     const {
       docId,
-      spaceId: docSpaceId,
+      spaceId,
       pageId,
-    } = await this.resolveTarget(targetId, activeSpace || body?.spaceId);
-    const spaceId =
-      docSpaceId ||
-      activeSpace ||
-      body?.spaceId ||
-      (await this.pageService.resolveProjectId(targetId));
+      crossSpaceMismatch,
+    } = await this.resolveTarget(
+      targetId,
+      routeSpaceId,
+      authSpace,
+      body?.spaceId,
+    );
+    if (crossSpaceMismatch) {
+      throw new NotFoundException(`Document ${targetId} not found`);
+    }
     const docTargetId = docId || targetId;
     if (!spaceId || !isUuid(spaceId) || !isUuid(docTargetId)) {
       throw new BadRequestException(
@@ -274,11 +263,12 @@ export class SuggestionsService {
       );
     }
 
-    const { docId, spaceId } = await this.resolveTarget(
+    const { docId, spaceId, crossSpaceMismatch } = await this.resolveTarget(
       targetId,
-      routeSpaceId || authSpace,
+      routeSpaceId,
+      authSpace,
     );
-    if (!spaceId) {
+    if (!spaceId || crossSpaceMismatch) {
       throw new NotFoundException(`Suggestion ${suggestionId} not found`);
     }
 
@@ -491,8 +481,12 @@ export class SuggestionsService {
     suggestionIds?: string[],
     userId?: string | null,
   ): Promise<number> {
-    const { docId, spaceId } = await this.resolveTarget(targetId, authSpace);
-    if (!spaceId) return 0;
+    const { docId, spaceId, crossSpaceMismatch } = await this.resolveTarget(
+      targetId,
+      undefined,
+      authSpace,
+    );
+    if (!spaceId || crossSpaceMismatch) return 0;
     const targetDocId = docId || targetId;
     await this.assertDocNotLocked(targetDocId);
 

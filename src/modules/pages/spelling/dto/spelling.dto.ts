@@ -3,6 +3,7 @@
  * HTTP DTOs & validation guardrails for Spelling Check and Project Dictionary.
  */
 
+import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -25,9 +26,13 @@ export class CheckSpellingDto {
   words!: string[];
 
   @ApiPropertyOptional({
-    description: 'Language code (en-US, en-GB, vi-VN, fr-FR, de-DE, es-ES)',
+    description:
+      'BCP-47 language tag (en-US, en-GB, vi-VN, fr-FR, de-DE, es-ES) or "off" to disable',
     default: 'en-US',
   })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().replace(/_/g, '-') : value,
+  )
   @IsString()
   @MaxLength(16)
   @IsOptional()

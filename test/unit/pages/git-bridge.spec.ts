@@ -4,39 +4,32 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as isoGit from 'isomorphic-git';
 import { fromPartial } from '@total-typescript/shoehorn';
-import { PackAdapter } from '@/modules/pages/git-bridge/adapters/pack.adapter';
-import { RepoAdapter } from '@/modules/pages/git-bridge/adapters/repo.adapter';
-import {
-  LfsUnsupportedError,
-  PushRejectedError,
-  TokenLimitError,
-} from '@/modules/pages/git-bridge/domain/errors';
-import {
-  MAX_TOKENS,
-  parseRepoId,
-  RepoPathVo,
-} from '@/modules/pages/git-bridge/domain/policy';
-import {
-  hasSideband,
-  isLfsPointer,
-  PktReportBuilder,
-  pktLine,
-} from '@/modules/pages/git-bridge/domain/pack.domain';
 import {
   AccessTokenVo,
-  parseAuthHeader,
-} from '@/modules/pages/git-bridge/domain/token.domain';
-import {
   GitBridgeRepository,
-  TokenRecord,
-} from '@/modules/pages/git-bridge/git-bridge.repository';
-import { MaintenanceService } from '@/modules/pages/git-bridge/services/maintenance.service';
-import { SyncService } from '@/modules/pages/git-bridge/services/sync.service';
-import { TokenService } from '@/modules/pages/git-bridge/services/token.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
+  LfsUnsupportedError,
+  MAX_TOKENS,
+  MaintenanceService,
+  PackAdapter,
+  PktReportBuilder,
+  PushRejectedError,
+  RepoAdapter,
+  RepoPathVo,
+  SyncService,
+  TokenLimitError,
+  TokenService,
+  canWrite,
+  hasSideband,
+  isLfsPointer,
+  parseAuthHeader,
+  parseRepoId,
+  pktLine,
+  type TokenRecord,
+} from '@/modules/pages/git-bridge';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { FilestoreService } from '@/modules/pages/filestore';
+import { StructureService } from '@/modules/pages/structure';
+import { SnapshotService } from '@/modules/pages/history';
 
 describe('GitBridge BCNF Schema + GoF Deep Module Suite', () => {
   let tmpDir: string;
@@ -769,6 +762,35 @@ describe('GitBridge BCNF Schema + GoF Deep Module Suite', () => {
       await expect(
         fsp.access(path.join(gitRepo.bareDir(hotId), 'HEAD')),
       ).resolves.toBeUndefined();
+    });
+
+    it('enforces Project Space membership role over stale page.createdById in GitBridgeRepository.resolveRole', async () => {
+      const projectId = '0195f000-0000-7000-8000-000000000050';
+      const prisma = {
+        page: {
+          findUnique: jest.fn().mockResolvedValue({
+            spaceId: projectId,
+            deletedAt: null,
+            createdById: USER_ID,
+            space: {
+              type: 'project',
+              ownerUserId: null,
+              projectId,
+            },
+          }),
+        },
+        projectMember: {
+          findUnique: jest.fn().mockResolvedValue({ role: 'reviewer' }),
+        },
+        project: {
+          findFirst: jest.fn().mockResolvedValue({ createdById: 'other-owner' }),
+        },
+      };
+
+      const repo = new GitBridgeRepository(prisma as never);
+      const role = await repo.resolveRole(REPO_ID, USER_ID);
+      expect(role).toBe('reviewer');
+      expect(canWrite(role)).toBe(false);
     });
   });
 });

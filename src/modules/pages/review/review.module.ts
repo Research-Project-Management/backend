@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { PageModule } from '@/modules/pages/page/page.module';
+import { DocstoreModule } from '@/modules/pages/docstore';
+import { PageModule } from '@/modules/pages/page';
 import { CommentsController } from './controllers/comments.controller';
 import { ReviewStatusController } from './controllers/status.controller';
 import { SuggestionsController } from './controllers/suggestions.controller';
@@ -25,12 +25,6 @@ import { SuggestionsService } from './services/suggestions.service';
     SuggestionsService,
     ReviewStatusService,
   ],
-  exports: [
-    ReviewRepository,
-    DocPatcher,
-    CommentsService,
-    SuggestionsService,
-    ReviewStatusService,
-  ],
+  exports: [CommentsService, SuggestionsService, ReviewStatusService],
 })
 export class ReviewModule {}

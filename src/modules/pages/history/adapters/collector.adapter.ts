@@ -9,19 +9,21 @@ import { mapWithConcurrency } from '@/core';
 import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
-  LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import {
   createZipStream,
   type ZipEntry,
-} from '@/modules/pages/core/utils/zip-builder';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { IBinaryStoragePort } from '@/modules/pages/filestore/domain/filestore.ports';
-import type { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import {
+  FilestoreService,
+  IBinaryStoragePort,
+} from '@/modules/pages/filestore';
+import {
+  StructureService,
+  type PageNodeEntity,
+} from '@/modules/pages/structure';
 import { Snapshot, FileSnapshotVo } from '../domain/snapshot';
 
 const COLLECT_CONCURRENCY = 6;
@@ -57,10 +59,6 @@ export class SnapshotCollectorAdapter {
     this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
-  private getLiveCollab(): LiveCollaborationPort {
-    return this.liveCollab;
-  }
-
   public async collectCurrentState(
     projectId: string,
     pageId?: string,
@@ -72,9 +70,7 @@ export class SnapshotCollectorAdapter {
     );
 
     const docIds = nodes.filter((n) => n.docId).map((n) => n.docId as string);
-    await this.getLiveCollab()
-      .flushDocs(projectId, docIds)
-      .catch(() => []);
+    await this.liveCollab.flushDocs(projectId, docIds).catch(() => []);
 
     const filesMap = new Map<string, FileSnapshotVo>();
 

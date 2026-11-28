@@ -1,42 +1,62 @@
 /**
- * modules/pages/core/services/page/page-trash.ts
- * Business: Soft-deleting pages/files, listing trash items, and restoring deleted items.
+ * modules/pages/page/services/trash.service.ts
+ * Domain service handling Page & file soft-deletion, trash listing, restore, and permanent purge.
  */
 
-import * as crypto from 'crypto';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { Prisma, PageDoc, PageNode } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { PageNode } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
-import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
+  NodePathVo,
+  PageDomainEventBus,
   ensureCanonicalPageId,
+  ensurePrismaFolderChain,
   getRecordSpaceId,
-  isRecordDeleted,
+  hydratePageDocLines,
   resolveActiveProjectId,
   resolveCanonicalPageId,
   resolveProjectIdByEntityId,
   resolveSpaceRootDocIds,
-  type PageScopeDbClient,
-} from '../../core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
+} from '@/modules/pages/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
-import type { PageLifecycleContext } from './content.service';
-import type { PageFilesTransferContext } from './file.service';
+import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 
-export async function deletePageHelper(
-  ctx: PageLifecycleContext,
-  pageId: string,
-  authorizedProjectId?: string | { id: string } | null,
-) {
-  if (isUuid(pageId)) {
+@Injectable()
+export class PageTrashService {
+  private readonly logger = new Logger(PageTrashService.name);
+  private readonly pageScopeRepo: ScopeRepository;
+  private readonly domainEventBus: PageDomainEventBus;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly docstoreService: DocstoreService,
+    @Optional() pageScopeRepo?: ScopeRepository,
+    @Optional() domainEventBus?: PageDomainEventBus,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {
+    this.pageScopeRepo = pageScopeRepo ?? new ScopeRepository(prisma);
+    this.domainEventBus = domainEventBus ?? new PageDomainEventBus();
+  }
+
+  public async deletePage(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+  ) {
+    if (!isUuid(pageId)) {
+      return { success: true };
+    }
     try {
       const targetProjectId = resolveActiveProjectId(authorizedProjectId);
-      const pageRow = ctx.prisma.page?.findUnique
+      const pageRow = this.prisma.page?.findUnique
         ? await Promise.resolve(
-            ctx.prisma.page.findUnique({
+            this.prisma.page.findUnique({
               where: { id: pageId },
               select: {
                 id: true,
@@ -48,8 +68,8 @@ export async function deletePageHelper(
           ).catch(() => null)
         : null;
       const doc = targetProjectId
-        ? await ctx.pageScopeRepo.findDocInProject(targetProjectId, pageId)
-        : await ctx.prisma.pageDoc.findUnique({
+        ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
+        : await this.prisma.pageDoc.findUnique({
             where: { id: pageId },
           });
 
@@ -61,10 +81,10 @@ export async function deletePageHelper(
           pageRow.spaceId === targetProjectId)
       ) {
         const aggregateSpaceId = pageRow.spaceId || targetProjectId || '';
-        const [activeDocs, activeFiles] = await Promise.all([
-          ctx.prisma.pageDoc?.findMany
+        const [activeDocs, activeFiles, pageNodes] = await Promise.all([
+          this.prisma.pageDoc?.findMany
             ? Promise.resolve(
-                ctx.prisma.pageDoc.findMany({
+                this.prisma.pageDoc.findMany({
                   where: {
                     pageId: pageRow.id,
                     ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
@@ -74,9 +94,9 @@ export async function deletePageHelper(
                 }),
               ).catch(() => [])
             : Promise.resolve([]),
-          ctx.prisma.pageFile?.findMany
+          this.prisma.pageFile?.findMany
             ? Promise.resolve(
-                ctx.prisma.pageFile.findMany({
+                this.prisma.pageFile.findMany({
                   where: {
                     pageId: pageRow.id,
                     ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
@@ -91,48 +111,44 @@ export async function deletePageHelper(
                 }),
               ).catch(() => [])
             : Promise.resolve([]),
+          this.prisma.pageNode?.findMany
+            ? Promise.resolve(
+                this.prisma.pageNode.findMany({
+                  where: {
+                    pageId: pageRow.id,
+                    ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
+                  },
+                  select: {
+                    id: true,
+                    path: true,
+                    docId: true,
+                    fileId: true,
+                  },
+                }),
+              ).catch(() => [])
+            : Promise.resolve([]),
         ]);
         const deletedDocIds = (activeDocs || []).map((d) => d.id);
         const deletedFileIds = (activeFiles || []).map((f) => f.id);
-
         const deletedAt = new Date();
-        // Sync lastKnownPath from active PageNodes onto PageDoc/PageFile and preserve
-        // page_nodes rows (including empty FOLDERs) scoped under pageRow.id so restoring
-        // the Page from Trash restores its entire folder hierarchy without loss.
-        const pageNodes = ctx.prisma.pageNode?.findMany
-          ? await Promise.resolve(
-              ctx.prisma.pageNode.findMany({
-                where: {
-                  pageId: pageRow.id,
-                  ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
-                },
-                select: {
-                  id: true,
-                  path: true,
-                  docId: true,
-                  fileId: true,
-                },
-              }),
-            ).catch(() => [])
-          : [];
 
         const pathSyncOps: Promise<unknown>[] = [];
         for (const n of pageNodes || []) {
           const relPath = NodePathVo.toRelative(n.path || '');
           if (!relPath) continue;
-          if (n.docId && ctx.prisma.pageDoc?.updateMany) {
+          if (n.docId && this.prisma.pageDoc?.updateMany) {
             pathSyncOps.push(
               Promise.resolve(
-                ctx.prisma.pageDoc.updateMany({
+                this.prisma.pageDoc.updateMany({
                   where: { id: n.docId, spaceId: aggregateSpaceId },
                   data: { lastKnownPath: relPath },
                 }),
               ).catch(() => null),
             );
-          } else if (n.fileId && ctx.prisma.pageFile?.updateMany) {
+          } else if (n.fileId && this.prisma.pageFile?.updateMany) {
             pathSyncOps.push(
               Promise.resolve(
-                ctx.prisma.pageFile.updateMany({
+                this.prisma.pageFile.updateMany({
                   where: { id: n.fileId, spaceId: aggregateSpaceId },
                   data: { lastKnownPath: relPath },
                 }),
@@ -145,14 +161,14 @@ export async function deletePageHelper(
         }
 
         await Promise.all([
-          ctx.prisma.page.updateMany({
+          this.prisma.page.updateMany({
             where: {
               id: pageRow.id,
               ...(aggregateSpaceId ? { spaceId: aggregateSpaceId } : {}),
             },
             data: { deletedAt },
           }),
-          ctx.prisma.pageDoc
+          this.prisma.pageDoc
             .updateMany({
               where: {
                 pageId: pageRow.id,
@@ -162,7 +178,7 @@ export async function deletePageHelper(
               data: { deletedAt },
             })
             .catch(() => null),
-          ctx.prisma.pageFile
+          this.prisma.pageFile
             ?.updateMany?.({
               where: {
                 pageId: pageRow.id,
@@ -175,7 +191,7 @@ export async function deletePageHelper(
         ]);
 
         if (aggregateSpaceId && deletedDocIds.length > 0) {
-          await ctx.domainEventBus.publish({
+          await this.domainEventBus.publish({
             type: 'manuscript.nodes.deleted',
             projectId: aggregateSpaceId,
             deletedDocIds,
@@ -186,9 +202,7 @@ export async function deletePageHelper(
         }
 
         if (aggregateSpaceId) {
-          // NOTE: Do NOT emit 'pages.page.deleted' on soft-delete so CAS blobs remain intact for restore.
-          // Blob ref-counts & storage quota are reclaimed only on permanent purge (`purgePagePermanentlyHelper`).
-          ctx.eventEmitter?.emit('pages.file-tree.change', {
+          this.eventEmitter?.emit('pages.file-tree.change', {
             projectId: aggregateSpaceId,
             pageId: pageRow.id,
             change: {
@@ -204,15 +218,15 @@ export async function deletePageHelper(
       if (doc) {
         const docProjectId = getRecordSpaceId(doc);
         const rootDocIds = await resolveSpaceRootDocIds(
-          ctx.prisma,
+          this.prisma,
           docProjectId,
           doc.pageId,
         );
         const deletedRootDoc = rootDocIds.has(doc.id);
 
-        const existingDocNode = ctx.prisma.pageNode?.findFirst
+        const existingDocNode = this.prisma.pageNode?.findFirst
           ? await Promise.resolve(
-              ctx.prisma.pageNode.findFirst({
+              this.prisma.pageNode.findFirst({
                 where: {
                   spaceId: docProjectId,
                   OR: [{ docId: doc.id }, { id: pageId }],
@@ -226,12 +240,12 @@ export async function deletePageHelper(
           : undefined;
 
         await Promise.all([
-          ctx.docstoreService.patchDoc(docProjectId, doc.id, {
+          this.docstoreService.patchDoc(docProjectId, doc.id, {
             deleted: true,
             deletedAt: new Date().toISOString(),
             ...(preservedRelPath ? { path: preservedRelPath } : {}),
           }),
-          ctx.prisma.pageNode
+          this.prisma.pageNode
             .deleteMany({
               where: {
                 spaceId: docProjectId,
@@ -243,9 +257,9 @@ export async function deletePageHelper(
 
         if (deletedRootDoc) {
           const docPageId = doc.pageId;
-          if (ctx.prisma.page?.updateMany) {
+          if (this.prisma.page?.updateMany) {
             await Promise.resolve(
-              ctx.prisma.page.updateMany({
+              this.prisma.page.updateMany({
                 where: {
                   spaceId: docProjectId,
                   ...(docPageId ? { id: docPageId } : {}),
@@ -255,7 +269,7 @@ export async function deletePageHelper(
               }),
             ).catch(() => null);
           }
-          const nextRootCandidate = await ctx.prisma.pageNode
+          const nextRootCandidate = await this.prisma.pageNode
             .findFirst({
               where: {
                 spaceId: docProjectId,
@@ -266,9 +280,9 @@ export async function deletePageHelper(
               orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }],
             })
             .catch(() => null);
-          if (nextRootCandidate?.docId && ctx.prisma.page?.updateMany) {
+          if (nextRootCandidate?.docId && this.prisma.page?.updateMany) {
             await Promise.resolve(
-              ctx.prisma.page.updateMany({
+              this.prisma.page.updateMany({
                 where: {
                   spaceId: docProjectId,
                   id: docPageId || nextRootCandidate.pageId,
@@ -279,7 +293,7 @@ export async function deletePageHelper(
           }
         }
 
-        await ctx.domainEventBus.publish({
+        await this.domainEventBus.publish({
           type: 'manuscript.nodes.deleted',
           projectId: docProjectId,
           deletedDocIds: [doc.id],
@@ -288,7 +302,7 @@ export async function deletePageHelper(
           occurredAt: Date.now(),
         });
 
-        ctx.eventEmitter?.emit('pages.file-tree.change', {
+        this.eventEmitter?.emit('pages.file-tree.change', {
           projectId: docProjectId,
           change: {
             action: 'delete',
@@ -296,14 +310,56 @@ export async function deletePageHelper(
           },
         });
       }
-    } catch {
-      // Fallback
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Soft-delete fallback for target ${pageId}: ${msg}`);
     }
+    return { success: true };
   }
-  return { success: true };
+
+  public async getDeletedFiles(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+  ) {
+    return getDeletedFilesInSpace(this.prisma, pageId, authorizedProjectId);
+  }
+
+  public async getTrashPages(spaceId: string) {
+    return getTrashPagesInSpace(this.prisma, spaceId);
+  }
+
+  public async restorePage(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+  ) {
+    if (!isUuid(pageId)) {
+      throw new BadRequestException('A valid UUID is required for pageId');
+    }
+    const targetProjectId = resolveActiveProjectId(authorizedProjectId);
+    return restoreDeletedDocOrFile(
+      this.prisma,
+      this.docstoreService,
+      this.eventEmitter,
+      pageId,
+      targetProjectId,
+    );
+  }
+
+  public async purgePagePermanently(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+  ) {
+    return purgePagePermanentlyInSpace(
+      this.prisma,
+      this.domainEventBus,
+      this.eventEmitter,
+      pageId,
+      authorizedProjectId,
+    );
+  }
 }
 
-export async function getDeletedFilesHelper(
+async function getDeletedFilesInSpace(
   prisma: PrismaService,
   pageId: string,
   authorizedProjectId?: string | { id: string } | null,
@@ -490,13 +546,12 @@ async function ensureRestoredAssetNode(
   return { node, parsed: NodePathVo.parse(cleanPath, finalLeafName) };
 }
 
-export async function restoreDeletedDocOrFile(
+async function restoreDeletedDocOrFile(
   prisma: PrismaService,
   docstoreService: DocstoreService,
   eventEmitter: EventEmitter2 | undefined,
   pageId: string,
   targetProjectId?: string,
-  filesPort?: IFilesPort,
 ) {
   // Case 0: Restoring a soft-deleted Page Aggregate Root (restores Page + all child docs/files + tree nodes)
   const deletedPage = prisma.page?.findUnique
@@ -717,7 +772,7 @@ export async function restoreDeletedDocOrFile(
   });
 }
 
-export async function getTrashPagesHelper(
+async function getTrashPagesInSpace(
   prisma: PrismaService,
   spaceId: string,
 ) {
@@ -777,8 +832,10 @@ export async function getTrashPagesHelper(
   return { pages, total: pages.length };
 }
 
-export async function purgePagePermanentlyHelper(
-  ctx: PageLifecycleContext,
+async function purgePagePermanentlyInSpace(
+  prisma: PrismaService,
+  domainEventBus: PageDomainEventBus,
+  eventEmitter: EventEmitter2 | undefined,
   pageId: string,
   authorizedProjectId?: string | { id: string } | null,
 ) {
@@ -786,7 +843,7 @@ export async function purgePagePermanentlyHelper(
     throw new NotFoundException(`Page ${pageId} not found`);
   }
   const targetProjectId = resolveActiveProjectId(authorizedProjectId);
-  const pageRow = await ctx.prisma.page.findUnique({
+  const pageRow = await prisma.page.findUnique({
     where: { id: pageId },
     select: { id: true, spaceId: true, deletedAt: true },
   });
@@ -801,11 +858,11 @@ export async function purgePagePermanentlyHelper(
 
   const spaceId = pageRow.spaceId;
   const [pageFiles, pageDocs] = await Promise.all([
-    ctx.prisma.pageFile.findMany({
+    prisma.pageFile.findMany({
       where: { pageId: pageRow.id, spaceId },
       select: { id: true, sizeBytes: true, blobId: true, hash: true },
     }),
-    ctx.prisma.pageDoc.findMany({
+    prisma.pageDoc.findMany({
       where: { pageId: pageRow.id, spaceId },
       select: { id: true, inStorage: true, storageKey: true },
     }),
@@ -813,7 +870,7 @@ export async function purgePagePermanentlyHelper(
 
   // Evict live Yjs collaboration sessions before hard-deleting docs
   if (pageDocs.length > 0) {
-    await ctx.domainEventBus?.publish({
+    await domainEventBus.publish({
       type: 'manuscript.nodes.deleted',
       projectId: spaceId,
       deletedDocIds: pageDocs.map((d) => d.id),
@@ -823,7 +880,7 @@ export async function purgePagePermanentlyHelper(
     });
   }
 
-  await ctx.prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     await tx.pageLabel.deleteMany({ where: { pageId: pageRow.id } });
     await tx.pageNode.deleteMany({ where: { pageId: pageRow.id, spaceId } });
     await tx.pageFile.deleteMany({ where: { pageId: pageRow.id, spaceId } });
@@ -832,7 +889,7 @@ export async function purgePagePermanentlyHelper(
   });
 
   // Reclaim CAS blob ref-counts, cold-tier S3 doc objects, and storage quota only on permanent purge
-  ctx.eventEmitter?.emit('pages.page.deleted', {
+  eventEmitter?.emit('pages.page.deleted', {
     projectId: spaceId,
     pageId: pageRow.id,
     deletedFiles: pageFiles,

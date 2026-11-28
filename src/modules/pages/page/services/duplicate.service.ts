@@ -1,28 +1,30 @@
 /**
- * modules/pages/core/services/page/page-duplicate.ts
- * Business: Duplicating (deep-cloning) a page, its root doc, and linked nodes.
+ * modules/pages/page/services/duplicate.service.ts
+ * Domain service deep-cloning a Page aggregate root, its documents, CAS files, and virtual tree.
  */
 
 import * as crypto from 'crypto';
-import { NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma, PageDoc } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, isUuid } from '@/core';
+import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
 import {
+  LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
+  NOOP_LIVE_COLLABORATION,
+  NodePathVo,
   ensureCanonicalPageId,
   getRecordSpaceId,
+  hydratePageDocLines,
   isRecordDeleted,
   resolveActiveProjectId,
-  type PageScopeDbClient,
-} from '../../core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { ensurePrismaFolderChain } from '@/modules/pages/structure/structure.repository';
+} from '@/modules/pages/core';
 import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { hydratePageDocLines } from '@/modules/pages/core/utils/doc-occ.helper';
-import type { PageLifecycleContext } from './content.service';
+import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
 
-export interface DuplicatePageSourceInput {
+interface DuplicatePageSourceInput {
   spaceId: string;
   sourcePageId: string;
   sourcePageRow?: {
@@ -217,454 +219,446 @@ export function buildClonePlan(input: ClonePlanInput): ClonePlanResult {
   };
 }
 
-export async function duplicateSourcePageAndNode(
-  prisma: PrismaService,
-  docstoreService: DocstoreService,
-  eventEmitter: EventEmitter2 | undefined,
-  input: DuplicatePageSourceInput,
-  filesPort?: IFilesPort,
-) {
-  const { spaceId, sourcePageId, sourcePageRow, fallbackDoc, actorId } = input;
-  const validActorId = actorId && isUuid(actorId) ? actorId : null;
+@Injectable()
+export class PageDuplicateService {
+  private readonly pageScopeRepo: ScopeRepository;
+  private readonly liveCollab: LiveCollaborationPort;
 
-  const [fetchedDocs, fetchedFiles, fetchedNodes] = await Promise.all([
-    prisma.pageDoc?.findMany
-      ? Promise.resolve(
-          prisma.pageDoc.findMany({
-            where: { spaceId, pageId: sourcePageId, deletedAt: null },
-            orderBy: { createdAt: 'asc' },
-          }),
-        ).catch(() => null)
-      : Promise.resolve(null),
-    prisma.pageFile?.findMany
-      ? Promise.resolve(
-          prisma.pageFile.findMany({
-            where: { spaceId, pageId: sourcePageId, deletedAt: null },
-            orderBy: { createdAt: 'asc' },
-          }),
-        ).catch(() => [])
-      : Promise.resolve([]),
-    prisma.pageNode?.findMany
-      ? Promise.resolve(
-          prisma.pageNode.findMany({
-            where: { spaceId, pageId: sourcePageId },
-            orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }],
-          }),
-        ).catch(() => [])
-      : Promise.resolve([]),
-  ]);
-
-  const sourceDocs: PageDoc[] =
-    Array.isArray(fetchedDocs) && fetchedDocs.length > 0
-      ? fetchedDocs
-      : fallbackDoc
-        ? [fallbackDoc]
-        : [];
-  const sourceFiles = Array.isArray(fetchedFiles) ? fetchedFiles : [];
-  const sourceNodes = Array.isArray(fetchedNodes) ? fetchedNodes : [];
-
-  const sourceRootDoc =
-    (sourcePageRow?.rootDocId
-      ? sourceDocs.find((d) => d.id === sourcePageRow.rootDocId)
-      : undefined) ||
-    (fallbackDoc
-      ? sourceDocs.find((d) => d.id === fallbackDoc.id)
-      : undefined) ||
-    sourceDocs[0] ||
-    fallbackDoc ||
-    undefined;
-
-  const rootRanges =
-    sourceRootDoc?.ranges && typeof sourceRootDoc.ranges === 'object'
-      ? (sourceRootDoc.ranges as Record<string, unknown>)
-      : {};
-  const rawBaseTitle =
-    (typeof rootRanges.title === 'string' && rootRanges.title.trim()) ||
-    sourcePageRow?.title?.trim() ||
-    NodePathVo.toRelative(
-      sourceRootDoc?.lastKnownPath ||
-        (sourceRootDoc as { path?: string } | undefined)?.path ||
-        '',
-    ) ||
-    'Untitled';
-  const baseTitleWithoutCopy =
-    rawBaseTitle.replace(/ \(Copy(?: \d+)?\)$/i, '').trim() || 'Untitled';
-
-  let existingTitles = new Set<string>();
-  if (prisma.page?.findMany) {
-    const existingPages = await Promise.resolve(
-      prisma.page.findMany({
-        where: { spaceId, deletedAt: null },
-        select: { title: true },
-      }),
-    ).catch(() => []);
-    if (Array.isArray(existingPages)) {
-      existingTitles = new Set(
-        existingPages
-          .map((p) =>
-            typeof p?.title === 'string' ? p.title.trim().toLowerCase() : '',
-          )
-          .filter(Boolean),
-      );
-    }
-  }
-
-  let newPageTitle = `${baseTitleWithoutCopy} (Copy)`;
-  let copyIdx = 1;
-  while (existingTitles.has(newPageTitle.toLowerCase()) && copyIdx <= 100) {
-    copyIdx++;
-    newPageTitle = `${baseTitleWithoutCopy} (Copy ${copyIdx})`;
-  }
-
-  const hydratedDocLinesById = new Map<string, string[]>();
-  const hasAnyInStorageDoc = sourceDocs.some((d) => Boolean(d.inStorage));
-  if (hasAnyInStorageDoc) {
-    for (const doc of sourceDocs) {
-      hydratedDocLinesById.set(
-        doc.id,
-        await hydratePageDocLines(docstoreService, doc),
-      );
-    }
-  } else if (sourceRootDoc) {
-    hydratedDocLinesById.set(
-      sourceRootDoc.id,
-      await hydratePageDocLines(docstoreService, sourceRootDoc),
-    );
-  }
-
-  const newPageId = crypto.randomUUID();
-  const rootFilePath =
-    sourceRootDoc?.lastKnownPath ||
-    (sourceRootDoc as { path?: string } | undefined)?.path ||
-    'main.tex';
-  const rootFileName = NodePathVo.toRelative(rootFilePath) || 'main.tex';
-  const nowIso = new Date().toISOString();
-  const blobIncrements = new Map<string, number>();
-  let totalClonedBytes = 0n;
-  for (const file of sourceFiles) {
-    const fileSize = Math.max(0, Number(file.sizeBytes ?? 0));
-    if (fileSize > 0) {
-      totalClonedBytes += BigInt(fileSize);
-    }
-    if (file.blobId) {
-      blobIncrements.set(
-        file.blobId,
-        (blobIncrements.get(file.blobId) ?? 0) + 1,
-      );
-    }
-  }
-
-  let quotaReserved = false;
-  if (
-    totalClonedBytes > 0n &&
-    typeof filesPort?.reserveQuota === 'function'
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly docstoreService: DocstoreService,
+    @Optional() pageScopeRepo?: ScopeRepository,
+    @Optional()
+    @Inject(LIVE_COLLABORATION_PORT)
+    liveCollab?: LiveCollaborationPort,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional()
+    @Inject(FILES_PORT)
+    private readonly filesPort?: IFilesPort,
   ) {
-    await filesPort.reserveQuota(spaceId, totalClonedBytes);
-    quotaReserved = true;
+    this.pageScopeRepo = pageScopeRepo ?? new ScopeRepository(prisma);
+    this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      const canProbeStoredProc =
-        Boolean(sourcePageRow) &&
-        !hasAnyInStorageDoc &&
-        typeof tx.$queryRaw === 'function' &&
-        typeof tx.$executeRaw === 'function';
-
-      if (canProbeStoredProc) {
-        const procRows = await Promise.resolve(
-          tx.$queryRaw<
-            Array<{ exists?: boolean }>
-          >`SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'clone_page_virtual_tree') AS "exists"`,
-        ).catch(() => []);
-        if (Array.isArray(procRows) && Boolean(procRows[0]?.exists)) {
-          await tx.$executeRaw`
-            CALL clone_page_virtual_tree(
-              ${sourcePageId}::uuid,
-              ${newPageId}::uuid,
-              ${spaceId}::uuid,
-              ${newPageTitle}::varchar,
-              ${validActorId}::uuid
-            )
-          `;
-          return;
-        }
-      }
-
-      // Prototype Batch Clone in-transaction (O(2 + depth) DB round-trips instead of O(D + F + N))
-      if (tx.page?.create || tx.page?.upsert) {
-        const pagePayload = {
-          id: newPageId,
-          spaceId,
-          rootDocId: null,
-          title: newPageTitle,
-          description: sourcePageRow?.description ?? null,
-          status: 'draft' as const,
-          compiler: sourcePageRow?.compiler || 'pdflatex',
-          texlive: sourcePageRow?.texlive || '2025',
-          spellLang: sourcePageRow?.spellLang || 'en_US',
-          settings:
-            (sourcePageRow?.settings as Prisma.InputJsonValue | undefined) ??
-            {},
-          createdById: validActorId ?? sourcePageRow?.createdById ?? null,
-        };
-        if (tx.page.create) {
-          await tx.page.create({ data: pagePayload });
-        } else if (tx.page.upsert) {
-          await tx.page.upsert({
-            where: { id: newPageId },
-            create: pagePayload,
-            update: { title: newPageTitle },
-          });
-        }
-      }
-
-      const plan = buildClonePlan({
-        spaceId,
-        newPageId,
-        newPageTitle,
-        sourceDocs,
-        sourceRootDocId: sourceRootDoc?.id ?? null,
-        hydratedDocLinesById,
-        sourceFiles,
-        sourceNodes,
+  public async duplicatePage(
+    pageId: string,
+    authorizedProjectId?: string | { id: string } | null,
+    userId?: string | null,
+  ) {
+    if (!isUuid(pageId)) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Page ${pageId} not found`,
       });
-      blobIncrements.clear();
-      for (const [blobId, count] of plan.blobIncrements.entries()) {
-        blobIncrements.set(blobId, count);
-      }
-
-      if (plan.docsToCreate.length > 0) {
-        if (tx.pageDoc.createMany) {
-          await tx.pageDoc.createMany({ data: plan.docsToCreate });
-        } else {
-          for (const docData of plan.docsToCreate) {
-            await tx.pageDoc.create({ data: docData });
-          }
-        }
-      }
-
-      if (plan.clonedRootDocId && (tx.page?.updateMany || tx.page?.update)) {
-        if (tx.page.updateMany) {
-          await tx.page.updateMany({
-            where: { id: newPageId, spaceId },
-            data: { rootDocId: plan.clonedRootDocId },
-          });
-        } else if (tx.page.update) {
-          await tx.page.update({
-            where: { id: newPageId },
-            data: { rootDocId: plan.clonedRootDocId },
-          });
-        }
-      }
-
-      if (plan.filesToCreate.length > 0) {
-        if (tx.pageFile?.createMany) {
-          await tx.pageFile.createMany({ data: plan.filesToCreate });
-        } else if (tx.pageFile?.create) {
-          for (const fileData of plan.filesToCreate) {
-            await tx.pageFile.create({ data: fileData });
-          }
-        }
-      }
-
-      const sortedDepths = Array.from(plan.nodeBatchesByDepth.keys()).sort(
-        (a, b) => a - b,
-      );
-      for (const depth of sortedDepths) {
-        const batch = plan.nodeBatchesByDepth.get(depth);
-        if (!batch || batch.length === 0) continue;
-        if (tx.pageNode?.createMany) {
-          await tx.pageNode.createMany({ data: batch });
-        } else if (tx.pageNode?.create) {
-          for (const nodeData of batch) {
-            await tx.pageNode.create({ data: nodeData });
-          }
-        }
-      }
-    });
-  } catch (err) {
-    if (quotaReserved && typeof filesPort?.releaseQuota === 'function') {
-      await Promise.resolve(
-        filesPort.releaseQuota(spaceId, totalClonedBytes),
-      ).catch(() => undefined);
     }
-    throw err;
-  }
 
-  if (filesPort && blobIncrements.size > 0) {
-    const acquireCalls: Array<Promise<unknown>> = [];
-    for (const [blobId, incrementBy] of blobIncrements.entries()) {
-      for (let i = 0; i < incrementBy; i++) {
-        acquireCalls.push(
-          Promise.resolve(filesPort.acquireBlob(blobId)).catch(() => null),
-        );
-      }
-    }
-    await Promise.all(acquireCalls);
-  }
+    const targetProjectId = resolveActiveProjectId(authorizedProjectId);
 
-  const rootLines = sourceRootDoc
-    ? (hydratedDocLinesById.get(sourceRootDoc.id) ?? [])
-    : [];
-  const content = rootLines.join('\n');
-
-  eventEmitter?.emit('pages.file-tree.change', {
-    projectId: spaceId,
-    change: {
-      action: 'page_duplicated',
-      pageId: newPageId,
-      sourcePageId,
-    },
-  });
-
-  return {
-    page: {
-      id: newPageId,
-      title: newPageTitle,
-      description: sourcePageRow?.description ?? '',
-      content,
-      status: 'draft',
-      projectId: spaceId,
-      mainFile: { id: newPageId, title: rootFileName },
-      mainFileId: newPageId,
-      rootPageId: newPageId,
-      version: 1,
-      rev: 1,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    mainFile: { id: newPageId, title: rootFileName },
-    rootPageId: newPageId,
-    mainFileId: newPageId,
-  };
-}
-
-export async function duplicatePageHelper(
-  ctx: Pick<
-    PageLifecycleContext,
-    | 'prisma'
-    | 'docstoreService'
-    | 'pageScopeRepo'
-    | 'liveCollab'
-    | 'eventEmitter'
-    | 'filesPort'
-  >,
-  pageId: string,
-  authorizedProjectId?: string | { id: string } | null,
-  userId?: string | null,
-) {
-  if (!isUuid(pageId)) {
-    throw new NotFoundException({
-      statusCode: 404,
-      code: 'RESOURCE_NOT_FOUND',
-      message: `Page ${pageId} not found`,
-    });
-  }
-
-  const targetProjectId = resolveActiveProjectId(authorizedProjectId);
-
-  const directPageRow = ctx.prisma.page?.findUnique
-    ? await Promise.resolve(
-        ctx.prisma.page.findUnique({
-          where: { id: pageId },
-        }),
-      ).catch(() => null)
-    : null;
-
-  const validDirectPage =
-    directPageRow &&
-    !isRecordDeleted(directPageRow) &&
-    (!targetProjectId || getRecordSpaceId(directPageRow) === targetProjectId)
-      ? directPageRow
-      : null;
-
-  let entryDoc = targetProjectId
-    ? await ctx.pageScopeRepo.findDocInProject(targetProjectId, pageId)
-    : await ctx.prisma.pageDoc.findUnique({
-        where: { id: pageId },
-      });
-
-  if ((!entryDoc || isRecordDeleted(entryDoc)) && validDirectPage?.rootDocId) {
-    entryDoc = targetProjectId
-      ? await ctx.pageScopeRepo.findDocInProject(
-          targetProjectId,
-          validDirectPage.rootDocId,
-        )
-      : await ctx.prisma.pageDoc.findUnique({
-          where: { id: validDirectPage.rootDocId },
-        });
-  }
-
-  const validEntryDoc =
-    entryDoc && !isRecordDeleted(entryDoc) ? entryDoc : null;
-
-  if (!validDirectPage && !validEntryDoc) {
-    throw new NotFoundException({
-      statusCode: 404,
-      code: 'RESOURCE_NOT_FOUND',
-      message: `Page ${pageId} not found`,
-    });
-  }
-
-  const spaceId =
-    getRecordSpaceId(validDirectPage) ||
-    getRecordSpaceId(validEntryDoc) ||
-    targetProjectId ||
-    '';
-
-  const sourcePageId =
-    validDirectPage?.id ||
-    validEntryDoc?.pageId ||
-    (await ensureCanonicalPageId(ctx.prisma, spaceId, pageId));
-
-  let sourcePageRow = validDirectPage;
-  if (!sourcePageRow && ctx.prisma.page?.findUnique && isUuid(sourcePageId)) {
-    const lookedUpPage = await Promise.resolve(
-      ctx.prisma.page.findUnique({
-        where: { id: sourcePageId },
-      }),
-    ).catch(() => null);
-    if (
-      lookedUpPage &&
-      !isRecordDeleted(lookedUpPage) &&
-      getRecordSpaceId(lookedUpPage) === spaceId
-    ) {
-      sourcePageRow = lookedUpPage;
-    }
-  }
-
-  if (ctx.liveCollab && spaceId) {
-    const pageDocsToFlush = ctx.prisma.pageDoc?.findMany
+    const directPageRow = this.prisma.page?.findUnique
       ? await Promise.resolve(
-          ctx.prisma.pageDoc.findMany({
-            where: { spaceId, pageId: sourcePageId, deletedAt: null },
-            select: { id: true },
+          this.prisma.page.findUnique({
+            where: { id: pageId },
           }),
         ).catch(() => null)
       : null;
-    const docIdsToFlush = Array.from(
-      new Set([
-        ...(Array.isArray(pageDocsToFlush)
-          ? pageDocsToFlush.map((d) => d.id)
-          : []),
-        ...(validEntryDoc?.id ? [validEntryDoc.id] : [pageId]),
-      ]),
-    );
-    await ctx.liveCollab.flushDocs(spaceId, docIdsToFlush).catch(() => []);
-  }
 
-  return duplicateSourcePageAndNode(
-    ctx.prisma,
-    ctx.docstoreService,
-    ctx.eventEmitter,
-    {
+    const validDirectPage =
+      directPageRow &&
+      !isRecordDeleted(directPageRow) &&
+      (!targetProjectId || getRecordSpaceId(directPageRow) === targetProjectId)
+        ? directPageRow
+        : null;
+
+    let entryDoc = targetProjectId
+      ? await this.pageScopeRepo.findDocInProject(targetProjectId, pageId)
+      : await this.prisma.pageDoc.findUnique({
+          where: { id: pageId },
+        });
+
+    if (
+      (!entryDoc || isRecordDeleted(entryDoc)) &&
+      validDirectPage?.rootDocId
+    ) {
+      entryDoc = targetProjectId
+        ? await this.pageScopeRepo.findDocInProject(
+            targetProjectId,
+            validDirectPage.rootDocId,
+          )
+        : await this.prisma.pageDoc.findUnique({
+            where: { id: validDirectPage.rootDocId },
+          });
+    }
+
+    let validEntryDoc =
+      entryDoc && !isRecordDeleted(entryDoc) ? entryDoc : null;
+
+    if (!validDirectPage && !validEntryDoc) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'RESOURCE_NOT_FOUND',
+        message: `Page ${pageId} not found`,
+      });
+    }
+
+    const spaceId =
+      getRecordSpaceId(validDirectPage) ||
+      getRecordSpaceId(validEntryDoc) ||
+      targetProjectId ||
+      '';
+
+    const sourcePageId =
+      validDirectPage?.id ||
+      validEntryDoc?.pageId ||
+      (await ensureCanonicalPageId(this.prisma, spaceId, pageId));
+
+    let sourcePageRow = validDirectPage;
+    if (
+      !sourcePageRow &&
+      this.prisma.page?.findUnique &&
+      isUuid(sourcePageId)
+    ) {
+      const lookedUpPage = await Promise.resolve(
+        this.prisma.page.findUnique({
+          where: { id: sourcePageId },
+        }),
+      ).catch(() => null);
+      if (
+        lookedUpPage &&
+        !isRecordDeleted(lookedUpPage) &&
+        getRecordSpaceId(lookedUpPage) === spaceId
+      ) {
+        sourcePageRow = lookedUpPage;
+      }
+    }
+
+    // Live-Flush Invariant: flush all active Yjs sessions of the source Page BEFORE reading PageDoc.lines
+    // so unsaved live edits are persisted and included in the cloned Page.
+    if (spaceId) {
+      const pageDocsToFlush = this.prisma.pageDoc?.findMany
+        ? await Promise.resolve(
+            this.prisma.pageDoc.findMany({
+              where: { spaceId, pageId: sourcePageId, deletedAt: null },
+              select: { id: true },
+            }),
+          ).catch(() => null)
+        : null;
+      const docIdsToFlush = Array.from(
+        new Set([
+          ...(Array.isArray(pageDocsToFlush)
+            ? pageDocsToFlush.map((d) => d.id)
+            : []),
+          ...(sourcePageRow?.rootDocId ? [sourcePageRow.rootDocId] : []),
+          ...(validEntryDoc?.id ? [validEntryDoc.id] : [pageId]),
+        ]),
+      );
+      const flushedIds = await this.liveCollab
+        .flushDocs(spaceId, docIdsToFlush)
+        .catch((): string[] => []);
+      if (
+        Array.isArray(flushedIds) &&
+        flushedIds.length > 0 &&
+        validEntryDoc &&
+        flushedIds.includes(validEntryDoc.id)
+      ) {
+        const refreshedEntry = targetProjectId
+          ? await this.pageScopeRepo.findDocInProject(
+              targetProjectId,
+              validEntryDoc.id,
+            )
+          : await this.prisma.pageDoc.findUnique({
+              where: { id: validEntryDoc.id },
+            });
+        if (refreshedEntry && !isRecordDeleted(refreshedEntry)) {
+          validEntryDoc = refreshedEntry;
+        }
+      }
+    }
+
+    return this.cloneSourcePageTree({
       spaceId,
       sourcePageId,
       sourcePageRow,
       fallbackDoc: validEntryDoc,
       actorId: userId,
-    },
-    ctx.filesPort,
-  );
+    });
+  }
+
+  private async cloneSourcePageTree(input: DuplicatePageSourceInput) {
+    const { spaceId, sourcePageId, sourcePageRow, fallbackDoc, actorId } =
+      input;
+    const validActorId = actorId && isUuid(actorId) ? actorId : null;
+
+    const [fetchedDocs, fetchedFiles, fetchedNodes] = await Promise.all([
+      this.prisma.pageDoc?.findMany
+        ? Promise.resolve(
+            this.prisma.pageDoc.findMany({
+              where: { spaceId, pageId: sourcePageId, deletedAt: null },
+              orderBy: { createdAt: 'asc' },
+            }),
+          ).catch(() => null)
+        : Promise.resolve(null),
+      this.prisma.pageFile?.findMany
+        ? Promise.resolve(
+            this.prisma.pageFile.findMany({
+              where: { spaceId, pageId: sourcePageId, deletedAt: null },
+              orderBy: { createdAt: 'asc' },
+            }),
+          ).catch(() => [])
+        : Promise.resolve([]),
+      this.prisma.pageNode?.findMany
+        ? Promise.resolve(
+            this.prisma.pageNode.findMany({
+              where: { spaceId, pageId: sourcePageId },
+              orderBy: [{ depth: 'asc' }, { sortOrder: 'asc' }],
+            }),
+          ).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+
+    const sourceDocs: PageDoc[] =
+      Array.isArray(fetchedDocs) && fetchedDocs.length > 0
+        ? fetchedDocs
+        : fallbackDoc
+          ? [fallbackDoc]
+          : [];
+    const sourceFiles = Array.isArray(fetchedFiles) ? fetchedFiles : [];
+    const sourceNodes = Array.isArray(fetchedNodes) ? fetchedNodes : [];
+
+    const sourceRootDoc =
+      (sourcePageRow?.rootDocId
+        ? sourceDocs.find((d) => d.id === sourcePageRow.rootDocId)
+        : undefined) ||
+      (fallbackDoc
+        ? sourceDocs.find((d) => d.id === fallbackDoc.id)
+        : undefined) ||
+      sourceDocs[0] ||
+      fallbackDoc ||
+      undefined;
+
+    const rootRanges =
+      sourceRootDoc?.ranges && typeof sourceRootDoc.ranges === 'object'
+        ? (sourceRootDoc.ranges as Record<string, unknown>)
+        : {};
+    const rawBaseTitle =
+      (typeof rootRanges.title === 'string' && rootRanges.title.trim()) ||
+      sourcePageRow?.title?.trim() ||
+      NodePathVo.toRelative(
+        sourceRootDoc?.lastKnownPath ||
+          (sourceRootDoc as { path?: string } | undefined)?.path ||
+          '',
+      ) ||
+      'Untitled';
+    const baseTitleWithoutCopy =
+      rawBaseTitle.replace(/ \(Copy(?: \d+)?\)$/i, '').trim() || 'Untitled';
+
+    let existingTitles = new Set<string>();
+    if (this.prisma.page?.findMany) {
+      const existingPages = await Promise.resolve(
+        this.prisma.page.findMany({
+          where: { spaceId, deletedAt: null },
+          select: { title: true },
+        }),
+      ).catch(() => []);
+      if (Array.isArray(existingPages)) {
+        existingTitles = new Set(
+          existingPages
+            .map((p) =>
+              typeof p?.title === 'string' ? p.title.trim().toLowerCase() : '',
+            )
+            .filter(Boolean),
+        );
+      }
+    }
+
+    let newPageTitle = `${baseTitleWithoutCopy} (Copy)`;
+    let copyIdx = 1;
+    while (existingTitles.has(newPageTitle.toLowerCase()) && copyIdx <= 100) {
+      copyIdx++;
+      newPageTitle = `${baseTitleWithoutCopy} (Copy ${copyIdx})`;
+    }
+
+    const hydratedEntries = await Promise.all(
+      sourceDocs.map(
+        async (doc): Promise<[string, string[]]> => [
+          doc.id,
+          await hydratePageDocLines(this.docstoreService, doc),
+        ],
+      ),
+    );
+    const hydratedDocLinesById = new Map<string, string[]>(hydratedEntries);
+
+    const newPageId = crypto.randomUUID();
+    const rootFilePath =
+      sourceRootDoc?.lastKnownPath ||
+      (sourceRootDoc as { path?: string } | undefined)?.path ||
+      'main.tex';
+    const rootFileName = NodePathVo.toRelative(rootFilePath) || 'main.tex';
+    const nowIso = new Date().toISOString();
+
+    const plan = buildClonePlan({
+      spaceId,
+      newPageId,
+      newPageTitle,
+      sourceDocs,
+      sourceRootDocId: sourceRootDoc?.id ?? null,
+      hydratedDocLinesById,
+      sourceFiles,
+      sourceNodes,
+    });
+
+    let totalClonedBytes = 0n;
+    for (const file of sourceFiles) {
+      const fileSize = Math.max(0, Number(file.sizeBytes ?? 0));
+      if (fileSize > 0) {
+        totalClonedBytes += BigInt(fileSize);
+      }
+    }
+
+    let quotaReserved = false;
+    if (
+      totalClonedBytes > 0n &&
+      typeof this.filesPort?.reserveQuota === 'function'
+    ) {
+      await this.filesPort.reserveQuota(spaceId, totalClonedBytes);
+      quotaReserved = true;
+    }
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Single-transaction Prisma batch clone (O(2 + depth) DB round-trips)
+        if (tx.page?.create || tx.page?.upsert) {
+          const pagePayload = {
+            id: newPageId,
+            spaceId,
+            rootDocId: null,
+            title: newPageTitle,
+            description: sourcePageRow?.description ?? null,
+            status: 'draft' as const,
+            compiler: sourcePageRow?.compiler || 'pdflatex',
+            texlive: sourcePageRow?.texlive || '2025',
+            spellLang: sourcePageRow?.spellLang || 'en_US',
+            settings:
+              (sourcePageRow?.settings as Prisma.InputJsonValue | undefined) ??
+              {},
+            createdById: validActorId ?? sourcePageRow?.createdById ?? null,
+          };
+          if (tx.page.create) {
+            await tx.page.create({ data: pagePayload });
+          } else if (tx.page.upsert) {
+            await tx.page.upsert({
+              where: { id: newPageId },
+              create: pagePayload,
+              update: { title: newPageTitle },
+            });
+          }
+        }
+
+        if (plan.docsToCreate.length > 0) {
+          if (tx.pageDoc?.createMany) {
+            await tx.pageDoc.createMany({ data: plan.docsToCreate });
+          } else if (tx.pageDoc?.create) {
+            for (const docData of plan.docsToCreate) {
+              await tx.pageDoc.create({ data: docData });
+            }
+          }
+        }
+
+        if (plan.clonedRootDocId && (tx.page?.updateMany || tx.page?.update)) {
+          if (tx.page.updateMany) {
+            await tx.page.updateMany({
+              where: { id: newPageId, spaceId },
+              data: { rootDocId: plan.clonedRootDocId },
+            });
+          } else if (tx.page.update) {
+            await tx.page.update({
+              where: { id: newPageId },
+              data: { rootDocId: plan.clonedRootDocId },
+            });
+          }
+        }
+
+        if (plan.filesToCreate.length > 0) {
+          if (tx.pageFile?.createMany) {
+            await tx.pageFile.createMany({ data: plan.filesToCreate });
+          } else if (tx.pageFile?.create) {
+            for (const fileData of plan.filesToCreate) {
+              await tx.pageFile.create({ data: fileData });
+            }
+          }
+        }
+
+        const sortedDepths = Array.from(plan.nodeBatchesByDepth.keys()).sort(
+          (a, b) => a - b,
+        );
+        for (const depth of sortedDepths) {
+          const batch = plan.nodeBatchesByDepth.get(depth);
+          if (!batch || batch.length === 0) continue;
+          if (tx.pageNode?.createMany) {
+            await tx.pageNode.createMany({ data: batch });
+          } else if (tx.pageNode?.create) {
+            for (const nodeData of batch) {
+              await tx.pageNode.create({ data: nodeData });
+            }
+          }
+        }
+      });
+    } catch (err) {
+      if (quotaReserved && typeof this.filesPort?.releaseQuota === 'function') {
+        await Promise.resolve(
+          this.filesPort.releaseQuota(spaceId, totalClonedBytes),
+        ).catch(() => undefined);
+      }
+      throw err;
+    }
+
+    if (this.filesPort && plan.blobIncrements.size > 0) {
+      const acquireCalls: Array<Promise<unknown>> = [];
+      for (const [blobId, incrementBy] of plan.blobIncrements.entries()) {
+        for (let i = 0; i < incrementBy; i++) {
+          acquireCalls.push(
+            Promise.resolve(this.filesPort.acquireBlob(blobId)).catch(
+              () => null,
+            ),
+          );
+        }
+      }
+      await Promise.all(acquireCalls);
+    }
+
+    const rootLines = sourceRootDoc
+      ? (hydratedDocLinesById.get(sourceRootDoc.id) ?? [])
+      : [];
+    const content = rootLines.join('\n');
+
+    this.eventEmitter?.emit('pages.file-tree.change', {
+      projectId: spaceId,
+      change: {
+        action: 'page_duplicated',
+        pageId: newPageId,
+        sourcePageId,
+      },
+    });
+
+    return {
+      page: {
+        id: newPageId,
+        title: newPageTitle,
+        description: sourcePageRow?.description ?? '',
+        content,
+        status: 'draft',
+        projectId: spaceId,
+        mainFile: { id: newPageId, title: rootFileName },
+        mainFileId: newPageId,
+        rootPageId: newPageId,
+        version: 1,
+        rev: 1,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+      mainFile: { id: newPageId, title: rootFileName },
+      rootPageId: newPageId,
+      mainFileId: newPageId,
+    };
+  }
 }

@@ -30,7 +30,7 @@ import {
 } from '../dto/review.dto';
 import { CommentsService } from '../services/comments.service';
 
-@ApiTags('Manuscripts - Pages Review & Comments')
+@ApiTags('Pages - Review & Comments')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages/docs/:docId/comments')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)

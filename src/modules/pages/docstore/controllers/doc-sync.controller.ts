@@ -27,14 +27,12 @@ import {
 } from '@/modules/project/access';
 import { isUuid } from '@/core';
 import {
-  getRecordSpaceId,
-  resolveActiveProjectId,
-} from '@/modules/pages/core/utils/page-scope';
-import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
+  getRecordSpaceId,
+  resolveActiveProjectId,
+} from '@/modules/pages/core';
 import { PageService } from '@/modules/pages/page/services/page.service';
 import { DocstoreService } from '../docstore.service';
 import { ScopeRepository } from '../repositories/scope.repository';

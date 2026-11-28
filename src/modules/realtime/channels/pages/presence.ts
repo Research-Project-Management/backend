@@ -306,8 +306,10 @@ export class RoomPresenceStore {
     if (this.isRedisActive()) {
       try {
         const client = this.redis!.getClient()!;
+        const docRoomKey = PAGES_REDIS_KEYS.docRoom(projectId, docId);
         await Promise.all([
-          client.sadd(PAGES_REDIS_KEYS.docRoom(projectId, docId), socketId),
+          client.sadd(docRoomKey, socketId),
+          client.expire(docRoomKey, this.sessionTtlSeconds * 2),
           client.set(
             PAGES_REDIS_KEYS.presence(socketId),
             JSON.stringify(session),

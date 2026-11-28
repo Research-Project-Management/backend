@@ -8,12 +8,12 @@ import { Readable } from 'node:stream';
 import { PageFile as PrismaPageFile } from '@prisma/client';
 import { PrismaService, isUuid } from '@/core';
 import {
+  NodePathVo,
   ensureCanonicalPageId,
+  ensurePrismaFolderChain,
   filterRecordsByPageScope,
   resolveCanonicalPageId,
-} from '@/modules/pages/core/utils/page-scope';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { ensurePrismaFolderChain } from '@/modules/pages/core/utils/folder-chain';
+} from '@/modules/pages/core';
 import { IBinaryStoragePort } from './domain/filestore.ports';
 import {
   StorageObjectMetadata,
@@ -29,14 +29,12 @@ import {
 import { DuplicateFileException } from './domain/filestore.errors';
 import {
   ContentHasherAdapter,
-  CryptoGitBlobHasherAdapter,
   PlatformBinaryStorageAdapter,
   LocalDiskBinaryStorageAdapter,
 } from './adapters/filestore.adapters';
 
 export {
   ContentHasherAdapter,
-  CryptoGitBlobHasherAdapter,
   PlatformBinaryStorageAdapter,
   LocalDiskBinaryStorageAdapter,
 };
@@ -120,12 +118,8 @@ export class FilestoreRepository {
     return this.hasher.hashStream(stream);
   }
 
-  public hashBuffer(buffer: Buffer): StreamHashResult {
-    return this.hasher.hashBuffer(buffer);
-  }
-
   public buildStorageKey(hash: ContentHash, prefix = 'blobs'): StorageKey {
-    return this.hasher.buildStorageKey(hash, prefix);
+    return StorageKey.fromHash(hash, prefix);
   }
 
   public async sendStream(
@@ -456,13 +450,6 @@ export class FilestoreRepository {
     );
   }
 
-  public async findById(id: string): Promise<PageBinaryAsset | null> {
-    const record = await this.prisma.pageFile.findUnique({
-      where: { id },
-    });
-    return record ? PageBinaryAssetMapper.toDomain(record) : null;
-  }
-
   public async findByProjectAndId(
     projectId: string,
     id: string,
@@ -640,16 +627,6 @@ export class FilestoreRepository {
     return result.count > 0;
   }
 
-  public async findByHash(hash: string): Promise<PageBinaryAsset[]> {
-    const records = await this.prisma.pageFile.findMany({
-      where: {
-        hash,
-        deletedAt: null,
-      },
-    });
-    return records.map(PageBinaryAssetMapper.toDomain);
-  }
-
   public async listByProject(
     projectId: string,
     includeDeleted = false,
@@ -666,18 +643,6 @@ export class FilestoreRepository {
       ? filterRecordsByPageScope(records, pageId, projectId)
       : records;
     return scopedRecords.map(PageBinaryAssetMapper.toDomain);
-  }
-
-  public async delete(id: string): Promise<void> {
-    await this.prisma.pageFile.update({
-      where: { id },
-      data: {
-        deletedAt: new Date(),
-      },
-    });
-    await this.prisma.pageNode?.deleteMany?.({
-      where: { fileId: id },
-    });
   }
 
   public async countReferencesByHash(hash: string): Promise<number> {

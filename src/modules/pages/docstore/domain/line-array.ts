@@ -45,14 +45,6 @@ export class LineArray {
   }
 
   /**
-   * Joins lines array into single raw text string with Unix LF (\n).
-   */
-  public static linesToText(lines: string[]): string {
-    if (!lines || lines.length === 0) return '';
-    return lines.join('\n');
-  }
-
-  /**
    * Validates lines array byte size against maximum limit.
    */
   public static validateLinesSize(
@@ -73,21 +65,4 @@ export class LineArray {
     }
     return totalBytes;
   }
-
-  /**
-   * Applies an in-place splice operation on the lines array.
-   */
-  public static applySplice(
-    currentLines: string[],
-    startLine: number,
-    deleteCount: number,
-    newLines: string[],
-  ): string[] {
-    const updated = [...currentLines];
-    const safeStart = Math.max(0, Math.min(startLine, updated.length));
-    updated.splice(safeStart, deleteCount, ...newLines);
-    return updated;
-  }
 }
-
-export const textToLines = LineArray.textToLines;

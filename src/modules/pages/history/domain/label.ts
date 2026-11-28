@@ -4,7 +4,7 @@
  */
 
 import * as crypto from 'node:crypto';
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 export interface CreateVersionLabelProps {
   id?: string;
@@ -30,7 +30,6 @@ export class InvalidVersionLabelException extends PagesDomainError {
 
 export class VersionLabel {
   private readonly _id: string;
-  private readonly _projectId: string;
   private readonly _spaceId: string;
   private readonly _pageId: string | undefined;
   private readonly _snapshotId: string;
@@ -45,9 +44,7 @@ export class VersionLabel {
       throw new InvalidVersionLabelException('Version label cannot be empty.');
     }
     this._id = props.id ?? crypto.randomUUID();
-    const resolvedSpaceId = props.spaceId ?? props.projectId;
-    this._projectId = resolvedSpaceId;
-    this._spaceId = resolvedSpaceId;
+    this._spaceId = props.spaceId ?? props.projectId;
     this._pageId = props.pageId;
     this._snapshotId = props.snapshotId;
     this._version = props.version;
@@ -65,7 +62,7 @@ export class VersionLabel {
     return this._id;
   }
   public get projectId(): string {
-    return this._projectId;
+    return this._spaceId;
   }
   public get spaceId(): string {
     return this._spaceId;
@@ -98,5 +95,21 @@ export class VersionLabel {
     }
     this._label = newLabel.trim();
     this._updatedAt = new Date();
+  }
+
+  public toDto(): {
+    id: string;
+    version: number;
+    label: string;
+    createdById?: string | null;
+    createdAt: Date;
+  } {
+    return {
+      id: this._id,
+      version: this._version,
+      label: this._label,
+      createdById: this._createdById,
+      createdAt: this._createdAt,
+    };
   }
 }

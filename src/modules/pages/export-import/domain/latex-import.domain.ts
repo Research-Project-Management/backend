@@ -7,17 +7,11 @@
  */
 
 import * as path from 'node:path';
+import { escapeLatex } from '@/modules/pages/core';
 import { ArchiveEntryVo } from './archive.domain';
 import { InvalidZipArchiveException } from './archive.errors';
 import type { TranspiledProjectResult } from '../types/archive.types';
-import {
-  escapeLatex,
-  sanitizeLatexUrl,
-  unescapeXml,
-} from './latex-export.domain';
-
-export { escapeLatex, sanitizeLatexUrl, unescapeXml };
-export type { TranspiledProjectResult };
+import { sanitizeLatexUrl, unescapeXml } from './latex-export.domain';
 
 export type SupportedImportFormat = 'docx' | 'md';
 

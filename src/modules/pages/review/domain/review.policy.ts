@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import type { ReviewRoundInfo } from '@/modules/pages/docstore/domain/doc-range';
+import type { ReviewRoundInfo } from '@/modules/pages/docstore';
 import { Role } from '@/modules/project/access';
 
 export const REVIEW_STATUSES = [
@@ -13,112 +13,61 @@ export const REVIEW_STATUSES = [
 
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
-export const REVIEW_TRANSITIONS: Record<ReviewStatus, readonly ReviewStatus[]> =
-  {
-    draft: ['in_review'],
-    in_review: ['changes_requested', 'approved', 'draft'],
-    changes_requested: ['in_review', 'draft'],
-    approved: ['submitted', 'in_review', 'draft'],
-    submitted: ['locked', 'in_review', 'draft'],
-    locked: ['draft'],
-  };
+const REVIEW_TRANSITIONS: Record<ReviewStatus, readonly ReviewStatus[]> = {
+  draft: ['in_review'],
+  in_review: ['changes_requested', 'approved', 'draft'],
+  changes_requested: ['in_review', 'draft'],
+  approved: ['submitted', 'in_review', 'draft'],
+  submitted: ['locked', 'in_review', 'draft'],
+  locked: ['draft'],
+};
 
-export function isReviewTransitionAllowed(
-  from: ReviewRoundInfo['status'],
-  to: ReviewStatus,
-): boolean {
-  if (from === to) return true;
-  return REVIEW_TRANSITIONS[from]?.includes(to) ?? false;
-}
+const PRIVILEGED_ROLES = new Set(['owner', 'coordinator']);
+const CONTRIBUTOR_OR_ABOVE = new Set(['owner', 'coordinator', 'contributor']);
+const PRIVILEGED_TARGET_STATUSES = new Set<ReviewStatus>([
+  'draft',
+  'submitted',
+  'locked',
+]);
 
-export interface ReviewTransitionCandidate {
+export function assertReviewTransitionAllowed(candidate: {
   role: string;
   fromStatus: ReviewRoundInfo['status'];
   toStatus: ReviewStatus;
-}
+}): void {
+  const normalizedRole = (candidate.role || '').trim().toLowerCase();
+  const { fromStatus, toStatus } = candidate;
 
-export interface ReviewPolicySpec {
-  isSatisfiedBy(candidate: ReviewTransitionCandidate): boolean;
-  readonly violationReason: (candidate: ReviewTransitionCandidate) => string;
-  readonly violationType: 'forbidden' | 'bad_request';
-}
-
-export class ReviewTransitionPolicy {
-  private static readonly PRIVILEGED_ROLES = new Set(['owner', 'coordinator']);
-  private static readonly CONTRIBUTOR_OR_ABOVE = new Set([
-    'owner',
-    'coordinator',
-    'contributor',
-  ]);
-  private static readonly PRIVILEGED_TARGET_STATUSES = new Set<ReviewStatus>([
-    'draft',
-    'submitted',
-    'locked',
-  ]);
-
-  private static normalizeRole(role: string): string {
-    return (role || '').trim().toLowerCase();
+  if (
+    PRIVILEGED_TARGET_STATUSES.has(toStatus) &&
+    !PRIVILEGED_ROLES.has(normalizedRole)
+  ) {
+    throw new ForbiddenException(
+      'Only project owner or coordinator can set status to draft, submitted, or locked',
+    );
   }
 
-  private readonly specs: ReadonlyArray<ReviewPolicySpec> = [
-    {
-      violationType: 'forbidden',
-      isSatisfiedBy: ({ role, toStatus }) =>
-        !ReviewTransitionPolicy.PRIVILEGED_TARGET_STATUSES.has(toStatus) ||
-        ReviewTransitionPolicy.PRIVILEGED_ROLES.has(
-          ReviewTransitionPolicy.normalizeRole(role),
-        ),
-      violationReason: () =>
-        'Only project owner or coordinator can set status to draft, submitted, or locked',
-    },
-    {
-      violationType: 'forbidden',
-      isSatisfiedBy: ({ role, toStatus }) =>
-        toStatus !== 'in_review' ||
-        ReviewTransitionPolicy.CONTRIBUTOR_OR_ABOVE.has(
-          ReviewTransitionPolicy.normalizeRole(role),
-        ),
-      violationReason: () =>
-        'Only project contributors or owners can request review',
-    },
-    {
-      violationType: 'forbidden',
-      isSatisfiedBy: ({ role, fromStatus }) =>
-        fromStatus !== 'locked' ||
-        ReviewTransitionPolicy.PRIVILEGED_ROLES.has(
-          ReviewTransitionPolicy.normalizeRole(role),
-        ),
-      violationReason: () =>
-        'Document review is locked; only owner or coordinator can change it',
-    },
-    {
-      violationType: 'bad_request',
-      isSatisfiedBy: ({ fromStatus, toStatus }) =>
-        isReviewTransitionAllowed(fromStatus, toStatus),
-      violationReason: ({ fromStatus, toStatus }) =>
-        `Invalid review transition: ${fromStatus} -> ${toStatus}`,
-    },
-  ];
+  if (toStatus === 'in_review' && !CONTRIBUTOR_OR_ABOVE.has(normalizedRole)) {
+    throw new ForbiddenException(
+      'Only project contributors or owners can request review',
+    );
+  }
 
-  public evaluate(candidate: ReviewTransitionCandidate): {
-    allowed: boolean;
-    violationType?: 'forbidden' | 'bad_request';
-    reason?: string;
-  } {
-    for (const spec of this.specs) {
-      if (!spec.isSatisfiedBy(candidate)) {
-        return {
-          allowed: false,
-          violationType: spec.violationType,
-          reason: spec.violationReason(candidate),
-        };
-      }
-    }
-    return { allowed: true };
+  if (fromStatus === 'locked' && !PRIVILEGED_ROLES.has(normalizedRole)) {
+    throw new ForbiddenException(
+      'Document review is locked; only owner or coordinator can change it',
+    );
+  }
+
+  if (
+    fromStatus !== toStatus &&
+    !(REVIEW_TRANSITIONS[fromStatus]?.includes(toStatus) ?? false)
+  ) {
+    throw new BadRequestException(
+      `Invalid review transition: ${fromStatus} -> ${toStatus}`,
+    );
   }
 }
-
-export const reviewTransitionPolicy = new ReviewTransitionPolicy();
 
 export function validateCommentLines(
   line?: number,

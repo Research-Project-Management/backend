@@ -37,7 +37,8 @@ export class QueryTemplatesDto {
   search?: string;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
+  @MaxLength(64)
   spaceId?: string;
 
   @IsOptional()

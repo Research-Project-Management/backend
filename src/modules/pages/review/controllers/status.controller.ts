@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -22,7 +23,7 @@ import {
 import { UpdateReviewStatusDto } from '../dto/status.dto';
 import { ReviewStatusService } from '../services/status.service';
 
-@ApiTags('Manuscripts - Pages Review & Comments')
+@ApiTags('Pages - Review & Comments')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 @UseGuards(JwtAuthGuard, ProjectAccessGuard)
@@ -34,6 +35,7 @@ export class ReviewStatusController {
   async getOverview(
     @Param('spaceId') spaceId?: string,
     @Param('pageId') pageId?: string,
+    @Query('pageId') queryPageId?: string,
     @Req() req?: AuthenticatedRequest,
     @ResolvedSpace() authSpace?: string | { id: string } | null,
   ) {
@@ -41,7 +43,7 @@ export class ReviewStatusController {
       ?.resolvedPageId;
     return this.statusService.getOverview(
       pageId || spaceId || '',
-      reqPageId,
+      queryPageId || pageId || reqPageId,
       authSpace,
     );
   }

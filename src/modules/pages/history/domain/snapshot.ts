@@ -132,7 +132,6 @@ export interface CreateSnapshotProps {
 
 export class Snapshot {
   private readonly _id: string;
-  private readonly _projectId: string;
   private readonly _spaceId: string;
   private readonly _pageId: string | undefined;
   private readonly _version: number;
@@ -146,9 +145,7 @@ export class Snapshot {
 
   private constructor(props: CreateSnapshotProps) {
     this._id = props.id ?? crypto.randomUUID();
-    const resolvedSpaceId = props.spaceId ?? props.projectId;
-    this._projectId = resolvedSpaceId;
-    this._spaceId = resolvedSpaceId;
+    this._spaceId = props.spaceId ?? props.projectId;
     this._pageId = props.pageId;
     this._version = props.version;
     this._summary = props.summary ?? null;
@@ -177,7 +174,7 @@ export class Snapshot {
       this._files.size === 0 &&
       (this._fileCountOverride === undefined || this._fileCountOverride === 0)
     ) {
-      throw new EmptyProjectException(this._projectId);
+      throw new EmptyProjectException(this._spaceId);
     }
   }
 
@@ -189,7 +186,7 @@ export class Snapshot {
     return this._id;
   }
   public get projectId(): string {
-    return this._projectId;
+    return this._spaceId;
   }
   public get spaceId(): string {
     return this._spaceId;
@@ -234,13 +231,6 @@ export class Snapshot {
       return;
     }
     this._labels.push(label);
-  }
-
-  public removeLabel(labelId: string): void {
-    const idx = this._labels.findIndex((l) => l.id === labelId);
-    if (idx >= 0) {
-      this._labels.splice(idx, 1);
-    }
   }
 
   public toFilesJson(): Record<string, unknown> {

@@ -1,12 +1,12 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AccessService, Role, Permission } from '@/modules/project/access';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
+import { DocstoreService } from '@/modules/pages/docstore';
 import { PrismaService, isUuid } from '@/core';
 import { RealtimeServiceUnavailableException } from '../../core/errors';
 import {
   PAGES_REALTIME_DEFAULTS,
   PagesRealtimeConfigService,
-  isPersonalSpaceAlias,
+  resolvePersonalSpaceId,
 } from './config';
 import type { WsAccessLevel } from './guard';
 
@@ -90,9 +90,7 @@ export class RealtimeAccessService {
     projectId: string,
     userId: string,
   ): Promise<RealtimeProjectAccess> {
-    if (isPersonalSpaceAlias(projectId) && userId) {
-      projectId = userId;
-    }
+    projectId = resolvePersonalSpaceId(projectId, userId);
 
     if (!projectId || !userId || !isUuid(projectId) || !isUuid(userId)) {
       return {
@@ -282,10 +280,7 @@ export class RealtimeAccessService {
     if (!rawId || typeof rawId !== 'string') {
       return { spaceId: rawId };
     }
-    const trimmed = rawId.trim();
-    if (isPersonalSpaceAlias(trimmed) && userId) {
-      return { spaceId: userId };
-    }
+    const trimmed = resolvePersonalSpaceId(rawId.trim(), userId);
     if (!isUuid(trimmed)) {
       return { spaceId: trimmed };
     }

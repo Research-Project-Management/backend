@@ -1,25 +1,19 @@
 /**
  * modules/pages/docstore/docstore.service.ts
  * Deep Module Service orchestrating document store persistence, SHA-256 hashing,
- * cold-tier S3 archive/unarchive, track-change line mutations, and LaTeX export transpilation.
+ * cold-tier S3 archive/unarchive, and Optimistic Concurrency Control (OCC) writes.
  */
 
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Readable } from 'stream';
-import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
 import { mapWithConcurrency } from '@/core';
 
 const gunzipAsync = promisify(zlib.gunzip);
 const gzipAsync = promisify(zlib.gzip);
-import { WorkspaceFile } from '@/modules/pages/core/types/workspace-file';
-import {
-  IDocPersistor,
-  DocstoreMetrics,
-  DocstoreMetricsSummary,
-} from './domain/doc.ports';
-import { computeDocSha256 } from './domain/doc-hasher';
+import { IDocPersistor, DocstoreMetrics } from './domain/doc.ports';
+import { computeContentMd5, computeDocSha256 } from './domain/doc-hasher';
 import { DocstoreRepository } from './repositories/docstore.repository';
 import { TextDoc, NoopDiffChecker } from './domain/text-doc.entity';
 import { DocRanges } from './domain/doc-range';
@@ -91,6 +85,14 @@ export class DocstoreService {
     return `${projectId}/${docId}-${rev}.json`;
   }
 
+  private async readStreamToBuffer(stream: Readable): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
   private async decodeArchivedPayload(rawBuffer: Buffer): Promise<{
     lines: string[];
     ranges?: DocRanges;
@@ -127,10 +129,7 @@ export class DocstoreService {
       process.env.DOCSTORE_ARCHIVE_GZIP !== 'false' &&
       rawBuffer.byteLength >= 4096;
     const finalBuffer = shouldCompress ? await gzipAsync(rawBuffer) : rawBuffer;
-    const sourceMd5 = crypto
-      .createHash('md5')
-      .update(finalBuffer)
-      .digest('hex');
+    const sourceMd5 = computeContentMd5(finalBuffer);
     return {
       buffer: finalBuffer,
       sourceMd5,
@@ -190,15 +189,8 @@ export class DocstoreService {
         const expectedMd5 =
           await this.docPersistor.getObjectMd5Hash(storageKey);
 
-        const chunks: Buffer[] = [];
-        for await (const chunk of stream) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        const rawBuffer = Buffer.concat(chunks);
-        const actualMd5 = crypto
-          .createHash('md5')
-          .update(rawBuffer)
-          .digest('hex');
+        const rawBuffer = await this.readStreamToBuffer(stream);
+        const actualMd5 = computeContentMd5(rawBuffer);
 
         if (expectedMd5 && actualMd5 !== expectedMd5) {
           throw new Md5MismatchError(
@@ -296,11 +288,7 @@ export class DocstoreService {
     }
 
     const stream = await this.docPersistor.getObjectStream(doc.storageKey);
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    const rawBuffer = Buffer.concat(chunks);
+    const rawBuffer = await this.readStreamToBuffer(stream);
     const decoded = await this.decodeArchivedPayload(rawBuffer);
     const lines = decoded.lines;
 
@@ -323,11 +311,6 @@ export class DocstoreService {
     });
 
     return { doc: peekedDoc, status: 'archived' };
-  }
-
-  public async getRawDoc(projectId: string, docId: string): Promise<string> {
-    const doc = await this.getDocEntity(projectId, docId);
-    return doc.toRawText();
   }
 
   public async getAllDocs(
@@ -494,31 +477,29 @@ export class DocstoreService {
     }
   }
 
-  public async archiveDoc(projectId: string, docId: string): Promise<void> {
-    const doc = await this.docRepository.getDoc(projectId, docId);
-    if (!doc) {
-      throw new DocNotFoundError(docId);
-    }
-    if (doc.inStorage) return;
-
+  private serializeArchivePayload(doc: TextDoc): string {
     const payload = JSON.stringify({
       lines: doc.lines,
       ranges: doc.ranges,
       schema_v: 1,
     });
-
     if (payload.indexOf('\u0000') !== -1) {
       throw new NullByteDetectedError(
-        `Null byte detected when archiving doc ${docId}`,
+        `Null byte detected when archiving doc ${doc.id}`,
       );
     }
+    return payload;
+  }
 
+  private async persistArchivedPayload(
+    projectId: string,
+    doc: TextDoc,
+    payload: string,
+    clearLines: boolean,
+  ): Promise<boolean> {
     const key = this.buildArchiveStorageKey(projectId, doc.id, doc.rev);
     const { buffer, sourceMd5 } = await this.encodeArchivePayload(payload);
     const stream = Readable.from(buffer);
-    const clearLines = this.docPersistor.isDurableStorageConfigured
-      ? this.docPersistor.isDurableStorageConfigured()
-      : true;
 
     await this.docPersistor.sendStream(key, stream, { sourceMd5 });
     const archived = await this.docRepository.markAsArchived(
@@ -528,34 +509,38 @@ export class DocstoreService {
       doc.rev,
       clearLines,
     );
-    if (archived) {
-      this.logger.log(`Archived single document ${docId} to S3 cold tier`);
-    } else {
-      await this.docPersistor.deleteObject(key).catch(() => {});
+    if (!archived) {
+      await Promise.resolve(this.docPersistor.deleteObject(key)).catch(
+        () => {},
+      );
       this.logger.warn(
-        `Skipped marking document ${docId} as archived due to concurrent rev modification`,
+        `Skipped marking document ${doc.id} as archived due to concurrent rev modification`,
       );
     }
+    return archived;
   }
 
-  public async isDocDeleted(
-    projectId: string,
-    docId: string,
-  ): Promise<boolean> {
-    const doc = await this.getDocEntity(projectId, docId, {
-      includeDeleted: true,
-    });
-    return doc.deleted;
-  }
+  public async archiveDoc(projectId: string, docId: string): Promise<void> {
+    const doc = await this.docRepository.getDoc(projectId, docId);
+    if (!doc) {
+      throw new DocNotFoundError(docId);
+    }
+    if (doc.inStorage) return;
 
-  public async getAllRanges(
-    projectId: string,
-  ): Promise<{ _id: string; ranges: DocRanges }[]> {
-    const docs = await this.getAllDocEntities(projectId);
-    return docs.map((d) => ({
-      _id: d.id,
-      ranges: d.ranges,
-    }));
+    const payload = this.serializeArchivePayload(doc);
+    const clearLines = this.docPersistor.isDurableStorageConfigured
+      ? this.docPersistor.isDurableStorageConfigured()
+      : true;
+
+    const archived = await this.persistArchivedPayload(
+      projectId,
+      doc,
+      payload,
+      clearLines,
+    );
+    if (archived) {
+      this.logger.log(`Archived single document ${docId} to S3 cold tier`);
+    }
   }
 
   public async archiveAllDocs(projectId: string): Promise<number> {
@@ -564,91 +549,28 @@ export class DocstoreService {
       ? this.docPersistor.isDurableStorageConfigured()
       : true;
 
-    const candidates = docs.filter((doc) => !doc.inStorage);
-    const payloads = candidates.map((doc) => {
-      const payload = JSON.stringify({
-        lines: doc.lines,
-        ranges: doc.ranges,
-        schema_v: 1,
-      });
-
-      if (payload.indexOf('\u0000') !== -1) {
-        throw new NullByteDetectedError(
-          `Null byte detected when archiving doc ${doc.id}`,
-        );
-      }
-      return { doc, payload };
-    });
+    const payloads = docs
+      .filter((doc) => !doc.inStorage)
+      .map((doc) => ({ doc, payload: this.serializeArchivePayload(doc) }));
 
     const results = await mapWithConcurrency(
       payloads,
       COLD_HYDRATION_CONCURRENCY,
       async ({ doc, payload }) => {
-        const key = this.buildArchiveStorageKey(projectId, doc.id, doc.rev);
-        const { buffer, sourceMd5 } = await this.encodeArchivePayload(payload);
-        const stream = Readable.from(buffer);
-
-        await this.docPersistor.sendStream(key, stream, { sourceMd5 });
-        const archived = await this.docRepository.markAsArchived(
+        const archived = await this.persistArchivedPayload(
           projectId,
-          doc.id,
-          key,
-          doc.rev,
+          doc,
+          payload,
           clearLines,
         );
-        if (!archived) {
-          await Promise.resolve(this.docPersistor.deleteObject(key)).catch(
-            () => {},
-          );
-          this.logger.warn(
-            `Skipped marking document ${doc.id} as archived due to concurrent rev modification`,
-          );
-        }
         return archived ? 1 : 0;
       },
     );
 
     const count = results.reduce<number>((sum, v) => sum + v, 0);
-
     this.logger.log(
       `Archived ${count} documents for project ${projectId} to S3 cold tier`,
     );
     return count;
-  }
-
-  public async unArchiveAllDocs(projectId: string): Promise<number> {
-    const docs = await this.docRepository.getAllDocs(projectId);
-    const coldDocs = docs.filter((doc) => doc.inStorage);
-
-    await mapWithConcurrency(
-      coldDocs,
-      COLD_HYDRATION_CONCURRENCY,
-      async (doc) => {
-        await this.getDocEntity(projectId, doc.id);
-      },
-    );
-
-    const count = coldDocs.length;
-    this.logger.log(`Unarchived ${count} documents for project ${projectId}`);
-    return count;
-  }
-
-  public async destroyAllDocs(projectId: string): Promise<number> {
-    return await this.docRepository.destroyAllDocs(projectId);
-  }
-
-  public async getAsWorkspaceFiles(
-    projectId: string,
-  ): Promise<WorkspaceFile[]> {
-    const docs = await this.getAllDocEntities(projectId);
-    return docs.map((doc) => doc.toWorkspaceFile());
-  }
-
-  public getPrometheusMetrics(): string {
-    return DocstoreMetrics.toPrometheus();
-  }
-
-  public getMetricsSummary(): DocstoreMetricsSummary {
-    return DocstoreMetrics.getSummary();
   }
 }

@@ -376,12 +376,6 @@ export class PageBinaryAsset {
     return this._updatedAt;
   }
 
-  public rename(newName: string): void {
-    this._name = PageBinaryAsset.sanitizeFilename(newName);
-    this._rev += 1;
-    this._updatedAt = new Date();
-  }
-
   public markDeleted(): void {
     this._deleted = true;
     this._deletedAt = new Date();

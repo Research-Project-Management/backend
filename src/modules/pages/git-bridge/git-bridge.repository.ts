@@ -268,21 +268,26 @@ export class GitBridgeRepository {
     const page = await this.prisma.page.findUnique({
       where: { id: repoId },
       select: {
+        spaceId: true,
         deletedAt: true,
         createdById: true,
-        space: { select: { ownerUserId: true, projectId: true } },
+        space: { select: { type: true, ownerUserId: true, projectId: true } },
       },
     });
 
     if (page) {
       if (page.deletedAt) return null;
-      if (page.createdById === userId || page.space.ownerUserId === userId) {
-        return 'owner';
+      if (page.space.type === 'personal' || page.space.ownerUserId) {
+        return page.space.ownerUserId === userId || page.spaceId === userId
+          ? 'owner'
+          : null;
       }
       if (page.space.projectId) {
         return this.lookupProjectRole(page.space.projectId, userId);
       }
-      return null;
+      return page.spaceId === userId || page.createdById === userId
+        ? 'owner'
+        : null;
     }
 
     const space = await this.prisma.space.findUnique({

@@ -4,8 +4,8 @@
  *
  * Organized into 5 Core Authoring Subsystems (Topological Dependency Order):
  * - Subsystem 0 (Shared Kernel): PagesCoreModule
- * - Subsystem 1 (Virtual File System & Storage): FilestoreModule -> DocstoreModule -> StructureModule
- * - Subsystem 3 (Compilation & Diagnostics): DiagnosticsModule -> ClsiModule
+ * - Subsystem 1 (Virtual File System & Storage): FilestoreModule -> DocstoreModule -> PageModule -> StructureModule
+ * - Subsystem 3 (Compilation & Diagnostics): ClsiModule
  * - Subsystem 4 (Review & Versioning): ReviewModule -> HistoryModule
  * - Subsystem 5 (Academic Authoring & Packaging): SpellingModule -> CitationsModule -> TemplatesModule -> ExportImportModule -> GitBridgeModule
  * (Note: Subsystem 2 - Real-time Collaboration lives in @/modules/realtime/channels/pages)
@@ -14,28 +14,28 @@
 import { Module } from '@nestjs/common';
 
 // Subsystem 0: Shared Kernel
-import { PagesCoreModule } from './core/core.module';
+import { PagesCoreModule } from './core';
 
 // Subsystem 1: Virtual File System & Storage (Unified with @/modules/files)
-import { FilestoreModule } from './filestore/filestore.module';
-import { DocstoreModule } from './docstore/docstore.module';
-import { PageModule } from './page/page.module';
-import { StructureModule } from './structure/structure.module';
+import { FilestoreModule } from './filestore';
+import { DocstoreModule } from './docstore';
+import { PageModule } from './page';
+import { StructureModule } from './structure';
 
 // Subsystem 3: Compilation
-import { ClsiModule } from './clsi/clsi.module';
+import { ClsiModule } from './clsi';
 
 // Subsystem 4: Review & Versioning
-import { ReviewModule } from './review/review.module';
-import { HistoryModule } from './history/history.module';
+import { ReviewModule } from './review';
+import { HistoryModule } from './history';
 
 // Subsystem 5: Academic Authoring & Packaging
-import { SpellingModule } from './spelling/spelling.module';
-import { CitationsModule } from './citations/citations.module';
-import { TemplatesModule } from './templates/templates.module';
-import { ExportImportModule } from './export-import/export-import.module';
-import { GitBridgeModule } from './git-bridge/git-bridge.module';
-import { EditorBootstrapModule } from './bootstrap/editor-bootstrap.module';
+import { SpellingModule } from './spelling';
+import { CitationsModule } from './citations';
+import { TemplatesModule } from './templates';
+import { ExportImportModule } from './export-import';
+import { GitBridgeModule } from './git-bridge';
+import { EditorBootstrapModule } from './bootstrap';
 
 @Module({
   imports: [

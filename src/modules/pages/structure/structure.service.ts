@@ -10,14 +10,12 @@ import {
   RenameNodeDto,
   TreeNodeDto,
 } from './dto/node.dto';
-import { CompilationPayload } from '@/modules/pages/core/types/workspace-file';
 import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
+  PageDomainEventBus,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
 import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
 import {
   type NodeMutationContext,
@@ -37,13 +35,11 @@ import {
   type ProjectSymbolPackageDto,
   type ProjectSymbolsContext,
   type ProjectSymbolsResponseDto,
-  buildCompilerPayloadHelper,
   getProjectOutlineHelper,
   getProjectSymbolsHelper,
 } from './services/symbols-extractor';
 
 export type {
-  CompilationPayload,
   ProjectSymbolLabelDto,
   ProjectSymbolCitationDto,
   ProjectSymbolCommandDto,
@@ -63,7 +59,6 @@ export class StructureService {
   constructor(
     private readonly repository: StructureRepository,
     @Optional() private readonly realtimeService?: RealtimeFacade,
-    @Optional() private readonly filestoreService?: FilestoreService,
     @Optional() private readonly docstoreService?: DocstoreService,
     @Optional()
     @Inject(PageDomainEventBus)
@@ -87,7 +82,6 @@ export class StructureService {
       logger: this.logger,
       domainEventBus: this.domainEventBus,
       realtimeService: this.realtimeService,
-      filestoreService: this.filestoreService,
       docstoreService: this.docstoreService,
     };
   }
@@ -97,7 +91,6 @@ export class StructureService {
       repository: this.repository,
       logger: this.logger,
       docstoreService: this.docstoreService,
-      filestoreService: this.filestoreService,
       autoDetectRootDoc: (projectId, docContents, existingNodes, pageId) =>
         this.autoDetectRootDoc(projectId, docContents, existingNodes, pageId),
     };
@@ -275,19 +268,6 @@ export class StructureService {
     }
 
     return null;
-  }
-
-  public async buildCompilerPayload(
-    projectId: string,
-    docContentsMap: Map<string, { lines: string[]; hash?: string | null }>,
-    pageId?: string,
-  ): Promise<CompilationPayload> {
-    return await buildCompilerPayloadHelper(
-      this.getSymbolsContext(),
-      projectId,
-      docContentsMap,
-      pageId,
-    );
   }
 
   public async reorderNode(

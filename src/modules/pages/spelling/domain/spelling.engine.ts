@@ -13,6 +13,7 @@ import {
   DICTIONARY_PACKAGES,
   SUPPORTED_LANGUAGES,
   type MisspelledWord,
+  type SpellingLanguage,
   type SpellingReport,
   type SupportedLanguage,
 } from '../types/spelling.types';
@@ -72,13 +73,27 @@ const SKIP_WORD_RULES: ReadonlyArray<(word: string) => boolean> = [
   (word) => LATEX_BUILTINS.has(word.toLowerCase()),
 ];
 
-export function normalizeLanguageCode(raw?: string): SupportedLanguage {
-  if (!raw || !raw.trim()) return 'en-us';
-  const normalized = raw.trim().toLowerCase().replace('_', '-');
-  if (!Object.prototype.hasOwnProperty.call(DICTIONARY_PACKAGES, normalized)) {
+export function normalizeLanguageCode(raw?: string): SpellingLanguage {
+  if (!raw || !raw.trim()) return 'en-US';
+  const cleaned = raw
+    .trim()
+    .replace(/\..*$/, '')
+    .replace(/_/g, '-');
+  if (!cleaned) return 'en-US';
+  if (cleaned.toLowerCase() === 'off') {
+    return 'off';
+  }
+
+  const parts = cleaned.split('-').filter(Boolean);
+  const canonical =
+    parts.length === 2 && parts[1].length === 2
+      ? `${parts[0].toLowerCase()}-${parts[1].toUpperCase()}`
+      : cleaned.toLowerCase();
+
+  if (!Object.prototype.hasOwnProperty.call(DICTIONARY_PACKAGES, canonical)) {
     throw new UnsupportedLanguageException(raw, SUPPORTED_LANGUAGES);
   }
-  return normalized as SupportedLanguage;
+  return canonical as SupportedLanguage;
 }
 
 export function validateCustomWord(raw: string): string {
@@ -214,7 +229,7 @@ export class SpellingEngine {
     maxSuggestions = DEFAULT_MAX_SUGGESTIONS,
   ): Promise<SpellingReport> {
     const language = normalizeLanguageCode(rawLanguage);
-    if (words.length === 0) {
+    if (language === 'off' || words.length === 0) {
       return {
         language,
         totalWordsChecked: 0,

@@ -1,22 +1,21 @@
 import {
+  BUILTIN_TEMPLATES,
+  GalleryService,
+  InstantiateService,
   InvalidTemplateError,
-  TemplateForbiddenError,
-  TemplateNotFoundError,
-} from '@/modules/pages/templates/domain/errors';
-import { BUILTIN_TEMPLATES } from '@/modules/pages/templates/domain/catalog.domain';
-import { TemplateFileVo } from '@/modules/pages/templates/domain/file.domain';
-import { TemplateManifest } from '@/modules/pages/templates/domain/manifest.domain';
-import {
+  PublishService,
   TEMPLATE_CATEGORIES,
   TEMPLATE_SCOPES,
+  TemplateFileVo,
+  TemplateForbiddenError,
+  TemplateManifest,
+  TemplateNotFoundError,
   assertCategory,
   assertScope,
   canManageTemplate,
   canReadTemplate,
-} from '@/modules/pages/templates/domain/policy';
-import { GalleryService } from '@/modules/pages/templates/services/gallery.service';
-import { InstantiateService } from '@/modules/pages/templates/services/instantiate.service';
-import { PublishService } from '@/modules/pages/templates/services/publish.service';
+} from '@/modules/pages/templates';
+import { TemplatesRepository } from '@/modules/pages/templates/templates.repository';
 
 const USER_ALICE = '11111111-1111-4111-8111-111111111111';
 const USER_BOB = '22222222-2222-4222-8222-222222222222';
@@ -320,6 +319,80 @@ describe('Templates Module (Flux Space + Zero-Copy FileBlob + ACID Batch Clone)'
       });
       expect(second.id).toBe(first.id);
       expect(second.name).toBe('Lab Paper Template v2');
+    });
+
+    it('deduplicates FileBlob CAS acquisition across multiple templates sharing the same TemplateBlob hash', async () => {
+      const existingBlobHashes = new Set<string>();
+      const txMock = {
+        templateBlob: {
+          findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+            if ('contentHash' in where) {
+              const hashes = (where.contentHash as { in: string[] }).in;
+              return hashes
+                .filter((h) => existingBlobHashes.has(h))
+                .map((contentHash) => ({ contentHash }));
+            }
+            return [];
+          }),
+          createMany: jest.fn(
+            async ({ data }: { data: Array<{ contentHash: string }> }) => {
+              for (const row of data) existingBlobHashes.add(row.contentHash);
+              return { count: data.length };
+            },
+          ),
+          deleteMany: jest.fn(async () => ({ count: 0 })),
+        },
+        pageTemplate: { upsert: jest.fn(async () => ({})) },
+        pageTemplateFile: {
+          deleteMany: jest.fn(async () => ({ count: 0 })),
+          createMany: jest.fn(async () => ({ count: 2 })),
+        },
+        pageTemplateTag: {
+          deleteMany: jest.fn(async () => ({ count: 0 })),
+          createMany: jest.fn(async () => ({ count: 0 })),
+        },
+      };
+
+      const repo = new TemplatesRepository({
+        $transaction: async <T>(cb: (tx: typeof txMock) => Promise<T>) =>
+          cb(txMock),
+      } as never);
+
+      const sharedLogo = TemplateFileVo.fromAssetRef('logo.png', {
+        blobId: BLOB_LOGO,
+        storageKey: 'cas/logo.png',
+        contentHash: 'e'.repeat(64),
+        mimeType: 'image/png',
+        sizeBytes: 512,
+      });
+      const mainTex = TemplateFileVo.fromText(
+        'main.tex',
+        '\\documentclass{article}\n\\begin{document}Hi\\end{document}',
+      );
+
+      const firstSaved = await repo.saveWithLifecycle(
+        TemplateManifest.create({
+          name: 'Template One',
+          spaceId: USER_ALICE,
+          spaceType: 'personal',
+          createdById: USER_ALICE,
+          files: [mainTex, sharedLogo],
+        }),
+      );
+      expect(firstSaved.acquiredBlobIds).toEqual([BLOB_LOGO]);
+      expect(firstSaved.releasedBlobIds).toEqual([]);
+
+      const secondSaved = await repo.saveWithLifecycle(
+        TemplateManifest.create({
+          name: 'Template Two Sharing Logo',
+          spaceId: USER_ALICE,
+          spaceType: 'personal',
+          createdById: USER_ALICE,
+          files: [mainTex, sharedLogo],
+        }),
+      );
+      expect(secondSaved.acquiredBlobIds).toEqual([]);
+      expect(secondSaved.releasedBlobIds).toEqual([]);
     });
   });
 

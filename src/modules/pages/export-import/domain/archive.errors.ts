@@ -1,4 +1,4 @@
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 export class ZipSlipSecurityException extends PagesDomainError {
   constructor(entryPath: string) {

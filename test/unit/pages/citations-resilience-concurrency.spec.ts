@@ -44,8 +44,6 @@ describe('Pages Citations - Concurrency (Per-Doc Lock & OCC Retry)', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
-      undefined,
       mockLock,
     );
 

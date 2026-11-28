@@ -1,15 +1,13 @@
 import {
   KNOWN_TEXT_EXTENSIONS,
   KNOWN_BINARY_EXTENSIONS,
-} from '@/modules/pages/core/domain/text-extensions';
+} from '@/modules/pages/core';
 import {
   ArchiveFileLimitExceededException,
   ArchiveSizeExceededException,
   InvalidZipArchiveException,
 } from './archive.errors';
 import type { ArchiveEntryVo, EntryStorageType } from './archive.domain';
-
-export { KNOWN_TEXT_EXTENSIONS, KNOWN_BINARY_EXTENSIONS };
 
 export const MAX_SINGLE_FILE_BYTES = 50 * 1024 * 1024;
 export const MAX_UNCOMPRESSED_PROJECT_BYTES = 500 * 1024 * 1024;

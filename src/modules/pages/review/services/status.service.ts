@@ -1,21 +1,23 @@
 import {
-  BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { isUuid } from '@/core';
-import { isPrismaUniqueConstraintError } from '@/modules/pages/core/utils/page-scope';
-import { PageService } from '@/modules/pages/page/services/page.service';
-import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { ReviewRoundInfo } from '@/modules/pages/docstore/domain/doc-range';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+import {
+  UserResolverService,
+  isPrismaUniqueConstraintError,
+} from '@/modules/pages/core';
+import {
+  DocstoreService,
+  ScopeRepository,
+  type ReviewRoundInfo,
+} from '@/modules/pages/docstore';
+import { PageService } from '@/modules/pages/page';
 import { Role } from '@/modules/project/access';
-import { reviewTransitionPolicy } from '../domain/review.policy';
+import { assertReviewTransitionAllowed } from '../domain/review.policy';
 import { UpdateReviewStatusDto } from '../dto/status.dto';
 import { REVIEW_EVENTS, emitReviewEvent } from '../review.events';
 import { ReviewRepository } from '../review.repository';
@@ -36,6 +38,21 @@ export class ReviewStatusService {
     private readonly pageService: PageService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  private resolveTarget(
+    targetId: string,
+    routeSpaceId?: string,
+    authSpace?: string | { id: string } | null,
+  ) {
+    return resolveReviewTarget({
+      scopeRepo: this.scopeRepo,
+      pageService: this.pageService,
+      targetId,
+      authSpace,
+      routeSpaceId,
+      fallbackPrisma: this.repo.getPrisma(),
+    });
+  }
 
   private toPersistencePayload(review: ReviewRoundInfo) {
     return {
@@ -69,14 +86,12 @@ export class ReviewStatusService {
     routeSpaceId?: string,
     authSpace?: string | { id: string } | null,
   ) {
-    const { docId, spaceId } = await resolveReviewTarget({
-      scopeRepo: this.scopeRepo,
-      pageService: this.pageService,
+    const { docId, spaceId, crossSpaceMismatch } = await this.resolveTarget(
       targetId,
-      authSpace: routeSpaceId || authSpace,
-      fallbackPrisma: this.repo.getPrisma(),
-    });
-    if (!docId || !spaceId) {
+      routeSpaceId,
+      authSpace,
+    );
+    if (!docId || !spaceId || crossSpaceMismatch) {
       throw new NotFoundException(`Document ${targetId} not found`);
     }
 
@@ -103,14 +118,12 @@ export class ReviewStatusService {
     routeSpaceId?: string,
     userId?: string,
   ) {
-    const { docId, spaceId } = await resolveReviewTarget({
-      scopeRepo: this.scopeRepo,
-      pageService: this.pageService,
+    const { docId, spaceId, crossSpaceMismatch } = await this.resolveTarget(
       targetId,
-      authSpace: routeSpaceId || authSpace,
-      fallbackPrisma: this.repo.getPrisma(),
-    });
-    if (!docId || !spaceId) {
+      routeSpaceId,
+      authSpace,
+    );
+    if (!docId || !spaceId || crossSpaceMismatch) {
       throw new NotFoundException(`Document ${targetId} not found`);
     }
 
@@ -135,17 +148,11 @@ export class ReviewStatusService {
         ? this.toReviewInfo(existingRow)
         : legacyReview || { roundNumber: 1, status: 'draft' };
 
-      const decision = reviewTransitionPolicy.evaluate({
+      assertReviewTransitionAllowed({
         role: String(currentRole),
         fromStatus: prevReview.status,
         toStatus: body.status,
       });
-      if (!decision.allowed) {
-        if (decision.violationType === 'forbidden') {
-          throw new ForbiddenException(decision.reason);
-        }
-        throw new BadRequestException(decision.reason);
-      }
 
       const nextRound =
         body.status === 'in_review' && prevReview.status !== 'in_review'

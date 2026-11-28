@@ -1,10 +1,9 @@
 /**
  * modules/pages/page/page.repository.ts
- * Prisma persistence repository for the Page aggregate (PageDoc, PageNode, SpaceLabel, Project).
+ * Prisma persistence repository for Page aggregate metadata, thumbnails, and labels.
  */
 
 import { Injectable } from '@nestjs/common';
-import { Prisma, PageDoc, PageNode } from '@prisma/client';
 import { PrismaService } from '@/core';
 
 export type ResolvedSpaceLabel = {
@@ -16,10 +15,6 @@ export type ResolvedSpaceLabel = {
 @Injectable()
 export class PageRepository {
   constructor(private readonly prisma: PrismaService) {}
-
-  public findDocById(docId: string): Promise<PageDoc | null> {
-    return this.prisma.pageDoc.findUnique({ where: { id: docId } });
-  }
 
   public async findActivePageInSpace(
     spaceId: string,
@@ -42,31 +37,6 @@ export class PageRepository {
         },
       }),
     ).catch(() => null);
-  }
-
-  public findNodeById(nodeId: string): Promise<PageNode | null> {
-    return this.prisma.pageNode.findUnique({ where: { id: nodeId } });
-  }
-
-  public findActiveDocsBySpace(spaceId: string): Promise<PageDoc[]> {
-    return this.prisma.pageDoc.findMany({
-      where: { spaceId, deletedAt: null },
-      orderBy: { updatedAt: 'desc' },
-    });
-  }
-
-  public findNodesBySpace(spaceId: string): Promise<PageNode[]> {
-    return this.prisma.pageNode.findMany({
-      where: { spaceId },
-      orderBy: [{ parentId: 'asc' }, { path: 'asc' }],
-    });
-  }
-
-  public findDeletedDocsBySpace(spaceId: string): Promise<PageDoc[]> {
-    return this.prisma.pageDoc.findMany({
-      where: { spaceId, deletedAt: { not: null } },
-      orderBy: { deletedAt: 'desc' },
-    });
   }
 
   public async findSpaceLabelsByIds(
@@ -152,21 +122,5 @@ export class PageRepository {
       },
       data: { thumbnail },
     });
-  }
-
-  public updateDocRanges(
-    docId: string,
-    ranges: Prisma.InputJsonValue,
-  ): Promise<PageDoc> {
-    return this.prisma.pageDoc.update({
-      where: { id: docId },
-      data: { ranges },
-    });
-  }
-
-  public transaction<T>(
-    fn: (tx: Prisma.TransactionClient) => Promise<T>,
-  ): Promise<T> {
-    return this.prisma.$transaction(fn);
   }
 }

@@ -6,9 +6,12 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
-import { DuplicateNodePathError, InvalidNodeNameError } from '@/modules/pages/structure/domain/structure.errors';
-import { MAX_VIRTUAL_TREE_DEPTH, NodePathVo } from '@/modules/pages/core/utils/node-path';
-import { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
+import { MAX_VIRTUAL_TREE_DEPTH, NodePathVo } from '@/modules/pages/core';
+import { PageNodeEntity } from '../domain/node.entity';
+import {
+  DuplicateNodePathError,
+  InvalidNodeNameError,
+} from '../domain/structure.errors';
 import {
   type HydratedPageNodeRow,
   NODE_HYDRATION_INCLUDE,

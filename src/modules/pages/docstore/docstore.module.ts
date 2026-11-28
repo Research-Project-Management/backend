@@ -6,15 +6,14 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/core';
-import { FilesModule } from '@/modules/files/files.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
+import { FilestoreModule } from '@/modules/pages/filestore';
+import { UserResolverService } from '@/modules/pages/core';
 import { PageModule } from '../page/page.module';
 import { DocController } from './controllers/doc.controller';
 import { DocSyncController } from './controllers/doc-sync.controller';
 import { SearchReplaceController } from './controllers/search-replace.controller';
 import { PresenceController } from './controllers/presence.controller';
 import { DocstoreService } from './docstore.service';
-import { UserResolverService } from '../core/services/user-resolver.service';
 import { PresenceService } from './services/presence.service';
 import { SearchReplaceService } from './services/search-replace.service';
 
@@ -28,7 +27,6 @@ import { ScopeRepository } from './repositories/scope.repository';
   imports: [
     ConfigModule,
     PrismaModule,
-    FilesModule,
     FilestoreModule,
     forwardRef(() => PageModule),
   ],

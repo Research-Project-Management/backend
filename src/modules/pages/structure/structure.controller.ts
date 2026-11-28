@@ -43,7 +43,7 @@ import {
   TreeNodeDto,
 } from './dto/node.dto';
 import { NodeNotFoundError, StructureError } from './domain/structure.errors';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 
 @ApiTags('Pages - Virtual Tree & Structure')
 @ApiBearerAuth('JWT-auth')

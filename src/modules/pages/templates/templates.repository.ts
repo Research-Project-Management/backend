@@ -176,84 +176,146 @@ export class TemplatesRepository {
 
   /** Atomically persists Space-owned `TemplateManifest` across the 4 BCNF tables. */
   public async save(manifest: TemplateManifest): Promise<TemplateManifest> {
+    const { manifest: saved } = await this.saveWithLifecycle(manifest);
+    return saved;
+  }
+
+  /**
+   * Atomically persists `TemplateManifest` and computes content-addressed `TemplateBlob`
+   * CAS transitions (`acquiredBlobIds` for newly inserted `TemplateBlob` rows and
+   * `releasedBlobIds` for newly orphaned `TemplateBlob` rows pruned in the same `$transaction`).
+   */
+  public async saveWithLifecycle(manifest: TemplateManifest): Promise<{
+    manifest: TemplateManifest;
+    acquiredBlobIds: string[];
+    releasedBlobIds: string[];
+  }> {
     if (!manifest.spaceId || !manifest.createdById) {
       throw new Error('Persisted PageTemplate requires spaceId and createdById');
     }
     const spaceId = manifest.spaceId;
     const createdById = manifest.createdById;
 
-    await this.prisma.$transaction(async (tx) => {
-      if (manifest.files.length > 0) {
-        const uniqueBlobs = new Map<string, TemplateFileVo>();
-        for (const f of manifest.files) {
-          uniqueBlobs.set(f.contentHash, f);
+    const { acquiredBlobIds, releasedBlobIds } = await this.prisma.$transaction(
+      async (tx) => {
+        const acquired = new Set<string>();
+
+        if (manifest.files.length > 0) {
+          const uniqueBlobs = new Map<string, TemplateFileVo>();
+          for (const f of manifest.files) {
+            uniqueBlobs.set(f.contentHash, f);
+          }
+
+          const binaryCandidateHashes = Array.from(uniqueBlobs.values())
+            .filter((b) => Boolean(b.blobId))
+            .map((b) => b.contentHash);
+
+          const existingHashes = new Set<string>();
+          if (binaryCandidateHashes.length > 0 && tx.templateBlob?.findMany) {
+            const existingRows = await tx.templateBlob.findMany({
+              where: { contentHash: { in: binaryCandidateHashes } },
+              select: { contentHash: true },
+            });
+            for (const row of existingRows) {
+              existingHashes.add(row.contentHash);
+            }
+          }
+
+          for (const b of uniqueBlobs.values()) {
+            if (b.blobId && !existingHashes.has(b.contentHash)) {
+              acquired.add(b.blobId);
+            }
+          }
+
+          await tx.templateBlob.createMany({
+            data: Array.from(uniqueBlobs.values()).map((b) => ({
+              contentHash: b.contentHash,
+              textContent: b.textContent,
+              blobId: b.blobId,
+              storageKey: b.storageKey,
+              bucketName: b.bucketName,
+              mimeType: b.mimeType,
+              sizeBytes: b.sizeBytes,
+            })),
+            skipDuplicates: true,
+          });
         }
-        await tx.templateBlob.createMany({
-          data: Array.from(uniqueBlobs.values()).map((b) => ({
-            contentHash: b.contentHash,
-            textContent: b.textContent,
-            blobId: b.blobId,
-            storageKey: b.storageKey,
-            bucketName: b.bucketName,
-            mimeType: b.mimeType,
-            sizeBytes: b.sizeBytes,
-          })),
-          skipDuplicates: true,
+
+        const coreData = {
+          spaceId,
+          sourcePageId: manifest.sourcePageId,
+          createdById,
+          slug: manifest.slug,
+          name: manifest.name,
+          category: manifest.category,
+          description: manifest.description,
+          compiler: manifest.compiler,
+          texlive: manifest.texlive,
+          mainFile: manifest.mainFile,
+          thumbnail: manifest.thumbnail,
+        };
+
+        await tx.pageTemplate.upsert({
+          where: { id: manifest.id },
+          create: {
+            id: manifest.id,
+            ...coreData,
+          },
+          update: coreData,
         });
-      }
 
-      const coreData = {
-        spaceId,
-        sourcePageId: manifest.sourcePageId,
-        createdById,
-        slug: manifest.slug,
-        name: manifest.name,
-        category: manifest.category,
-        description: manifest.description,
-        compiler: manifest.compiler,
-        texlive: manifest.texlive,
-        mainFile: manifest.mainFile,
-        thumbnail: manifest.thumbnail,
-      };
+        if (manifest.files.length > 0) {
+          await tx.pageTemplateFile.deleteMany({
+            where: { templateId: manifest.id },
+          });
+          await tx.pageTemplateFile.createMany({
+            data: manifest.files.map((f) => ({
+              templateId: manifest.id,
+              pathname: f.path,
+              type: f.type,
+              contentHash: f.contentHash,
+            })),
+          });
+        }
 
-      await tx.pageTemplate.upsert({
-        where: { id: manifest.id },
-        create: {
-          id: manifest.id,
-          ...coreData,
-        },
-        update: coreData,
-      });
-
-      if (manifest.files.length > 0) {
-        await tx.pageTemplateFile.deleteMany({
+        await tx.pageTemplateTag.deleteMany({
           where: { templateId: manifest.id },
         });
-        await tx.pageTemplateFile.createMany({
-          data: manifest.files.map((f) => ({
-            templateId: manifest.id,
-            pathname: f.path,
-            type: f.type,
-            contentHash: f.contentHash,
-          })),
-        });
-      }
+        if (manifest.tags.length > 0) {
+          await tx.pageTemplateTag.createMany({
+            data: manifest.tags.map((tag) => ({
+              templateId: manifest.id,
+              tag,
+            })),
+            skipDuplicates: true,
+          });
+        }
 
-      await tx.pageTemplateTag.deleteMany({
-        where: { templateId: manifest.id },
-      });
-      if (manifest.tags.length > 0) {
-        await tx.pageTemplateTag.createMany({
-          data: manifest.tags.map((tag) => ({
-            templateId: manifest.id,
-            tag,
-          })),
-          skipDuplicates: true,
-        });
-      }
-    });
+        const orphans = tx.templateBlob?.findMany
+          ? await tx.templateBlob.findMany({
+              where: { templateFiles: { none: {} } },
+              select: { contentHash: true, blobId: true },
+            })
+          : [];
 
-    return manifest;
+        const released = orphans
+          .map((o) => o.blobId)
+          .filter((b): b is string => Boolean(b));
+
+        if (orphans.length > 0 && tx.templateBlob?.deleteMany) {
+          await tx.templateBlob.deleteMany({
+            where: { contentHash: { in: orphans.map((o) => o.contentHash) } },
+          });
+        }
+
+        return {
+          acquiredBlobIds: Array.from(acquired),
+          releasedBlobIds: released,
+        };
+      },
+    );
+
+    return { manifest, acquiredBlobIds, releasedBlobIds };
   }
 
   public async deleteById(id: string): Promise<{ deleted: boolean; releasedBlobIds: string[] }> {

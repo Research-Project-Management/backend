@@ -4,19 +4,17 @@
  */
 
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/core';
 import {
+  NodePathVo,
   ensureCanonicalPageId,
   filterRecordsByPageScope,
-} from '@/modules/pages/core/utils/page-scope';
+} from '@/modules/pages/core';
 import { CreateNodeParams } from './domain/structure.ports';
 import { PageNodeEntity } from './domain/node.entity';
-import { NodePathVo, ParsedFolderSegment } from '@/modules/pages/core/utils/node-path';
 import {
   NODE_HYDRATION_INCLUDE,
   type HydratedPageNodeRow,
-  ensureFolderChainInTxHelper,
   ensurePrismaFolderChain,
   mapHydratedRowToPageNodeEntity,
 } from './repositories/folder-chain';
@@ -31,20 +29,6 @@ export { ensurePrismaFolderChain };
 @Injectable()
 export class StructureRepository {
   constructor(private readonly prisma: PrismaService) {}
-
-  public async ensureFolderChainInTx(
-    tx: Prisma.TransactionClient,
-    projectId: string,
-    folderPathOrChain: string | readonly ParsedFolderSegment[],
-    pageId?: string | null,
-  ): Promise<string | null> {
-    return await ensureFolderChainInTxHelper(
-      tx,
-      projectId,
-      folderPathOrChain,
-      pageId,
-    );
-  }
 
   public async createNode(params: CreateNodeParams): Promise<PageNodeEntity> {
     const depth = NodePathVo.depth(params.path);

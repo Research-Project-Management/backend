@@ -6,22 +6,29 @@
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import * as pathPosix from 'node:path/posix';
-import { PrismaService, isUuid } from '@/core';
+import { DistributedLockService, PrismaService, isUuid } from '@/core';
 import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
-import { ensureCanonicalPageId } from '@/modules/pages/core/utils/page-scope';
 import {
-  LiveCollaborationPort,
   LIVE_COLLABORATION_PORT,
+  LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { IDistributedLockPort } from '@/modules/pages/core/ports/distributed-lock.port';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import type { PageNodeEntity } from '@/modules/pages/structure/domain/node.entity';
-import { HistoryRepository } from '../history.repository';
+  PageDomainEventBus,
+  PagesDomainError,
+  ensureCanonicalPageId,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { FilestoreService } from '@/modules/pages/filestore';
+import {
+  StructureRepository,
+  StructureService,
+  type PageNodeEntity,
+} from '@/modules/pages/structure';
+import { RealtimeFacade } from '@/modules/realtime/realtime.facade';
+import {
+  HistoryRepository,
+  resolveCasFileBlobId,
+} from '../history.repository';
 import { SnapshotCollectorAdapter } from './collector.adapter';
 import { Snapshot, FileSnapshotVo } from '../domain/snapshot';
 import { SnapshotFileNotFoundException } from '../domain/errors';
@@ -48,8 +55,7 @@ export class SnapshotRestorerAdapter {
     private readonly structureService: StructureService,
     private readonly docstoreService: DocstoreService,
     @Optional()
-    @Inject(IDistributedLockPort)
-    private readonly distributedLock?: IDistributedLockPort,
+    private readonly distributedLock?: DistributedLockService,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly domainEventBus?: PageDomainEventBus,
     @Optional()
@@ -64,6 +70,10 @@ export class SnapshotRestorerAdapter {
     @Optional()
     @Inject(FILES_PORT)
     private readonly filesPort?: IFilesPort,
+    @Optional()
+    private readonly structureRepository?: StructureRepository,
+    @Optional()
+    private readonly realtimeService?: RealtimeFacade,
   ) {
     this.liveCollab = liveCollab ?? NOOP_LIVE_COLLABORATION;
   }
@@ -71,6 +81,7 @@ export class SnapshotRestorerAdapter {
   private getDeps(): RestorerDeps {
     return {
       structureService: this.structureService,
+      structureRepository: this.structureRepository,
       docstoreService: this.docstoreService,
       liveCollab: this.liveCollab,
       logger: this.logger,
@@ -80,6 +91,7 @@ export class SnapshotRestorerAdapter {
       filestoreService: this.filestoreService,
       collector: this.collector,
       filesPort: this.filesPort,
+      realtimeService: this.realtimeService,
     };
   }
 
@@ -100,11 +112,23 @@ export class SnapshotRestorerAdapter {
       this.executeRestoreWorkflow(projectId, snapshot, resolvedPageId);
 
     if (this.distributedLock) {
-      return this.distributedLock.withLock(
-        `manuscript:restore:${projectId}:${resolvedPageId ?? 'default'}`,
+      const lockResource = `pages:restore:${projectId}:${resolvedPageId ?? 'default'}`;
+      const lockedResult = await this.distributedLock.withLock(
+        lockResource,
+        60_000,
         restoreAction,
-        60000,
       );
+      if (lockedResult === null) {
+        throw new PagesDomainError(
+          `Another snapshot restore is already in progress for page "${resolvedPageId ?? projectId}"`,
+          {
+            code: 'RESTORE_LOCK_CONTENDED',
+            statusCode: 409,
+            details: { projectId, pageId: resolvedPageId ?? null },
+          },
+        );
+      }
+      return lockedResult;
     }
     return restoreAction();
   }
@@ -168,7 +192,7 @@ export class SnapshotRestorerAdapter {
       await Promise.all(
         postSnapshotFileNodes.map(async (node) => {
           try {
-            await this.structureService.deleteNode(projectId, node.id);
+            await deleteTreeNodeSilent(deps, projectId, node, targetPageId);
           } catch (err) {
             this.logger.warn(
               `Could not delete post-snapshot node ${node.path} (${node.id}): ${err}`,
@@ -189,7 +213,7 @@ export class SnapshotRestorerAdapter {
 
     for (const folder of orphanFolders) {
       try {
-        await this.structureService.deleteNode(projectId, folder.id);
+        await deleteTreeNodeSilent(deps, projectId, folder, targetPageId);
       } catch (err) {
         this.logger.warn(
           `Could not delete post-snapshot folder ${folder.path} (${folder.id}): ${err}`,
@@ -197,10 +221,12 @@ export class SnapshotRestorerAdapter {
       }
     }
 
+    const folderIdByPath = new Map<string, string>();
     const ensuredParentDirs = new Set<string>(['/']);
     for (const node of currentNodes) {
       if (node.isFolder() && requiredFolders.has(node.path)) {
         ensuredParentDirs.add(node.path);
+        folderIdByPath.set(node.path, node.id);
       }
     }
 
@@ -215,21 +241,23 @@ export class SnapshotRestorerAdapter {
         !ensuredParentDirs.has(parentDir)
       ) {
         try {
-          await this.structureService.mkdirp(
+          await ensureParentDirSilent(
+            deps,
             projectId,
             parentDir,
             targetPageId,
+            folderIdByPath,
+            ensuredParentDirs,
           );
-          let cur = parentDir;
-          while (cur && cur !== '.' && cur !== '/') {
-            ensuredParentDirs.add(cur);
-            cur = pathPosix.dirname(cur);
-          }
         } catch (err) {
           this.logger.warn(`Could not ensure directory ${parentDir}: ${err}`);
         }
       }
 
+      const parentId =
+        parentDir && parentDir !== '.' && parentDir !== '/'
+          ? (folderIdByPath.get(parentDir) ?? null)
+          : null;
       const existingNode = currentByPath.get(filePath);
 
       if (fileVo.type === 'doc') {
@@ -253,14 +281,19 @@ export class SnapshotRestorerAdapter {
           restoredDocIds.push(existingNode.docId);
 
           if (fileVo.isRootDoc) {
-            await this.structureService.setRootDoc(projectId, existingNode.id);
+            await setRootDocSilent(deps, projectId, existingNode.id);
           }
         } else {
           if (existingNode) {
             if (existingNode.docId) {
               evictedDocIds.push(existingNode.docId);
             }
-            await this.structureService.deleteNode(projectId, existingNode.id);
+            await deleteTreeNodeSilent(
+              deps,
+              projectId,
+              existingNode,
+              targetPageId,
+            );
           }
 
           const { docId, rev, version } = await restoreOrCreateDoc(
@@ -278,12 +311,14 @@ export class SnapshotRestorerAdapter {
             restoredDocIds.push(docId);
           }
 
-          const newNode = await this.structureService.createNode(
+          const newNode = await createTreeNodeSilent(
+            deps,
             projectId,
             {
               name: fileName,
               path: filePath,
               type: 'DOC',
+              parentId,
               docId: docId ?? undefined,
               isRootDoc: fileVo.isRootDoc,
             },
@@ -291,7 +326,7 @@ export class SnapshotRestorerAdapter {
           );
 
           if (fileVo.isRootDoc) {
-            await this.structureService.setRootDoc(projectId, newNode.id);
+            await setRootDocSilent(deps, projectId, newNode.id);
           }
         }
 
@@ -317,48 +352,24 @@ export class SnapshotRestorerAdapter {
           targetPageId,
         );
         if (restoredFileId) {
-          if (existingNode) {
-            if (
-              existingNode.type !== 'FILE' ||
-              existingNode.fileId !== restoredFileId
-            ) {
-              if (existingNode.docId) {
-                evictedDocIds.push(existingNode.docId);
-              }
-              await this.structureService.deleteNode(projectId, existingNode.id);
-              await this.structureService.createNode(
-                projectId,
-                {
-                  name: fileName,
-                  path: filePath,
-                  type: 'FILE',
-                  fileId: restoredFileId,
-                },
-                targetPageId,
-              );
-            } else if (typeof this.structureService.updateNodeFileId === 'function') {
-              await this.structureService
-                .updateNodeFileId(
-                  projectId,
-                  existingNode.id,
-                  restoredFileId,
-                  fileVo.sizeBytes,
-                  fileVo.hash || null,
-                )
-                .catch(() => undefined);
-            }
-          } else {
-            await this.structureService.createNode(
-              projectId,
-              {
-                name: fileName,
-                path: filePath,
-                type: 'FILE',
-                fileId: restoredFileId,
-              },
-              targetPageId,
-            );
+          if (
+            existingNode?.docId &&
+            (existingNode.type !== 'FILE' ||
+              existingNode.fileId !== restoredFileId)
+          ) {
+            evictedDocIds.push(existingNode.docId);
           }
+          await syncRestoredFileNode(deps, {
+            projectId,
+            fileName,
+            filePath,
+            parentId,
+            restoredFileId,
+            fileVo,
+            existingNode: existingNode ?? null,
+            targetPageId,
+            silent: true,
+          });
         }
       }
     }
@@ -368,16 +379,21 @@ export class SnapshotRestorerAdapter {
         type: 'manuscript.history.restored',
         projectId,
         pageId: targetPageId,
-        version:
-          typeof snapshot.version === 'number'
-            ? snapshot.version
-            : ((snapshot.version as { value?: number } | undefined)?.value ??
-              0),
+        version: snapshot.version,
         restoredDocIds,
         evictedDocIds,
         occurredAt: Date.now(),
       });
     }
+
+    // Emit ONE consolidated file-tree update event at the end of full snapshot restore
+    this.realtimeService?.broadcastFileTreeChange(projectId, {
+      action: 'restore',
+      node: {
+        pageId: targetPageId ?? null,
+        version: snapshot.version,
+      },
+    });
 
     return {
       restoredFilesCount: snapshotFiles.size,
@@ -405,6 +421,7 @@ export class SnapshotRestorerAdapter {
 
 interface RestorerDeps {
   structureService: StructureService;
+  structureRepository?: StructureRepository;
   docstoreService: DocstoreService;
   liveCollab: LiveCollaborationPort;
   logger: Logger;
@@ -414,6 +431,7 @@ interface RestorerDeps {
   filestoreService?: FilestoreService;
   collector?: SnapshotCollectorAdapter;
   filesPort?: IFilesPort;
+  realtimeService?: RealtimeFacade;
 }
 
 const RESTORE_MIME_MAP: Record<string, string> = {
@@ -431,45 +449,238 @@ function inferMimeFromPath(filePath: string): string {
   return RESTORE_MIME_MAP[ext] || 'application/octet-stream';
 }
 
-async function resolvePinnedFileBlobId(
-  deps: Pick<RestorerDeps, 'prisma' | 'filesPort'>,
-  fileVo: FileSnapshotVo,
-  pinnedStorageKey: string,
-): Promise<string | null> {
-  if (fileVo.blobId && isUuid(fileVo.blobId)) {
-    return fileVo.blobId;
+async function deleteTreeNodeSilent(
+  deps: RestorerDeps,
+  projectId: string,
+  node: PageNodeEntity,
+  targetPageId?: string,
+): Promise<void> {
+  if (deps.structureRepository) {
+    await deps.structureRepository.deleteSubtree(
+      projectId,
+      node.path,
+      targetPageId ?? node.pageId ?? null,
+    );
+    return;
   }
+  await deps.structureService.deleteNode(projectId, node.id);
+}
 
-  if (deps.prisma?.fileBlob?.findFirst) {
-    const byKey = await Promise.resolve(
-      deps.prisma.fileBlob.findFirst({
-        where: { storageKey: pinnedStorageKey },
-        select: { id: true },
-      }),
-    ).catch(() => null);
-    if (byKey?.id) return byKey.id;
-  }
-
-  const cleanHash = (fileVo.hash || '').trim().toLowerCase();
-  if (/^[0-9a-f]{64}$/.test(cleanHash)) {
-    if (typeof deps.filesPort?.findBlobByHash === 'function') {
-      const byPort = await deps.filesPort
-        .findBlobByHash(cleanHash)
-        .catch(() => null);
-      if (byPort?.id) return byPort.id;
+async function ensureParentDirSilent(
+  deps: RestorerDeps,
+  projectId: string,
+  parentDir: string,
+  targetPageId: string | undefined,
+  folderIdByPath: Map<string, string>,
+  ensuredParentDirs: Set<string>,
+): Promise<void> {
+  if (!deps.structureRepository) {
+    await deps.structureService.mkdirp(projectId, parentDir, targetPageId);
+    let cur = parentDir;
+    while (cur && cur !== '.' && cur !== '/') {
+      ensuredParentDirs.add(cur);
+      cur = pathPosix.dirname(cur);
     }
-    if (deps.prisma?.fileBlob?.findFirst) {
-      const byHash = await Promise.resolve(
-        deps.prisma.fileBlob.findFirst({
-          where: { contentHash: Buffer.from(cleanHash, 'hex') },
-          select: { id: true },
-        }),
-      ).catch(() => null);
-      if (byHash?.id) return byHash.id;
-    }
+    return;
   }
 
-  return null;
+  const segments = parentDir.split('/').filter(Boolean);
+  let curPath = '';
+  let parentId: string | null = null;
+
+  for (const segment of segments) {
+    curPath = `${curPath}/${segment}`;
+    const knownId = folderIdByPath.get(curPath);
+    if (knownId) {
+      parentId = knownId;
+      ensuredParentDirs.add(curPath);
+      continue;
+    }
+
+    let found = await deps.structureRepository.findByPath(
+      projectId,
+      curPath,
+      targetPageId,
+    );
+    if (!found) {
+      found = await deps.structureRepository.createNode({
+        projectId,
+        ...(targetPageId ? { pageId: targetPageId } : {}),
+        parentId,
+        type: 'FOLDER',
+        name: segment,
+        path: curPath,
+      });
+    }
+    parentId = found.id;
+    folderIdByPath.set(curPath, found.id);
+    ensuredParentDirs.add(curPath);
+  }
+}
+
+async function createTreeNodeSilent(
+  deps: RestorerDeps,
+  projectId: string,
+  input: {
+    name: string;
+    path: string;
+    type: 'DOC' | 'FILE';
+    parentId?: string | null;
+    docId?: string;
+    fileId?: string;
+    isRootDoc?: boolean;
+  },
+  targetPageId?: string,
+): Promise<PageNodeEntity> {
+  if (deps.structureRepository) {
+    return deps.structureRepository.createNode({
+      projectId,
+      ...(targetPageId ? { pageId: targetPageId } : {}),
+      parentId: input.parentId ?? null,
+      type: input.type,
+      name: input.name,
+      path: input.path,
+      docId: input.docId,
+      fileId: input.fileId,
+      isRootDoc: input.isRootDoc,
+    });
+  }
+  return deps.structureService.createNode(
+    projectId,
+    {
+      name: input.name,
+      path: input.path,
+      type: input.type,
+      docId: input.docId,
+      fileId: input.fileId,
+      isRootDoc: input.isRootDoc,
+    },
+    targetPageId,
+  );
+}
+
+async function setRootDocSilent(
+  deps: RestorerDeps,
+  projectId: string,
+  nodeId: string,
+): Promise<void> {
+  if (deps.structureRepository) {
+    await deps.structureRepository.setRootDoc(projectId, nodeId);
+    return;
+  }
+  await deps.structureService.setRootDoc(projectId, nodeId);
+}
+
+async function syncRestoredFileNode(
+  deps: RestorerDeps,
+  params: {
+    projectId: string;
+    fileName: string;
+    filePath: string;
+    parentId?: string | null;
+    restoredFileId: string;
+    fileVo: FileSnapshotVo;
+    existingNode: PageNodeEntity | null;
+    targetPageId?: string;
+    silent: boolean;
+  },
+): Promise<void> {
+  const {
+    projectId,
+    fileName,
+    filePath,
+    parentId,
+    restoredFileId,
+    fileVo,
+    existingNode,
+    targetPageId,
+    silent,
+  } = params;
+
+  if (existingNode) {
+    if (
+      existingNode.type !== 'FILE' ||
+      existingNode.fileId !== restoredFileId
+    ) {
+      if (silent) {
+        await deleteTreeNodeSilent(deps, projectId, existingNode, targetPageId);
+        await createTreeNodeSilent(
+          deps,
+          projectId,
+          {
+            name: fileName,
+            path: filePath,
+            type: 'FILE',
+            parentId,
+            fileId: restoredFileId,
+          },
+          targetPageId,
+        );
+      } else {
+        await deps.structureService.deleteNode(projectId, existingNode.id);
+        await deps.structureService.createNode(
+          projectId,
+          {
+            name: fileName,
+            path: filePath,
+            type: 'FILE',
+            fileId: restoredFileId,
+          },
+          targetPageId,
+        );
+      }
+      return;
+    }
+
+    if (silent && deps.structureRepository) {
+      await deps.structureRepository
+        .updateNodeFileId(
+          projectId,
+          existingNode.id,
+          restoredFileId,
+          fileVo.sizeBytes,
+          fileVo.hash || null,
+        )
+        .catch(() => undefined);
+    } else if (typeof deps.structureService.updateNodeFileId === 'function') {
+      await deps.structureService
+        .updateNodeFileId(
+          projectId,
+          existingNode.id,
+          restoredFileId,
+          fileVo.sizeBytes,
+          fileVo.hash || null,
+        )
+        .catch(() => undefined);
+    }
+    return;
+  }
+
+  if (silent) {
+    await createTreeNodeSilent(
+      deps,
+      projectId,
+      {
+        name: fileName,
+        path: filePath,
+        type: 'FILE',
+        parentId,
+        fileId: restoredFileId,
+      },
+      targetPageId,
+    );
+  } else {
+    await deps.structureService.createNode(
+      projectId,
+      {
+        name: fileName,
+        path: filePath,
+        type: 'FILE',
+        fileId: restoredFileId,
+      },
+      targetPageId,
+    );
+  }
 }
 
 async function restorePinnedBinaryFile(
@@ -507,11 +718,11 @@ async function restorePinnedBinaryFile(
     return fileVo.fileId ?? null;
   }
 
-  const targetBlobId = await resolvePinnedFileBlobId(
-    deps,
-    fileVo,
-    pinnedStorageKey,
-  );
+  const targetBlobId = await resolveCasFileBlobId(deps.prisma, deps.filesPort, {
+    blobId: fileVo.blobId,
+    storageKey: pinnedStorageKey,
+    contentHash: fileVo.hash,
+  });
   const relPath = filePath.replace(/^\/+/, '');
 
   const existingFile =
@@ -933,47 +1144,16 @@ async function restoreSingleFileToStateHelper(
       targetPageId,
     );
     if (restoredFileId) {
-      if (existingNode) {
-        if (
-          existingNode.type !== 'FILE' ||
-          existingNode.fileId !== restoredFileId
-        ) {
-          await deps.structureService.deleteNode(projectId, existingNode.id);
-          await deps.structureService.createNode(
-            projectId,
-            {
-              name: fileName,
-              path: targetPath,
-              type: 'FILE',
-              fileId: restoredFileId,
-            },
-            targetPageId,
-          );
-        } else if (
-          typeof deps.structureService.updateNodeFileId === 'function'
-        ) {
-          await deps.structureService
-            .updateNodeFileId(
-              projectId,
-              existingNode.id,
-              restoredFileId,
-              fileVo.sizeBytes,
-              fileVo.hash || null,
-            )
-            .catch(() => undefined);
-        }
-      } else {
-        await deps.structureService.createNode(
-          projectId,
-          {
-            name: fileName,
-            path: targetPath,
-            type: 'FILE',
-            fileId: restoredFileId,
-          },
-          targetPageId,
-        );
-      }
+      await syncRestoredFileNode(deps, {
+        projectId,
+        fileName,
+        filePath: targetPath,
+        restoredFileId,
+        fileVo,
+        existingNode,
+        targetPageId,
+        silent: false,
+      });
     }
     return {
       path: targetPath,

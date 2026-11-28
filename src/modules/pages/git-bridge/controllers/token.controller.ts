@@ -30,7 +30,10 @@ import {
   ResolvedSpace,
   Role,
 } from '@/modules/project/access';
-import { readPagesConfig } from '../../core/config/pages.config';
+import {
+  readPagesConfig,
+  resolvePageControllerCoordinates,
+} from '@/modules/pages/core';
 import { TokenLimitError } from '../domain/errors';
 import {
   canWrite,
@@ -43,7 +46,7 @@ import { CreateTokenDto, RepoQueryDto } from '../dto/token.dto';
 import { GitBridgeRepository } from '../git-bridge.repository';
 import { TokenService } from '../services/token.service';
 
-@ApiTags('Manuscripts - Git Bridge')
+@ApiTags('Pages - Git Bridge')
 @ApiBearerAuth('JWT-auth')
 @Controller('api/v1/pages')
 export class TokenController {
@@ -76,12 +79,29 @@ export class TokenController {
     @CurrentUser('id') userId: string,
     @Req() req: FastifyRequest,
   ) {
-    const baseId = spaceId || routeSpaceId || '';
-    if (!parseRepoId(baseId)) {
+    const coords = resolvePageControllerCoordinates(
+      { spaceId: routeSpaceId },
+      spaceId,
+      query?.pageId,
+      req,
+    );
+    const effectiveSpaceId =
+      coords.spaceId.trim().toLowerCase() === 'personal'
+        ? userId
+        : coords.spaceId;
+    if (!parseRepoId(effectiveSpaceId)) {
       throw new BadRequestException('Invalid project or page identifier');
     }
 
-    const target = await this.repo.resolveTarget(baseId, query?.pageId);
+    const target = await this.repo.resolveTarget(
+      effectiveSpaceId,
+      coords.pageId,
+    );
+    const effectiveRole =
+      access?.role ??
+      (effectiveSpaceId.toLowerCase() === userId?.toLowerCase()
+        ? 'owner'
+        : null);
 
     return {
       enabled: true,
@@ -89,7 +109,7 @@ export class TokenController {
       cloneUrl: this.cloneUrl(req, target.repoId),
       branch: DEFAULT_BRANCH,
       username: GIT_USER,
-      canPush: canWrite(access?.role),
+      canPush: canWrite(effectiveRole),
       maxTokens: MAX_TOKENS,
       tokens: await this.tokens.list(userId),
     };

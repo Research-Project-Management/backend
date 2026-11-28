@@ -14,7 +14,7 @@ import {
   IsDateString,
 } from 'class-validator';
 import { Prisma } from '@prisma/client';
-import { DocRanges } from '@/modules/pages/docstore/domain/doc-range';
+import { DocRanges } from '../domain/doc-range';
 
 export class CreateDocDto {
   @ApiProperty({

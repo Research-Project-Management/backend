@@ -7,19 +7,19 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Readable, Writable } from 'node:stream';
 import { DistributedLockService, mapWithConcurrency } from '@/core';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { FilestoreService } from '@/modules/pages/filestore/filestore.service';
-import { StructureService } from '@/modules/pages/structure/structure.service';
-import { SnapshotService } from '@/modules/pages/history/services/snapshot.service';
-import { isTextPath } from '@/modules/pages/core/domain/text-extensions';
 import {
+  isTextPath,
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { UserResolverService } from '@/modules/pages/core/services/user-resolver.service';
-import { SagaRunner } from '@/modules/pages/core/utils/saga-runner';
+  PageDomainEventBus,
+  SagaRunner,
+  UserResolverService,
+} from '@/modules/pages/core';
+import { DocstoreService } from '@/modules/pages/docstore';
+import { FilestoreService } from '@/modules/pages/filestore';
+import { SnapshotService } from '@/modules/pages/history';
+import { StructureService } from '@/modules/pages/structure';
 import { PackAdapter } from '../adapters/pack.adapter';
 import { BlobEntry, GitAuthor, RepoAdapter } from '../adapters/repo.adapter';
 import { GitBridgeRepository } from '../git-bridge.repository';

@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import { Readable, Writable } from 'node:stream';
-import { readPagesConfig } from '../../core/config/pages.config';
+import { readPagesConfig } from '@/modules/pages/core';
 import { GitBridgeError } from '../domain/errors';
 import { GitService } from '../domain/policy';
 import { RepoAdapter } from './repo.adapter';

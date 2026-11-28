@@ -3,7 +3,7 @@
  * Domain exceptions and size limits for Pages Filestore.
  */
 
-import { PagesDomainError } from '@/modules/pages/core/domain/errors';
+import { PagesDomainError } from '@/modules/pages/core';
 
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB (Overleaf Parity)
 

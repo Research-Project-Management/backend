@@ -5,14 +5,13 @@
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@/core';
-import { DocstoreModule } from '@/modules/pages/docstore/docstore.module';
-import { FilestoreModule } from '@/modules/pages/filestore/filestore.module';
+import { DocstoreModule } from '@/modules/pages/docstore';
 import { StructureController } from './structure.controller';
 import { StructureService } from './structure.service';
 import { StructureRepository } from './structure.repository';
 
 @Module({
-  imports: [PrismaModule, DocstoreModule, FilestoreModule],
+  imports: [PrismaModule, DocstoreModule],
   controllers: [StructureController],
   providers: [StructureService, StructureRepository],
   exports: [StructureService, StructureRepository],

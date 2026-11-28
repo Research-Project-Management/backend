@@ -3,12 +3,11 @@ import {
   LIVE_COLLABORATION_PORT,
   LiveCollaborationPort,
   NOOP_LIVE_COLLABORATION,
-} from '@/modules/pages/core/ports/live-collaboration.port';
-import { PageDomainEventBus } from '@/modules/pages/core/events/event-bus.service';
-import { getRecordSpaceId } from '@/modules/pages/core/utils/page-scope';
-import { PageService } from '@/modules/pages/page/services/page.service';
-import { DocstoreService } from '@/modules/pages/docstore/docstore.service';
-import { ScopeRepository } from '@/modules/pages/docstore/repositories/scope.repository';
+  PageDomainEventBus,
+  getRecordSpaceId,
+} from '@/modules/pages/core';
+import { DocstoreService, ScopeRepository } from '@/modules/pages/docstore';
+import { PageService } from '@/modules/pages/page';
 import { TrackChange } from '../domain/change.domain';
 import { LinePatcher, PatchResult } from '../domain/patcher.domain';
 import { PatchConflictError } from '../domain/review.errors';

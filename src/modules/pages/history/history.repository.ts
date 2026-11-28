@@ -15,19 +15,19 @@ import { isUUID } from 'class-validator';
 import { PrismaService } from '@/core';
 import { FILES_PORT } from '@/modules/files/files.constant';
 import { type IFilesPort } from '@/modules/files/types/files.type';
-import { ensureCanonicalPageId } from '@/modules/pages/core/utils/page-scope';
+import { ensureCanonicalPageId } from '@/modules/pages/core';
 import {
   HistoryBlob as PrismaBlob,
   PageSnapshot as PrismaSnapshot,
   PageSnapshotFile as PrismaSnapshotFile,
   PageSnapshotLabel as PrismaLabel,
 } from '@prisma/client';
-import { Snapshot } from './domain/snapshot';
+import {
+  Snapshot,
+  FileSnapshotVo,
+  SnapshotNormalizer,
+} from './domain/snapshot';
 import { VersionLabel } from './domain/label';
-import { FileSnapshotVo } from './domain/snapshot';
-import { SnapshotNormalizer, RawSnapshotFileEntry } from './domain/snapshot';
-
-export type { RawSnapshotFileEntry };
 
 export type PrismaSnapshotFileWithBlob = PrismaSnapshotFile & {
   blob?: PrismaBlob | null;
@@ -190,6 +190,50 @@ export class HistoryMapper {
   }
 }
 
+export async function resolveCasFileBlobId(
+  prisma: PrismaService | undefined,
+  filesPort: IFilesPort | undefined,
+  params: {
+    blobId?: string | null;
+    storageKey?: string | null;
+    contentHash?: string | null;
+  },
+): Promise<string | null> {
+  if (params.blobId && isUUID(params.blobId)) {
+    return params.blobId;
+  }
+
+  const cleanKey = params.storageKey?.trim() || null;
+  if (cleanKey && prisma?.fileBlob?.findFirst) {
+    const byKey = await Promise.resolve(
+      prisma.fileBlob.findFirst({
+        where: { storageKey: cleanKey },
+        select: { id: true },
+      }),
+    ).catch(() => null);
+    if (byKey?.id) return byKey.id;
+  }
+
+  const cleanHash = params.contentHash?.trim().toLowerCase() || '';
+  if (/^[0-9a-f]{64}$/.test(cleanHash)) {
+    if (typeof filesPort?.findBlobByHash === 'function') {
+      const byPort = await filesPort.findBlobByHash(cleanHash).catch(() => null);
+      if (byPort?.id) return byPort.id;
+    }
+    if (prisma?.fileBlob?.findFirst) {
+      const byHash = await Promise.resolve(
+        prisma.fileBlob.findFirst({
+          where: { contentHash: Buffer.from(cleanHash, 'hex') },
+          select: { id: true },
+        }),
+      ).catch(() => null);
+      if (byHash?.id) return byHash.id;
+    }
+  }
+
+  return null;
+}
+
 @Injectable()
 export class HistoryRepository {
   constructor(
@@ -199,50 +243,12 @@ export class HistoryRepository {
     private readonly filesPort?: IFilesPort,
   ) {}
 
-  private async resolveFileBlobId(params: {
+  private resolveFileBlobId(params: {
     blobId?: string | null;
     storageKey?: string | null;
     contentHash?: string | null;
   }): Promise<string | null> {
-    if (params.blobId && isUUID(params.blobId)) {
-      return params.blobId;
-    }
-
-    const cleanKey = params.storageKey?.trim() || null;
-    if (cleanKey && this.prisma.fileBlob?.findFirst) {
-      const byKey = await Promise.resolve(
-        this.prisma.fileBlob.findFirst({
-          where: { storageKey: cleanKey },
-          select: { id: true },
-        }),
-      ).catch(() => null);
-      if (byKey?.id) return byKey.id;
-    }
-
-    const cleanHash = params.contentHash?.trim().toLowerCase() || '';
-    if (/^[0-9a-f]{64}$/.test(cleanHash)) {
-      if (typeof this.filesPort?.findBlobByHash === 'function') {
-        const byPort = await this.filesPort
-          .findBlobByHash(cleanHash)
-          .catch(() => null);
-        if (byPort?.id) return byPort.id;
-      }
-      if (this.prisma.fileBlob?.findFirst) {
-        const byHash = await Promise.resolve(
-          this.prisma.fileBlob.findFirst({
-            where: { contentHash: Buffer.from(cleanHash, 'hex') },
-            select: { id: true },
-          }),
-        ).catch(() => null);
-        if (byHash?.id) return byHash.id;
-      }
-    }
-
-    return null;
-  }
-
-  public toDomain(record: PrismaSnapshotWithRelations): Snapshot {
-    return HistoryMapper.toDomain(record);
+    return resolveCasFileBlobId(this.prisma, this.filesPort, params);
   }
 
   private async resolveTargetPageId(
@@ -736,41 +742,6 @@ export class HistoryRepository {
       inStorage: match.blob.inStorage,
       storageKey: match.blob.storageKey,
     };
-  }
-
-  public async findSnapshotInProject(
-    projectId: string,
-    versionOrId: string | number,
-  ): Promise<PrismaSnapshotWithRelations | null> {
-    if (typeof versionOrId === 'number' || !isNaN(Number(versionOrId))) {
-      const snap = await this.prisma.pageSnapshot.findFirst({
-        where: { spaceId: projectId, version: Number(versionOrId) },
-        include: { files: { include: { blob: true } }, labels: true },
-      });
-      if (snap) return snap;
-      return this.prisma.pageSnapshot
-        .findFirst({
-          where: { pageId: projectId, version: Number(versionOrId) },
-          include: { files: { include: { blob: true } }, labels: true },
-        })
-        .catch(() => null);
-    }
-
-    if (isUUID(String(versionOrId))) {
-      const snap = await this.prisma.pageSnapshot.findFirst({
-        where: { id: String(versionOrId), spaceId: projectId },
-        include: { files: { include: { blob: true } }, labels: true },
-      });
-      if (snap) return snap;
-      return this.prisma.pageSnapshot
-        .findFirst({
-          where: { id: String(versionOrId), pageId: projectId },
-          include: { files: { include: { blob: true } }, labels: true },
-        })
-        .catch(() => null);
-    }
-
-    return null;
   }
 
   /**

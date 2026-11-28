@@ -1,4 +1,8 @@
-import { SpellingEngine } from '@/modules/pages/spelling/domain/spelling.engine';
+import {
+  normalizeLanguageCode,
+  SpellingEngine,
+} from '@/modules/pages/spelling/domain/spelling.engine';
+import { UnsupportedLanguageException } from '@/modules/pages/spelling/domain/spelling.errors';
 import { SpellingService } from '@/modules/pages/spelling/spelling.service';
 import type { SpellingRepository } from '@/modules/pages/spelling/spelling.repository';
 
@@ -94,5 +98,42 @@ describe('Pages Spelling - Async Hunspell Engine & Overleaf Protocol', () => {
 
     expect(mockRepo.listWords).toHaveBeenCalledTimes(1);
     expect(reports.every((r) => r.misspelledCount === 0)).toBe(true);
+  });
+
+  it('normalizes Prisma underscore locales (en_US, fr_FR) to BCP-47 and short-circuits "off" or invalid tags before DB queries', async () => {
+    expect(normalizeLanguageCode('en_US')).toBe('en-US');
+    expect(normalizeLanguageCode('fr_FR')).toBe('fr-FR');
+    expect(normalizeLanguageCode('en-us')).toBe('en-US');
+    expect(normalizeLanguageCode('OFF')).toBe('off');
+
+    const mockRepo = {
+      listWords: jest.fn(async () => ['custom']),
+    } as unknown as SpellingRepository;
+    const svc = new SpellingService(mockRepo, engine);
+
+    const offReport = await svc.check('p1', {
+      words: ['misspelledxyz'],
+      language: 'off',
+    });
+    expect(offReport).toEqual({
+      language: 'off',
+      totalWordsChecked: 0,
+      misspelledCount: 0,
+      errors: [],
+    });
+    expect(mockRepo.listWords).not.toHaveBeenCalled();
+
+    await expect(
+      svc.check('p1', { words: ['hello'], language: 'xx_YY' }),
+    ).rejects.toThrow(UnsupportedLanguageException);
+    expect(mockRepo.listWords).not.toHaveBeenCalled();
+
+    const prismaDefaultReport = await svc.check('p1', {
+      words: ['algorithm', 'languge'],
+      language: 'en_US',
+    });
+    expect(prismaDefaultReport.language).toBe('en-US');
+    expect(prismaDefaultReport.misspelledCount).toBe(1);
+    expect(mockRepo.listWords).toHaveBeenCalledTimes(1);
   });
 });

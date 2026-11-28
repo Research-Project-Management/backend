@@ -10,14 +10,14 @@ import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { IBinaryStoragePort } from '@/modules/pages/filestore/domain/filestore.ports';
-import { IDocPersistor } from '@/modules/pages/docstore/domain/doc.ports';
+import { IBinaryStoragePort } from '@/modules/pages/filestore';
+import { IDocPersistor } from '../domain/doc.ports';
 import {
   Md5MismatchError,
   ArchiveObjectNotFoundError,
   ArchiveWriteFailedError,
-} from '@/modules/pages/docstore/domain/doc.errors';
-import { computeContentMd5 } from '@/modules/pages/docstore/domain/doc-hasher';
+} from '../domain/doc.errors';
+import { computeContentMd5 } from '../domain/doc-hasher';
 
 /**
  * Pure in-memory archive repository adapter for fast, deterministic unit tests.
@@ -318,18 +318,3 @@ export class DocArchiveRepository implements IDocPersistor {
     await fs.promises.unlink(filePath).catch(() => {});
   }
 }
-
-/** @deprecated Collapsed into DocArchiveRepository; retained for external DI compatibility. */
-@Injectable()
-export class StoragePortDocArchiveAdapter extends DocArchiveRepository {
-  constructor(
-    @Optional()
-    @Inject(IBinaryStoragePort)
-    binaryStorage?: IBinaryStoragePort,
-    @Optional() configService?: ConfigService,
-  ) {
-    super(configService, binaryStorage);
-  }
-}
-
-export { IDocPersistor } from '@/modules/pages/docstore/domain/doc.ports';

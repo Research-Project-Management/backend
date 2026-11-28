@@ -6,7 +6,7 @@
 import {
   StructureError,
   InvalidNodeNameError,
-} from '@/modules/pages/core/domain/errors';
+} from '@/modules/pages/core';
 
 export { StructureError, InvalidNodeNameError };
 
@@ -46,16 +46,6 @@ export class CannotDeleteRootFolderError extends StructureError {
       'The root directory cannot be deleted.',
       400,
       'STRUCTURE_CANNOT_DELETE_ROOT',
-    );
-  }
-}
-
-export class RootDocNotFoundError extends StructureError {
-  constructor(projectId: string) {
-    super(
-      `No valid root document (main.tex) could be resolved for project ${projectId}`,
-      404,
-      'STRUCTURE_ROOT_DOC_NOT_FOUND',
     );
   }
 }

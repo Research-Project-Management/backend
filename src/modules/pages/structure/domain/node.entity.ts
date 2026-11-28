@@ -3,7 +3,7 @@
  * Domain Entity representing a Folder, Document, or Binary Asset node in a Page's Virtual Tree.
  */
 
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { NodePathVo } from '@/modules/pages/core';
 import {
   CannotDeleteRootFolderError,
   CyclicMoveError,
@@ -248,10 +248,6 @@ export class PageNodeEntity {
     }
   }
 
-  public setChildren(children: PageNodeEntity[]): void {
-    this.props.children = children;
-  }
-
   public markAsRootDoc(isRoot: boolean): void {
     if (isRoot) {
       this.assertCanBeRootDoc();
@@ -276,13 +272,6 @@ export class PageNodeEntity {
     return { oldPath, newPath, newName, depth: this.props.depth };
   }
 
-  public rename(newName: string, newPath: string): void {
-    NodePathVo.validateFilename(newName);
-    this.props.name = newName;
-    this.props.path = NodePathVo.normalize(newPath);
-    this.props.depth = NodePathVo.depth(newPath);
-  }
-
   public validateMoveTo(destPath: string): string {
     this.assertMutableTarget();
     const normDest = NodePathVo.normalize(destPath);
@@ -294,14 +283,6 @@ export class PageNodeEntity {
       throw new CyclicMoveError(this.props.path, normDest);
     }
     return normDest;
-  }
-
-  public moveTo(newParentId: string | null, newPath: string): void {
-    const normDest = this.validateMoveTo(newPath);
-    this.props.parentId = newParentId;
-    this.props.path = normDest;
-    this.props.name = NodePathVo.basename(normDest);
-    this.props.depth = NodePathVo.depth(normDest);
   }
 
   public toTreeNode(children: SerializedTreeNode[] = []): SerializedTreeNode {

@@ -34,7 +34,7 @@ import { Readable } from 'node:stream';
 import { PageBinaryAssetResponseDto } from './dto/file-response.dto';
 import { FileNotFoundException, InvalidByteRangeException } from './domain/filestore.errors';
 import { FilestoreService } from './filestore.service';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 
 const STRICT_MIME_REGEX = /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i;
 
@@ -98,6 +98,23 @@ export class FilestoreController {
       resolvedSpace,
       queryPageId,
       req,
+    );
+  }
+
+  private applySafeAssetHeaders(
+    res: FastifyReply,
+    file: { mimeType: string; name: string },
+  ): void {
+    res.header(
+      'Content-Type',
+      resolveSafeDownloadContentType(file.mimeType, file.name),
+    );
+    res.header('Accept-Ranges', 'bytes');
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header('Content-Security-Policy', 'sandbox');
+    res.header(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(file.name)}"`,
     );
   }
 
@@ -189,17 +206,7 @@ export class FilestoreController {
       );
 
       res.header('Content-Length', file.sizeBytes.toString());
-      res.header(
-        'Content-Type',
-        resolveSafeDownloadContentType(file.mimeType, file.name),
-      );
-      res.header('Accept-Ranges', 'bytes');
-      res.header('X-Content-Type-Options', 'nosniff');
-      res.header('Content-Security-Policy', 'sandbox');
-      res.header(
-        'Content-Disposition',
-        `attachment; filename="${encodeURIComponent(file.name)}"`,
-      );
+      this.applySafeAssetHeaders(res, file);
       res.status(200).send();
     } catch (err) {
       if (err instanceof FileNotFoundException) {
@@ -233,7 +240,6 @@ export class FilestoreController {
     @Query('path') queryPath: string | undefined,
     @Query('name') queryName: string | undefined,
     @Headers('range') rangeHeader: string | undefined,
-    @Headers('user-agent') userAgent: string | undefined,
     @Res() res: FastifyReply,
     @Query('pageId') queryPageId?: string,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
@@ -267,7 +273,6 @@ export class FilestoreController {
       spaceId,
       file.id,
       rangeHeader,
-      userAgent,
       res,
       resolvedSpace,
       paramPageId || pageId,
@@ -281,7 +286,6 @@ export class FilestoreController {
     @Param('spaceId') routeSpaceId: string | undefined,
     @Param('fileId') fileId: string,
     @Headers('range') rangeHeader: string | undefined,
-    @Headers('user-agent') userAgent: string | undefined,
     @Res() res: FastifyReply,
     @ResolvedSpace() resolvedSpace?: string | { id?: string },
     @Param('pageId') paramPageId?: string,
@@ -305,18 +309,8 @@ export class FilestoreController {
       const { file, stream, byteRange, isPartialContent, contentLength } =
         result;
 
-      res.header(
-        'Content-Type',
-        resolveSafeDownloadContentType(file.mimeType, file.name),
-      );
+      this.applySafeAssetHeaders(res, file);
       res.header('Cache-Control', 'private, max-age=3600, immutable');
-      res.header('Accept-Ranges', 'bytes');
-      res.header('X-Content-Type-Options', 'nosniff');
-      res.header('Content-Security-Policy', 'sandbox');
-      res.header(
-        'Content-Disposition',
-        `attachment; filename="${encodeURIComponent(file.name)}"`,
-      );
 
       if (isPartialContent && byteRange) {
         res.status(206);

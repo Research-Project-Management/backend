@@ -29,7 +29,7 @@ import {
   UserRateLimit,
   UserRateLimitGuard,
 } from '@/core';
-import { resolvePageControllerCoordinates } from '@/modules/pages/core/utils/page-scope';
+import { resolvePageControllerCoordinates } from '@/modules/pages/core';
 import { SearchReplaceService } from '../services/search-replace.service';
 
 @ApiTags('Pages - Search & Presence')

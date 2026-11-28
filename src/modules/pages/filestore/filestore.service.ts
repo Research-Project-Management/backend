@@ -11,7 +11,7 @@ import { Readable } from 'node:stream';
 import { isUuid } from '@/core';
 import { BlobStatus, type IFilesPort } from '@/modules/files/types/files.type';
 import { FILES_PORT } from '@/modules/files/files.constant';
-import { NodePathVo } from '@/modules/pages/core/utils/node-path';
+import { NodePathVo } from '@/modules/pages/core';
 import { FilestoreRepository } from './filestore.repository';
 import {
   PageBinaryAsset,
@@ -586,6 +586,35 @@ export class FilestoreService {
     }
   }
 
+  private async fetchAssetsByIdsMap(
+    projectId: string,
+    ids: string[],
+  ): Promise<Map<string, PageBinaryAsset>> {
+    const uniqueIds = Array.from(new Set(ids));
+    const map = new Map<string, PageBinaryAsset>();
+    if (uniqueIds.length === 0) return map;
+
+    if (typeof this.repository.findManyByProjectAndIds === 'function') {
+      const batch = await this.repository
+        .findManyByProjectAndIds(projectId, uniqueIds)
+        .catch(() => []);
+      for (const f of batch) {
+        map.set(f.id, f);
+      }
+      return map;
+    }
+
+    if (typeof this.repository.findByProjectAndId === 'function') {
+      for (const id of uniqueIds) {
+        const f = await this.repository
+          .findByProjectAndId(projectId, id)
+          .catch(() => null);
+        if (f) map.set(f.id, f);
+      }
+    }
+    return map;
+  }
+
   /**
    * Reclaims unified platform Space StorageQuota and decrements StorageBlob CAS refCounts
    * when binary files are soft-deleted in bulk via StructureService.deleteNode / deleteSubtree.
@@ -627,24 +656,10 @@ export class FilestoreService {
       }
 
       if (nodesMissingBlob.length > 0) {
-        const missingIds = nodesMissingBlob.map((n) => n.fileId);
-        const fetchedById = new Map<string, PageBinaryAsset>();
-        if (typeof this.repository.findManyByProjectAndIds === 'function') {
-          const batch = await this.repository
-            .findManyByProjectAndIds(projectId, missingIds)
-            .catch(() => []);
-          for (const f of batch) {
-            fetchedById.set(f.id, f);
-          }
-        } else if (typeof this.repository.findByProjectAndId === 'function') {
-          for (const id of missingIds) {
-            const f = await this.repository
-              .findByProjectAndId(projectId, id)
-              .catch(() => null);
-            if (f) fetchedById.set(f.id, f);
-          }
-        }
-
+        const fetchedById = await this.fetchAssetsByIdsMap(
+          projectId,
+          nodesMissingBlob.map((n) => n.fileId),
+        );
         for (const n of nodesMissingBlob) {
           const f = fetchedById.get(n.fileId);
           if (f?.blobId) {
@@ -658,22 +673,8 @@ export class FilestoreService {
         }
       }
     } else {
-      const uniqueIds = Array.from(new Set(fileIds));
-      let files: PageBinaryAsset[] = [];
-      if (typeof this.repository.findManyByProjectAndIds === 'function') {
-        files = await this.repository
-          .findManyByProjectAndIds(projectId, uniqueIds)
-          .catch(() => []);
-      } else {
-        for (const fileId of uniqueIds) {
-          const f = await this.repository
-            .findByProjectAndId(projectId, fileId)
-            .catch(() => null);
-          if (f) files.push(f);
-        }
-      }
-
-      for (const f of files) {
+      const fetchedById = await this.fetchAssetsByIdsMap(projectId, fileIds);
+      for (const f of fetchedById.values()) {
         if (f.sizeBytes > 0) {
           totalReclaimedBytes += BigInt(f.sizeBytes);
         }
@@ -779,10 +780,7 @@ export class FilestoreService {
       expiresIn,
     );
 
-    if (
-      !signedUrl ||
-      signedUrl.startsWith('/api/manuscripts/filestore/download/')
-    ) {
+    if (!signedUrl) {
       return `/api/v1/pages/spaces/${projectId}/files/${file.id}`;
     }
 
